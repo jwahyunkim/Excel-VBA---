@@ -870,7 +870,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_LEVEL).ColumnWidth = 7
     ws.Columns(COL_TASK).WrapText = False
     ws.Columns(COL_TASK).AutoFit
-    ws.Columns(COL_NOTE).ColumnWidth = 14
+    ws.Columns(COL_NOTE).ColumnWidth = 4.5
     ws.Columns(COL_PLAN_START).ColumnWidth = 11
     ws.Columns(COL_PLAN_END).ColumnWidth = 11
     ws.Columns(COL_ACTUAL_START).ColumnWidth = 11
