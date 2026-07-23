@@ -401,7 +401,7 @@ Public Sub 칸트차트_행삭제버튼_생성()
 End Sub
 
 Public Sub 칸트차트_개체삽입버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 8
+    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 6
 End Sub
 
 Public Sub 칸트차트_개체삽입()
