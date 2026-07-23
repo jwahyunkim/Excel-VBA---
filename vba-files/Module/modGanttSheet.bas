@@ -281,15 +281,8 @@ Public Sub DrawTaskBars(ws As Worksheet, ByVal lastRow As Long, ByVal chartStart
         markerDate = FindLevelMarkerDate(ws, r, holidayDict, workdayDict)
         markerText = GetTaskLevelMarker(ws, r)
 
-        If statusText = STATUS_HOLD Then
-            actualColor = RGB(191, 191, 191)
-        ElseIf statusText = STATUS_DELAY Then
-            actualColor = RGB(255, 102, 102)
-        ElseIf statusText = STATUS_CAUTION Then
-            actualColor = RGB(255, 192, 0)
-        Else
-            actualColor = RGB(102, 255, 51)
-        End If
+        actualColor = GetTaskStatusFillColor(statusText)
+
 
         If IsDate(planS) And IsDate(planE) Then
             For d = CDate(planS) To CDate(planE)
@@ -671,6 +664,65 @@ Private Function BuildParentStatusFromChildren(ws As Worksheet, ByVal rowNum As 
     End If
 End Function
 
+Private Function GetTaskStatusFillColor(ByVal statusText As String) As Long
+    If IsDoneStatusText(statusText) Then
+        GetTaskStatusFillColor = RGB(102, 255, 51)
+        Exit Function
+    End If
+
+    Select Case statusText
+        Case STATUS_NORMAL
+            GetTaskStatusFillColor = RGB(91, 155, 213)
+        Case STATUS_CAUTION
+            GetTaskStatusFillColor = RGB(255, 192, 0)
+        Case STATUS_HOLD
+            GetTaskStatusFillColor = RGB(153, 102, 204)
+        Case STATUS_DELAY
+            GetTaskStatusFillColor = RGB(255, 99, 99)
+        Case STATUS_ERROR
+            GetTaskStatusFillColor = RGB(237, 125, 49)
+        Case Else
+            GetTaskStatusFillColor = RGB(91, 155, 213)
+    End Select
+End Function
+
+Private Function IsTaskPlannedOnDate(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal targetDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object) As Boolean
+    Dim planS As Variant
+    Dim planE As Variant
+
+    planS = ws.Cells(rowNum, COL_PLAN_START).Value
+    planE = ws.Cells(rowNum, COL_PLAN_END).Value
+
+    If Not IsDate(planS) Or Not IsDate(planE) Then Exit Function
+    If Not IsWorkingDay(targetDate, holidayDict, workdayDict) Then Exit Function
+
+    IsTaskPlannedOnDate = (CLng(targetDate) >= CLng(CDate(planS)) And _
+                           CLng(targetDate) <= CLng(CDate(planE)))
+End Function
+
+Private Function IsTaskActualOnDate(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal targetDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object) As Boolean
+    Dim actualS As Variant
+    Dim actualE As Variant
+    Dim actualDrawEnd As Date
+
+    actualS = ws.Cells(rowNum, COL_ACTUAL_START).Value
+    actualE = ws.Cells(rowNum, COL_ACTUAL_END).Value
+
+    If Not IsDate(actualS) Then Exit Function
+    If Not IsWorkingDay(targetDate, holidayDict, workdayDict) Then Exit Function
+
+    If IsDate(actualE) Then
+        actualDrawEnd = CDate(actualE)
+    ElseIf CDate(actualS) <= Date Then
+        actualDrawEnd = Date
+    Else
+        Exit Function
+    End If
+
+    IsTaskActualOnDate = (CLng(targetDate) >= CLng(CDate(actualS)) And _
+                          CLng(targetDate) <= CLng(actualDrawEnd))
+End Function
+
 Private Function IsDoneStatusText(ByVal statusText As String) As Boolean
     IsDoneStatusText = (statusText = STATUS_DONE Or statusText = STATUS_DONE & STATUS_DONE_WITH_HOLD_SUFFIX)
 End Function
@@ -792,7 +844,10 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
             For r = DATA_START_ROW To lastRow
                 If HasTaskContent(ws, r) Then
                     If ws.Cells(r, c).Value = "" Then
-                        ws.Cells(r, c).Interior.Color = RGB(255, 199, 206)
+                        If Not IsTaskPlannedOnDate(ws, r, d, holidayDict, workdayDict) And _
+                           Not IsTaskActualOnDate(ws, r, d, holidayDict, workdayDict) Then
+                            ws.Cells(r, c).Interior.Color = RGB(255, 199, 206)
+                        End If
                     End If
                 End If
             Next r
