@@ -60,6 +60,8 @@ Public Sub 칸트차트_생성()
 
     Application.EnableEvents = True
     Application.ScreenUpdating = True
+    DoEvents
+    AlignAllGanttPptArtifactsToNoteCells ws
 
     MsgBox "칸트차트 생성 완료", vbInformation
     Exit Sub
@@ -221,16 +223,7 @@ End Sub
 Public Sub 칸트차트_개체삽입()
     Dim ws As Worksheet
     Dim targetRow As Long
-    Dim noteCell As Range
-    Dim squareSize As Double
-    Dim shapeLeft As Double
-    Dim shapeTop As Double
-    Dim shapeWidth As Double
-    Dim shapeHeight As Double
-    Dim innerPad As Double
-    Dim shp As Shape
     Dim oleObj As OLEObject
-    Dim shapeName As String
     Dim oleName As String
     Dim lastRow As Long
     Dim wasProtected As Boolean
@@ -255,7 +248,6 @@ Public Sub 칸트차트_개체삽입()
     End If
 
     targetRow = ActiveCell.Row
-    shapeName = GetGanttPptShapeName(targetRow)
     oleName = GetGanttPptOleName(targetRow)
 
     If HasEmbeddedPptObject(ws, targetRow) Then
@@ -273,62 +265,27 @@ Public Sub 칸트차트_개체삽입()
 
     RemoveEmbeddedPptArtifacts ws, targetRow
 
-    Set noteCell = ws.Cells(targetRow, ws.Range(COL_NOTE & "1").Column)
-
-    squareSize = noteCell.Height
-    If squareSize > noteCell.Width Then squareSize = noteCell.Width
-    If squareSize < 6 Then squareSize = 6
-
-    innerPad = 1.2
-
-    shapeLeft = noteCell.Left + innerPad
-    shapeTop = noteCell.Top + innerPad
-    shapeWidth = squareSize - (innerPad * 2)
-    shapeHeight = squareSize - (innerPad * 2)
-
-    If shapeWidth < 1 Then shapeWidth = 1
-    If shapeHeight < 1 Then shapeHeight = 1
-
     Set oleObj = ws.OLEObjects.Add( _
         ClassType:="PowerPoint.Show.12", _
         Link:=False, _
         DisplayAsIcon:=True, _
         IconLabel:="", _
-        Left:=shapeLeft, _
-        Top:=shapeTop, _
-        Width:=shapeWidth, _
-        Height:=shapeHeight)
+        Left:=0, _
+        Top:=0, _
+        Width:=1, _
+        Height:=1)
 
     With oleObj
         .Name = oleName
         .Placement = xlMoveAndSize
-        .PrintObject = True
+        .PrintObject = False
         .Width = 1
         .Height = 1
         .Visible = False
     End With
 
-    Set shp = ws.Shapes.AddShape(msoShapeRectangle, shapeLeft, shapeTop, shapeWidth, shapeHeight)
-
-    With shp
-        .Name = shapeName
-        .OnAction = "칸트차트_PPT개체열기"
-        .Placement = xlMoveAndSize
-        .AlternativeText = ""
-
-        .Fill.Visible = msoTrue
-        .Fill.ForeColor.RGB = RGB(255, 0, 0)
-        .Fill.Transparency = 0
-
-        .Line.Visible = msoTrue
-        .Line.ForeColor.RGB = RGB(192, 0, 0)
-        .Line.Weight = 0.75
-
-        .TextFrame2.TextRange.Characters.Text = ""
-        .LockAspectRatio = msoFalse
-    End With
-
-    shp.ZOrder msoBringToFront
+    PositionHiddenGanttPptOle ws, oleObj, targetRow
+    SetGanttPptCellIcon ws, targetRow
 
     If wasProtected Then
         lastRow = GetLastDataRow(ws)
@@ -339,7 +296,7 @@ Public Sub 칸트차트_개체삽입()
     Application.EnableEvents = True
     Application.ScreenUpdating = True
 
-    MsgBox "PPT 개체 삽입 완료 (Excel 통합문서에 포함됨)", vbInformation
+    MsgBox "PPT 개체 삽입 완료 (비고 셀의 빨간 사각형을 클릭하세요.)", vbInformation
     Exit Sub
 
 EH:
@@ -359,27 +316,19 @@ EH:
     MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
 End Sub
 
-Public Sub 칸트차트_PPT개체열기()
-    Dim ws As Worksheet
+Public Sub 칸트차트_PPT셀아이콘열기(ByVal ws As Worksheet, ByVal targetRow As Long)
     Dim oleObj As OLEObject
-    Dim shpName As String
     Dim oleName As String
-    Dim targetRow As Long
 
     On Error GoTo EH
 
-    shpName = CStr(Application.Caller)
-    Set ws = ActiveSheet
+    If ws Is Nothing Then Exit Sub
+    If targetRow < DATA_START_ROW Then Exit Sub
 
-    If Not ShapeExistsOnSheet(ws, shpName) Then
-        MsgBox "PPT 아이콘을 찾을 수 없습니다.", vbExclamation
-        Exit Sub
-    End If
-
-    targetRow = ws.Shapes(shpName).TopLeftCell.Row
     oleName = GetGanttPptOleName(targetRow)
 
     If Not OLEObjectExistsOnSheet(ws, oleName) Then
+        ClearGanttPptCellIcon ws, targetRow
         MsgBox "Excel에 포함된 PPT 개체를 찾을 수 없습니다.", vbExclamation
         Exit Sub
     End If
@@ -387,6 +336,29 @@ Public Sub 칸트차트_PPT개체열기()
     Set oleObj = ws.OLEObjects(oleName)
     oleObj.Visible = False
     oleObj.Verb Verb:=xlOpen
+    Exit Sub
+
+EH:
+    MsgBox "PPT 편집 화면을 여는 중 오류가 발생했습니다: " & Err.Description, vbExclamation
+End Sub
+
+Public Sub 칸트차트_PPT개체열기()
+    Dim ws As Worksheet
+    Dim targetRow As Long
+    Dim callerName As String
+
+    On Error GoTo EH
+
+    Set ws = ActiveSheet
+    callerName = CStr(Application.Caller)
+
+    If ShapeExistsOnSheet(ws, callerName) Then
+        targetRow = ws.Shapes(callerName).TopLeftCell.Row
+    Else
+        targetRow = ActiveCell.Row
+    End If
+
+    칸트차트_PPT셀아이콘열기 ws, targetRow
     Exit Sub
 
 EH:
@@ -490,6 +462,10 @@ EH:
     MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
 End Sub
 
+Private Function GetGanttPptCellIconText() As String
+    GetGanttPptCellIconText = ChrW(&H25A0)
+End Function
+
 Private Function GetGanttPptShapeName(ByVal targetRow As Long) As String
     GetGanttPptShapeName = "shpGanttPpt_" & CStr(targetRow)
 End Function
@@ -510,23 +486,92 @@ Private Function OLEObjectExistsOnSheet(ByVal ws As Worksheet, ByVal oleName As 
     On Error GoTo 0
 End Function
 
+Private Function GetGanttPptNoteCell(ByVal ws As Worksheet, ByVal targetRow As Long) As Range
+    Set GetGanttPptNoteCell = ws.Cells(targetRow, ws.Range(COL_NOTE & "1").Column)
+End Function
+
+Private Sub SetGanttPptCellIcon(ByVal ws As Worksheet, ByVal targetRow As Long)
+    Dim noteCell As Range
+    Dim iconFontSize As Double
+    Dim subAddress As String
+
+    Set noteCell = GetGanttPptNoteCell(ws, targetRow)
+    subAddress = "'" & Replace(ws.Name, "'", "''") & "'!" & noteCell.Address
+
+    On Error Resume Next
+    noteCell.Hyperlinks.Delete
+    On Error GoTo 0
+
+    noteCell.Value = GetGanttPptCellIconText()
+    ws.Hyperlinks.Add Anchor:=noteCell, _
+                      Address:="", _
+                      SubAddress:=subAddress, _
+                      ScreenTip:="PPT 편집 화면 열기", _
+                      TextToDisplay:=GetGanttPptCellIconText()
+
+    iconFontSize = noteCell.Height * 0.72
+    If iconFontSize < 9 Then iconFontSize = 9
+    If iconFontSize > 16 Then iconFontSize = 16
+
+    With noteCell
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .WrapText = False
+        .ShrinkToFit = False
+        .Font.Name = "Arial"
+        .Font.Size = iconFontSize
+        .Font.Bold = False
+        .Interior.Pattern = xlSolid
+        .Interior.Color = RGB(255, 0, 0)
+        .Font.Color = RGB(255, 0, 0)
+        .Font.Underline = xlUnderlineStyleNone
+    End With
+End Sub
+
+Private Sub ClearGanttPptCellIcon(ByVal ws As Worksheet, ByVal targetRow As Long)
+    Dim noteCell As Range
+
+    Set noteCell = GetGanttPptNoteCell(ws, targetRow)
+
+    If CStr(noteCell.Value2) = GetGanttPptCellIconText() Then
+        On Error Resume Next
+        noteCell.Hyperlinks.Delete
+        On Error GoTo 0
+
+        noteCell.ClearContents
+        noteCell.HorizontalAlignment = xlGeneral
+        noteCell.VerticalAlignment = xlCenter
+        noteCell.Interior.Pattern = xlNone
+        noteCell.Font.ColorIndex = xlAutomatic
+        noteCell.Font.Underline = xlUnderlineStyleNone
+    End If
+End Sub
+
+Private Sub PositionHiddenGanttPptOle(ByVal ws As Worksheet, ByVal oleObj As OLEObject, ByVal targetRow As Long)
+    Dim noteCell As Range
+
+    Set noteCell = GetGanttPptNoteCell(ws, targetRow)
+
+    With oleObj
+        .Placement = xlMoveAndSize
+        .Left = noteCell.Left + 1
+        .Top = noteCell.Top + 1
+        .Width = 1
+        .Height = 1
+        .Visible = False
+    End With
+End Sub
+
 Private Function HasEmbeddedPptObject(ByVal ws As Worksheet, ByVal targetRow As Long) As Boolean
-    Dim shapeName As String
     Dim oleName As String
-    Dim hasShape As Boolean
-    Dim hasOle As Boolean
 
-    shapeName = GetGanttPptShapeName(targetRow)
     oleName = GetGanttPptOleName(targetRow)
+    HasEmbeddedPptObject = OLEObjectExistsOnSheet(ws, oleName)
 
-    hasShape = ShapeExistsOnSheet(ws, shapeName)
-    hasOle = OLEObjectExistsOnSheet(ws, oleName)
-
-    If hasShape And hasOle Then
-        HasEmbeddedPptObject = True
+    If HasEmbeddedPptObject Then
+        SetGanttPptCellIcon ws, targetRow
     Else
-        If hasShape Or hasOle Then RemoveEmbeddedPptArtifacts ws, targetRow
-        HasEmbeddedPptObject = False
+        ClearGanttPptCellIcon ws, targetRow
     End If
 End Function
 
@@ -541,23 +586,64 @@ Private Sub RemoveEmbeddedPptArtifacts(ByVal ws As Worksheet, ByVal targetRow As
     ws.Shapes(shapeName).Delete
     ws.OLEObjects(oleName).Delete
     On Error GoTo 0
+
+    ClearGanttPptCellIcon ws, targetRow
+End Sub
+
+Private Sub DeleteLegacyGanttPptShapes(ByVal ws As Worksheet)
+    Dim i As Long
+
+    For i = ws.Shapes.Count To 1 Step -1
+        If IsGanttPptShape(ws.Shapes(i)) Then
+            ws.Shapes(i).Delete
+        End If
+    Next i
+End Sub
+
+Private Sub ClearOrphanGanttPptCellIcons(ByVal ws As Worksheet)
+    Dim lastRow As Long
+    Dim r As Long
+    Dim noteCell As Range
+
+    lastRow = GetLastDataRow(ws)
+    If lastRow < DATA_START_ROW Then Exit Sub
+
+    For r = DATA_START_ROW To lastRow
+        Set noteCell = GetGanttPptNoteCell(ws, r)
+        If CStr(noteCell.Value2) = GetGanttPptCellIconText() Then
+            If Not OLEObjectExistsOnSheet(ws, GetGanttPptOleName(r)) Then
+                ClearGanttPptCellIcon ws, r
+            End If
+        End If
+    Next r
+End Sub
+
+Private Sub AlignAllGanttPptArtifactsToNoteCells(ByVal ws As Worksheet)
+    Dim oleObj As OLEObject
+    Dim targetRow As Long
+
+    DeleteLegacyGanttPptShapes ws
+
+    For Each oleObj In ws.OLEObjects
+        If Left$(oleObj.Name, Len("oleGanttPpt_")) = "oleGanttPpt_" Then
+            targetRow = CLng(Val(Mid$(oleObj.Name, Len("oleGanttPpt_") + 1)))
+            If targetRow >= DATA_START_ROW Then
+                PositionHiddenGanttPptOle ws, oleObj, targetRow
+                SetGanttPptCellIcon ws, targetRow
+            End If
+        End If
+    Next oleObj
+
+    ClearOrphanGanttPptCellIcons ws
 End Sub
 
 Private Sub NormalizeGanttPptArtifactNames(ByVal ws As Worksheet)
-    Dim shp As Shape
     Dim oleObj As OLEObject
     Dim targetRow As Long
     Dim finalName As String
     Dim tempIndex As Long
 
     tempIndex = 1
-
-    For Each shp In ws.Shapes
-        If IsGanttPptShape(shp) Then
-            shp.Name = "tmpGanttPptShape_" & Format$(Now, "hhnnss") & "_" & CStr(tempIndex)
-            tempIndex = tempIndex + 1
-        End If
-    Next shp
 
     For Each oleObj In ws.OLEObjects
         If IsGanttPptOleObject(oleObj) Then
@@ -566,18 +652,6 @@ Private Sub NormalizeGanttPptArtifactNames(ByVal ws As Worksheet)
         End If
     Next oleObj
 
-    For Each shp In ws.Shapes
-        If IsGanttPptShape(shp) Then
-            targetRow = shp.TopLeftCell.Row
-            If targetRow >= DATA_START_ROW Then
-                finalName = GetGanttPptShapeName(targetRow)
-                If Not ShapeExistsOnSheet(ws, finalName) Then
-                    shp.Name = finalName
-                End If
-            End If
-        End If
-    Next shp
-
     For Each oleObj In ws.OLEObjects
         If IsGanttPptOleObject(oleObj) Then
             targetRow = oleObj.TopLeftCell.Row
@@ -585,10 +659,15 @@ Private Sub NormalizeGanttPptArtifactNames(ByVal ws As Worksheet)
                 finalName = GetGanttPptOleName(targetRow)
                 If Not OLEObjectExistsOnSheet(ws, finalName) Then
                     oleObj.Name = finalName
+                    PositionHiddenGanttPptOle ws, oleObj, targetRow
+                    SetGanttPptCellIcon ws, targetRow
                 End If
             End If
         End If
     Next oleObj
+
+    DeleteLegacyGanttPptShapes ws
+    ClearOrphanGanttPptCellIcons ws
 End Sub
 
 Private Function IsGanttPptShape(ByVal shp As Shape) As Boolean
