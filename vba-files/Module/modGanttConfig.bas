@@ -1,4 +1,4 @@
-ÔªøAttribute VB_Name = "modGanttConfig"
+Attribute VB_Name = "modGanttConfig"
 Option Explicit
 
 Public Const GANTT_HEADER_ROW_MONTH As Long = 1
@@ -28,7 +28,7 @@ Public Const COL_ACTUAL_DAYS As String = "Q"
 Public Const COL_STATUS As String = "R"
 Public Const COL_GANTT_START As String = "S"
 
-Public Const HOLIDAY_SHEET_NAME As String = "Ìú¥ÏùºÏÑ§Ï†ï"
+Public Const HOLIDAY_SHEET_NAME As String = "»ﬁ¿œº≥¡§"
 Public Const HOLIDAY_HEADER_ROW As Long = 1
 Public Const HOLIDAY_DATA_START_ROW As Long = 2
 
@@ -36,8 +36,8 @@ Public Const HOLIDAY_COL_DATE As String = "A"
 Public Const HOLIDAY_COL_TYPE As String = "B"
 Public Const HOLIDAY_COL_DESC As String = "C"
 
-Public Const HOLIDAY_TYPE_HOLIDAY As String = "Ìú¥Ïùº"
-Public Const HOLIDAY_TYPE_WORKDAY As String = "Í∑ºÎ¨¥Ïùº"
+Public Const HOLIDAY_TYPE_HOLIDAY As String = "»ﬁ¿œ"
+Public Const HOLIDAY_TYPE_WORKDAY As String = "±Ÿπ´¿œ"
 
 Public Const HIDE_SETTING_TITLE_CELL As String = "F1"
 Public Const HIDE_SETTING_LEVEL_LABEL_CELL As String = "F2"
@@ -58,15 +58,15 @@ Public Const HIDE_EXCLUDE_DATE_HEADER_CELL As String = "G5"
 Public Const HIDE_EXCLUDE_NO_START_CELL As String = "F6"
 Public Const HIDE_EXCLUDE_DATE_START_CELL As String = "G6"
 
-Public Const STATUS_NORMAL As String = "Ï†ïÏÉÅ"
-Public Const STATUS_CAUTION As String = "Ï£ºÏùò"
-Public Const STATUS_DELAY As String = "ÏßÄÏó∞"
-Public Const STATUS_DONE As String = "ÏôÑÎ£å"
-Public Const STATUS_HOLD As String = "Î≥¥Î•ò"
-Public Const STATUS_WEEKLY_REPORT As String = "Ï£ºÍ∞ÑÎ≥¥Í≥†"
-Public Const STATUS_DEV_PROGRESS As String = "Í∞úÎ∞úÏßÑÌñâ"
-Public Const STATUS_REPORT_DONE As String = "Î≥¥Í≥†ÏôÑÎ£å"
-Public Const STATUS_ERROR As String = "Ïò§Î•ò"
-Public Const REPORT_FILTER_ALL As String = "Ï†ÑÏ≤¥"
-Public Const REPORT_FILTER_EMPTY As String = "ÎπàÍ∞í"
-Public Const STATUS_DONE_WITH_HOLD_SUFFIX As String = "(Î≥¥Î•ò Ìè¨Ìï®)"
+Public Const STATUS_NORMAL As String = "¡§ªÛ"
+Public Const STATUS_CAUTION As String = "¡÷¿«"
+Public Const STATUS_DELAY As String = "¡ˆø¨"
+Public Const STATUS_DONE As String = "øœ∑·"
+Public Const STATUS_HOLD As String = "∫∏∑˘"
+Public Const STATUS_WEEKLY_REPORT As String = "¡÷∞£∫∏∞Ì"
+Public Const STATUS_DEV_PROGRESS As String = "∞≥πﬂ¡¯«‡"
+Public Const STATUS_REPORT_DONE As String = "∫∏∞Ìøœ∑·"
+Public Const STATUS_ERROR As String = "ø¿∑˘"
+Public Const REPORT_FILTER_ALL As String = "¿¸√º"
+Public Const REPORT_FILTER_EMPTY As String = "∫Û∞™"
+Public Const STATUS_DONE_WITH_HOLD_SUFFIX As String = "(∫∏∑˘ ∆˜«‘)"

@@ -1,4 +1,4 @@
-ï»¿Attribute VB_Name = "modGanttDate"
+Attribute VB_Name = "modGanttDate"
 
 Option Explicit
 
@@ -160,13 +160,13 @@ End Function
 Public Function GetTaskLevelMarker(ws As Worksheet, ByVal rowNum As Long) As String
     Select Case GetTaskLevel(ws, rowNum)
         Case 1
-            GetTaskLevelMarker = "â– "
+            GetTaskLevelMarker = "¡á"
         Case 2
-            GetTaskLevelMarker = "â–£"
+            GetTaskLevelMarker = "¢Ã"
         Case 3
-            GetTaskLevelMarker = "â—†"
+            GetTaskLevelMarker = "¡ß"
         Case Else
-            GetTaskLevelMarker = "â– "
+            GetTaskLevelMarker = "¡á"
     End Select
 End Function
 
