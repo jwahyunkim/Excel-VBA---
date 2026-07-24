@@ -16,12 +16,12 @@ Public Sub 칸트차트_생성()
 
     Set ws = ActiveSheet
 
-    If ws.Name = HOLIDAY_SHEET_NAME Then
-        MsgBox "휴일설정 시트에서는 실행할 수 없습니다.", vbExclamation
+    If ws.Name = CONFIG_SHEET_NAME Then
+        MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
 
-    EnsureHolidaySheet
+    EnsureConfigSheet
     LoadHolidaySettings holidayDict, workdayDict
 
     lastRow = GetLastDataRow(ws)
@@ -84,8 +84,8 @@ Public Sub 칸트차트_초기화()
 
     Set ws = ActiveSheet
 
-    If ws.Name = HOLIDAY_SHEET_NAME Then
-        MsgBox "휴일설정 시트에서는 실행할 수 없습니다.", vbExclamation
+    If ws.Name = CONFIG_SHEET_NAME Then
+        MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
 
@@ -123,12 +123,12 @@ Public Sub 칸트차트_항목숨기기()
 
     Set ws = ActiveSheet
 
-    If ws.Name = HOLIDAY_SHEET_NAME Then
-        MsgBox "휴일설정 시트에서는 실행할 수 없습니다.", vbExclamation
+    If ws.Name = CONFIG_SHEET_NAME Then
+        MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
 
-    EnsureHolidaySheet
+    EnsureConfigSheet
 
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then
@@ -156,46 +156,6 @@ EH:
     MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
 End Sub
 
-Public Sub 칸트차트_기간숨기기()
-    Dim ws As Worksheet
-    Dim lastRow As Long
-
-    On Error GoTo EH
-
-    Set ws = ActiveSheet
-
-    If ws.Name = HOLIDAY_SHEET_NAME Then
-        MsgBox "휴일설정 시트에서는 실행할 수 없습니다.", vbExclamation
-        Exit Sub
-    End If
-
-    EnsureHolidaySheet
-
-    lastRow = GetLastDataRow(ws)
-    If lastRow < DATA_START_ROW Then
-        MsgBox "데이터가 없습니다.", vbExclamation
-        Exit Sub
-    End If
-
-    Application.ScreenUpdating = False
-    Application.EnableEvents = False
-
-    UnprotectTaskSheet ws
-    HideIdleDateColumns ws, lastRow
-    ApplyCalculatedColumnsProtection ws, lastRow
-
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
-
-    MsgBox "기간 숨김 완료", vbInformation
-    Exit Sub
-
-EH:
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
-    MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
-End Sub
-
 Public Sub 칸트차트_생성버튼_생성()
     CreateGanttActionButton ActiveSheet, "btnGanttCreate", "생성", "칸트차트_생성", 1
 End Sub
@@ -212,12 +172,8 @@ Public Sub 칸트차트_항목숨기기버튼_생성()
     CreateGanttActionButton ActiveSheet, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", 4
 End Sub
 
-Public Sub 칸트차트_기간숨기기버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttHidePeriod", "기간 숨김", "칸트차트_기간숨기기", 5
-End Sub
-
 Public Sub 칸트차트_개체삽입버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 6
+    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 5
 End Sub
 
 Public Sub 칸트차트_개체삽입()
@@ -232,8 +188,8 @@ Public Sub 칸트차트_개체삽입()
 
     Set ws = ActiveSheet
 
-    If ws.Name = HOLIDAY_SHEET_NAME Then
-        MsgBox "휴일설정 시트에서는 실행할 수 없습니다.", vbExclamation
+    If ws.Name = CONFIG_SHEET_NAME Then
+        MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
 
@@ -379,8 +335,8 @@ Private Sub CreateGanttActionButton(ByVal ws As Worksheet, ByVal buttonName As S
 
     If ws Is Nothing Then Exit Sub
 
-    If ws.Name = HOLIDAY_SHEET_NAME Then
-        MsgBox "휴일설정 시트에는 버튼을 생성할 수 없습니다.", vbExclamation
+    If ws.Name = CONFIG_SHEET_NAME Then
+        MsgBox "config 시트에는 버튼을 생성할 수 없습니다.", vbExclamation
         Exit Sub
     End If
 
@@ -505,7 +461,7 @@ Private Sub SetGanttPptCellIcon(ByVal ws As Worksheet, ByVal targetRow As Long)
     noteCell.Value = GetGanttPptCellIconText()
     ws.Hyperlinks.Add Anchor:=noteCell, _
                       Address:="", _
-                      SubAddress:=subAddress, _
+                      subAddress:=subAddress, _
                       ScreenTip:="PPT 편집 화면 열기", _
                       TextToDisplay:=GetGanttPptCellIconText()
 

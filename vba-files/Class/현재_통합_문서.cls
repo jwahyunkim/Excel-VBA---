@@ -7,13 +7,12 @@ Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
-
 Private Sub Workbook_SheetFollowHyperlink(ByVal Sh As Object, ByVal Target As Hyperlink)
     Dim anchorCell As Range
 
     On Error GoTo SafeExit
 
-    If Sh.Name = HOLIDAY_SHEET_NAME Then Exit Sub
+    If Sh.Name = CONFIG_SHEET_NAME Then Exit Sub
 
     Set anchorCell = Target.Range
     If anchorCell Is Nothing Then Exit Sub

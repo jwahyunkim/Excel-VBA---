@@ -28,7 +28,8 @@ Public Const COL_ACTUAL_DAYS As String = "Q"
 Public Const COL_STATUS As String = "R"
 Public Const COL_GANTT_START As String = "S"
 
-Public Const HOLIDAY_SHEET_NAME As String = "휴일설정"
+Public Const CONFIG_SHEET_NAME As String = "config"
+Public Const LEGACY_CONFIG_SHEET_NAME As String = "휴일설정"
 Public Const HOLIDAY_HEADER_ROW As Long = 1
 Public Const HOLIDAY_DATA_START_ROW As Long = 2
 
@@ -42,8 +43,6 @@ Public Const HOLIDAY_TYPE_WORKDAY As String = "근무일"
 Public Const HIDE_SETTING_TITLE_CELL As String = "F1"
 Public Const HIDE_SETTING_LEVEL_LABEL_CELL As String = "F2"
 Public Const HIDE_SETTING_LEVEL_VALUE_CELL As String = "G2"
-Public Const HIDE_SETTING_PERIOD_LABEL_CELL As String = "F3"
-Public Const HIDE_SETTING_PERIOD_VALUE_CELL As String = "G3"
 Public Const DISPLAY_SETTING_TITLE_CELL As String = "I1"
 Public Const DISPLAY_SETTING_START_LABEL_CELL As String = "I2"
 Public Const DISPLAY_SETTING_START_VALUE_CELL As String = "J2"
