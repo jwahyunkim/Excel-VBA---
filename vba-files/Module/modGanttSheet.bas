@@ -23,6 +23,23 @@ Public Sub SetupDataHeaders(ws As Worksheet)
     ws.Cells(HEADER_ROW, COL_STATUS).Value = "상태"
 End Sub
 
+Private Sub NormalizeReportStatusCell(ByVal targetCell As Range)
+    Dim statusText As String
+
+    statusText = UCase$(Trim$(CStr(targetCell.Value2)))
+
+    Select Case statusText
+        Case "Y", "TRUE"
+            targetCell.Value = REPORT_STATUS_IN_PROGRESS
+        Case "N", "FALSE"
+            targetCell.ClearContents
+        Case UCase$(REPORT_STATUS_IN_PROGRESS)
+            targetCell.Value = REPORT_STATUS_IN_PROGRESS
+        Case UCase$(REPORT_STATUS_COMPLETED)
+            targetCell.Value = REPORT_STATUS_COMPLETED
+    End Select
+End Sub
+
 Public Sub UpdateTaskNumbers(ws As Worksheet, ByVal lastRow As Long)
     Dim r As Long
     Dim seqNo As Long
@@ -74,12 +91,14 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
         manualStatusText = Trim$(CStr(ws.Cells(r, COL_MANUAL_STATUS).Value))
 
         If manualStatusText = STATUS_WEEKLY_REPORT Then
-            ws.Cells(r, COL_WEEKLY_REPORT).Value = "Y"
+            ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_IN_PROGRESS
             ws.Cells(r, COL_MANUAL_STATUS).ClearContents
         ElseIf manualStatusText = STATUS_DEV_PROGRESS Or manualStatusText = "개발 진행" Then
-            ws.Cells(r, COL_DEV_PROGRESS).Value = "Y"
+            ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_IN_PROGRESS
             ws.Cells(r, COL_MANUAL_STATUS).ClearContents
         End If
+        NormalizeReportStatusCell ws.Cells(r, COL_WEEKLY_REPORT)
+        NormalizeReportStatusCell ws.Cells(r, COL_DEV_PROGRESS)
     Next r
 
     Set targetRange = ws.Range(COL_NO & HEADER_ROW & ":" & ws.Cells(HEADER_ROW, ws.Columns.Count).Address(False, False))
@@ -879,8 +898,8 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_NORMAL_PROGRESS).ColumnWidth = 11
     ws.Columns(COL_MANUAL_PROGRESS).ColumnWidth = 11
     ws.Columns(COL_MANUAL_STATUS).ColumnWidth = 11
-    ws.Columns(COL_WEEKLY_REPORT).ColumnWidth = 9
-    ws.Columns(COL_DEV_PROGRESS).ColumnWidth = 9
+    ws.Columns(COL_WEEKLY_REPORT).ColumnWidth = 12
+    ws.Columns(COL_DEV_PROGRESS).ColumnWidth = 12
     ws.Columns(COL_PLAN_DAYS).ColumnWidth = 9
     ws.Columns(COL_ACTUAL_DAYS).ColumnWidth = 10
     ws.Columns(COL_STATUS).ColumnWidth = 15
@@ -999,14 +1018,14 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     rngReportFlags.Validation.Add Type:=xlValidateList, _
                                   AlertStyle:=xlValidAlertStop, _
                                   Operator:=xlBetween, _
-                                  Formula1:="Y,N"
+                                  Formula1:=REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
 
     rngReportFlags.Validation.IgnoreBlank = True
     rngReportFlags.Validation.InCellDropdown = True
-    rngReportFlags.Validation.InputTitle = "체크"
-    rngReportFlags.Validation.InputMessage = "해당하면 Y, 아니면 N을 선택하세요."
+    rngReportFlags.Validation.InputTitle = "상태 선택"
+    rngReportFlags.Validation.InputMessage = "In Progress 또는 Completed를 선택하세요. 대상이 아니면 빈칸으로 두세요."
     rngReportFlags.Validation.ErrorTitle = "입력 오류"
-    rngReportFlags.Validation.ErrorMessage = "Y 또는 N만 입력할 수 있습니다."
+    rngReportFlags.Validation.ErrorMessage = "In Progress 또는 Completed만 입력할 수 있습니다."
 
     ApplyManualStatusValidation ws, lastSheetRow
 End Sub
@@ -1131,9 +1150,9 @@ End Function
 Private Function IsTaskManualStatus(ws As Worksheet, ByVal rowNum As Long, ByVal statusText As String) As Boolean
     Select Case statusText
         Case STATUS_WEEKLY_REPORT
-            IsTaskManualStatus = IsCheckedFlag(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value)
+            IsTaskManualStatus = HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value)
         Case STATUS_DEV_PROGRESS
-            IsTaskManualStatus = IsCheckedFlag(ws.Cells(rowNum, COL_DEV_PROGRESS).Value)
+            IsTaskManualStatus = HasReportStatusValue(ws.Cells(rowNum, COL_DEV_PROGRESS).Value)
         Case Else
             IsTaskManualStatus = (Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value)) = statusText)
     End Select
@@ -1141,15 +1160,17 @@ End Function
 
 Private Function IsTaskManualStatusEmpty(ws As Worksheet, ByVal rowNum As Long) As Boolean
     IsTaskManualStatusEmpty = _
-        Not IsCheckedFlag(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value) And _
-        Not IsCheckedFlag(ws.Cells(rowNum, COL_DEV_PROGRESS).Value)
+        Not HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value) And _
+        Not HasReportStatusValue(ws.Cells(rowNum, COL_DEV_PROGRESS).Value)
 End Function
 
-Private Function IsCheckedFlag(ByVal flagValue As Variant) As Boolean
-    Dim flagText As String
+Private Function HasReportStatusValue(ByVal statusValue As Variant) As Boolean
+    Dim statusText As String
 
-    flagText = UCase$(Trim$(CStr(flagValue)))
-    IsCheckedFlag = (flagText = "Y" Or flagText = "TRUE")
+    statusText = UCase$(Trim$(CStr(statusValue)))
+    HasReportStatusValue = _
+        (statusText = UCase$(REPORT_STATUS_IN_PROGRESS) Or _
+         statusText = UCase$(REPORT_STATUS_COMPLETED))
 End Function
 
 Public Sub ShowAllDateColumns(ws As Worksheet)
