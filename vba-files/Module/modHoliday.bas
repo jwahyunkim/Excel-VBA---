@@ -1,12 +1,11 @@
 Attribute VB_Name = "modHoliday"
 Option Explicit
 
-Public Sub EnsureHolidaySheet()
+Public Sub EnsureConfigSheet()
     Dim ws As Worksheet
     Dim lastSheetRow As Long
     Dim rngType As Range
     Dim rngHideLevel As Range
-    Dim rngHidePeriod As Range
     Dim rngExcludeNo As Range
     Dim rngExcludeDate As Range
     Dim rngDisplayStart As Range
@@ -15,12 +14,22 @@ Public Sub EnsureHolidaySheet()
     Dim rngDisplayReportOnly As Range
 
     On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     On Error GoTo 0
 
     If ws Is Nothing Then
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(LEGACY_CONFIG_SHEET_NAME)
+        On Error GoTo 0
+
+        If Not ws Is Nothing Then
+            ws.Name = CONFIG_SHEET_NAME
+        End If
+    End If
+
+    If ws Is Nothing Then
         Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-        ws.Name = HOLIDAY_SHEET_NAME
+        ws.Name = CONFIG_SHEET_NAME
     End If
 
     ws.Range(HOLIDAY_COL_DATE & HOLIDAY_HEADER_ROW).Value = "날짜"
@@ -34,7 +43,6 @@ Public Sub EnsureHolidaySheet()
 
     ws.Range(HIDE_SETTING_TITLE_CELL).Value = "숨김 설정"
     ws.Range(HIDE_SETTING_LEVEL_LABEL_CELL).Value = "완료 숨김 레벨"
-    ws.Range(HIDE_SETTING_PERIOD_LABEL_CELL).Value = "기간 숨김 기준일수"
     ws.Range(DISPLAY_SETTING_TITLE_CELL).Value = "표시 기간 설정"
     ws.Range(DISPLAY_SETTING_START_LABEL_CELL).Value = "표시 시작일"
     ws.Range(DISPLAY_SETTING_END_LABEL_CELL).Value = "표시 종료일"
@@ -47,9 +55,6 @@ Public Sub EnsureHolidaySheet()
         ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value = 3
     End If
 
-    If Trim$(CStr(ws.Range(HIDE_SETTING_PERIOD_VALUE_CELL).Value)) = "" Then
-        ws.Range(HIDE_SETTING_PERIOD_VALUE_CELL).Value = 5
-    End If
 
     ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
     ws.Columns(HOLIDAY_COL_TYPE).ColumnWidth = 12
@@ -57,7 +62,7 @@ Public Sub EnsureHolidaySheet()
     ws.Columns("E").ColumnWidth = 24
     ws.Columns("F").ColumnWidth = 16
     ws.Columns("G").ColumnWidth = 14
-    ws.Columns("I").ColumnWidth = 16
+    ws.Columns("I").ColumnWidth = 26
     ws.Columns("J").ColumnWidth = 14
 
     ws.Range("A1:C1").Font.Bold = True
@@ -72,7 +77,7 @@ Public Sub EnsureHolidaySheet()
     ws.Range("I1:J1").Interior.Color = RGB(242, 242, 242)
     ws.Range("I1:J1").Borders.LineStyle = xlContinuous
 
-    ws.Range("F2:G3").Borders.LineStyle = xlContinuous
+    ws.Range("F2:G2").Borders.LineStyle = xlContinuous
     ws.Range("I2:J5").Borders.LineStyle = xlContinuous
     ws.Range("F5:G5").Font.Bold = True
     ws.Range("F5:G5").Interior.Color = RGB(242, 242, 242)
@@ -89,7 +94,6 @@ Public Sub EnsureHolidaySheet()
     lastSheetRow = ws.Rows.Count
     Set rngType = ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_DATA_START_ROW & ":" & HOLIDAY_COL_TYPE & lastSheetRow)
     Set rngHideLevel = ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL)
-    Set rngHidePeriod = ws.Range(HIDE_SETTING_PERIOD_VALUE_CELL)
     Set rngExcludeNo = ws.Range(HIDE_EXCLUDE_NO_START_CELL & ":F" & lastSheetRow)
     Set rngExcludeDate = ws.Range(HIDE_EXCLUDE_DATE_START_CELL & ":G" & lastSheetRow)
     Set rngDisplayStart = ws.Range(DISPLAY_SETTING_START_VALUE_CELL)
@@ -100,7 +104,6 @@ Public Sub EnsureHolidaySheet()
     On Error Resume Next
     rngType.Validation.Delete
     rngHideLevel.Validation.Delete
-    rngHidePeriod.Validation.Delete
     rngExcludeNo.Validation.Delete
     rngExcludeDate.Validation.Delete
     rngDisplayStart.Validation.Delete
@@ -127,12 +130,6 @@ Public Sub EnsureHolidaySheet()
                                 Formula1:="1", _
                                 Formula2:="3"
 
-    rngHidePeriod.Validation.Add Type:=xlValidateWholeNumber, _
-                                 AlertStyle:=xlValidAlertStop, _
-                                 Operator:=xlBetween, _
-                                 Formula1:="1", _
-                                 Formula2:="365"
-
     rngExcludeNo.Validation.Add Type:=xlValidateWholeNumber, _
                                 AlertStyle:=xlValidAlertStop, _
                                 Operator:=xlBetween, _
@@ -154,6 +151,10 @@ Public Sub EnsureHolidaySheet()
                                    Formula1:="2000-01-01", _
                                    Formula2:="2100-12-31"
     rngDisplayStart.Validation.IgnoreBlank = True
+    rngDisplayStart.Validation.InputTitle = "표시 시작일"
+    rngDisplayStart.Validation.InputMessage = "간트에서 처음 보여줄 날짜를 입력하세요."
+    rngDisplayStart.Validation.ErrorTitle = "입력 오류"
+    rngDisplayStart.Validation.ErrorMessage = "올바른 날짜를 입력하세요."
 
     rngDisplayEnd.Validation.Add Type:=xlValidateDate, _
                                  AlertStyle:=xlValidAlertStop, _
@@ -161,6 +162,10 @@ Public Sub EnsureHolidaySheet()
                                  Formula1:="2000-01-01", _
                                  Formula2:="2100-12-31"
     rngDisplayEnd.Validation.IgnoreBlank = True
+    rngDisplayEnd.Validation.InputTitle = "표시 종료일"
+    rngDisplayEnd.Validation.InputMessage = "간트에서 마지막으로 보여줄 날짜를 입력하세요."
+    rngDisplayEnd.Validation.ErrorTitle = "입력 오류"
+    rngDisplayEnd.Validation.ErrorMessage = "올바른 날짜를 입력하세요."
 
     rngDisplayGanttOnly.Validation.Add Type:=xlValidateList, _
                                         AlertStyle:=xlValidAlertStop, _
@@ -189,7 +194,7 @@ Public Sub LoadHolidaySettings(ByRef holidayDict As Object, ByRef workdayDict As
     Set holidayDict = CreateObject("Scripting.Dictionary")
     Set workdayDict = CreateObject("Scripting.Dictionary")
 
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     lastRow = ws.Cells(ws.Rows.Count, HOLIDAY_COL_DATE).End(xlUp).Row
 
     If lastRow < HOLIDAY_DATA_START_ROW Then Exit Sub
@@ -218,7 +223,7 @@ Public Function TryGetDisplayDateRange(ByRef displayStartDate As Date, ByRef dis
 
     TryGetDisplayDateRange = False
 
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
 
     startValue = ws.Range(DISPLAY_SETTING_START_VALUE_CELL).Value
     endValue = ws.Range(DISPLAY_SETTING_END_VALUE_CELL).Value
@@ -226,18 +231,18 @@ Public Function TryGetDisplayDateRange(ByRef displayStartDate As Date, ByRef dis
     If Trim$(CStr(startValue)) = "" And Trim$(CStr(endValue)) = "" Then Exit Function
 
     If Trim$(CStr(startValue)) = "" Or Trim$(CStr(endValue)) = "" Then
-        Err.Raise vbObjectError + 7101, "TryGetDisplayDateRange", "휴일설정 시트의 표시 시작일과 표시 종료일을 모두 입력해야 합니다."
+        Err.Raise vbObjectError + 7101, "TryGetDisplayDateRange", "config 시트의 표시 시작일과 표시 종료일을 모두 입력해야 합니다."
     End If
 
     If Not IsDate(startValue) Or Not IsDate(endValue) Then
-        Err.Raise vbObjectError + 7102, "TryGetDisplayDateRange", "휴일설정 시트의 표시 기간은 날짜만 입력할 수 있습니다."
+        Err.Raise vbObjectError + 7102, "TryGetDisplayDateRange", "config 시트의 표시 기간은 날짜만 입력할 수 있습니다."
     End If
 
     displayStartDate = CDate(startValue)
     displayEndDate = CDate(endValue)
 
     If CLng(displayStartDate) > CLng(displayEndDate) Then
-        Err.Raise vbObjectError + 7103, "TryGetDisplayDateRange", "휴일설정 시트의 표시 시작일은 표시 종료일보다 늦을 수 없습니다."
+        Err.Raise vbObjectError + 7103, "TryGetDisplayDateRange", "config 시트의 표시 시작일은 표시 종료일보다 늦을 수 없습니다."
     End If
 
     TryGetDisplayDateRange = True
@@ -247,7 +252,7 @@ Public Function GetDisplayGanttOnlyFlag() As Boolean
     Dim ws As Worksheet
     Dim v As String
 
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     v = UCase$(Trim$(CStr(ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).Value)))
 
     GetDisplayGanttOnlyFlag = (v = "Y")
@@ -257,7 +262,7 @@ Public Function GetDisplayReportOnlyFlag() As String
     Dim ws As Worksheet
     Dim v As String
 
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     v = Trim$(CStr(ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).Value))
 
     If v = STATUS_WEEKLY_REPORT Or v = STATUS_DEV_PROGRESS Or v = REPORT_FILTER_ALL Or v = REPORT_FILTER_EMPTY Then
@@ -271,7 +276,7 @@ Public Function GetHideCompletedMaxLevel() As Long
     Dim ws As Worksheet
     Dim v As Variant
 
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     v = ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value
 
     If IsNumeric(v) Then
@@ -284,22 +289,6 @@ Public Function GetHideCompletedMaxLevel() As Long
     If GetHideCompletedMaxLevel > 3 Then GetHideCompletedMaxLevel = 3
 End Function
 
-Public Function GetHideIdlePeriodDays() As Long
-    Dim ws As Worksheet
-    Dim v As Variant
-
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
-    v = ws.Range(HIDE_SETTING_PERIOD_VALUE_CELL).Value
-
-    If IsNumeric(v) Then
-        GetHideIdlePeriodDays = CLng(v)
-    Else
-        GetHideIdlePeriodDays = 5
-    End If
-
-    If GetHideIdlePeriodDays < 1 Then GetHideIdlePeriodDays = 1
-End Function
-
 Public Sub LoadExcludedRowNos(ByRef excludeNoDict As Object)
     Dim ws As Worksheet
     Dim lastRow As Long
@@ -308,7 +297,7 @@ Public Sub LoadExcludedRowNos(ByRef excludeNoDict As Object)
     Dim key As String
 
     Set excludeNoDict = CreateObject("Scripting.Dictionary")
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     lastRow = ws.Cells(ws.Rows.Count, "F").End(xlUp).Row
 
     If lastRow < 6 Then Exit Sub
@@ -333,7 +322,7 @@ Public Sub LoadExcludedDates(ByRef excludeDateDict As Object)
     Dim key As String
 
     Set excludeDateDict = CreateObject("Scripting.Dictionary")
-    Set ws = ThisWorkbook.Worksheets(HOLIDAY_SHEET_NAME)
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     lastRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).Row
 
     If lastRow < 6 Then Exit Sub
