@@ -172,6 +172,10 @@ Public Sub 칸트차트_항목숨기기버튼_생성()
     CreateGanttActionButton ActiveSheet, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", 4
 End Sub
 
+Public Sub 개발진행보고_버튼_생성()
+    CreateGanttActionButton ActiveSheet, "btnDevProgressReport", "개발 보고", "개발진행보고_텍스트생성", 6
+End Sub
+
 Public Sub 칸트차트_개체삽입버튼_생성()
     CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 5
 End Sub

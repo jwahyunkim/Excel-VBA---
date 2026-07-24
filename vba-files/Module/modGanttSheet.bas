@@ -33,6 +33,8 @@ Private Sub NormalizeReportStatusCell(ByVal targetCell As Range)
             targetCell.Value = REPORT_STATUS_IN_PROGRESS
         Case "N", "FALSE"
             targetCell.ClearContents
+        Case UCase$(REPORT_STATUS_PLANNED)
+            targetCell.Value = REPORT_STATUS_PLANNED
         Case UCase$(REPORT_STATUS_IN_PROGRESS)
             targetCell.Value = REPORT_STATUS_IN_PROGRESS
         Case UCase$(REPORT_STATUS_COMPLETED)
@@ -269,6 +271,38 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
     End With
 End Sub
 
+Public Sub UpdateDevelopmentProgressStatuses(ByVal ws As Worksheet, _
+                                             ByVal lastRow As Long, _
+                                             ByVal holidayDict As Object, _
+                                             ByVal workdayDict As Object)
+    Dim r As Long
+    Dim statusText As String
+    Dim actualStart As Variant
+
+    If lastRow < DATA_START_ROW Then Exit Sub
+
+    For r = DATA_START_ROW To lastRow
+        If HasTaskContent(ws, r) Then
+            If HasChildTask(ws, r, lastRow) Then
+                statusText = Trim$(CStr(ws.Cells(r, COL_STATUS).Value2))
+            Else
+                statusText = GetTaskStatus(ws, r, holidayDict, workdayDict)
+            End If
+
+            actualStart = ws.Cells(r, COL_ACTUAL_START).Value
+
+            If IsDoneStatusText(statusText) Then
+                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_COMPLETED
+            ElseIf IsDate(actualStart) Then
+                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_IN_PROGRESS
+            Else
+                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_PLANNED
+            End If
+        Else
+            ws.Cells(r, COL_DEV_PROGRESS).ClearContents
+        End If
+    Next r
+End Sub
 Public Sub DrawTaskBars(ws As Worksheet, ByVal lastRow As Long, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object)
     Dim r As Long
     Dim d As Date
@@ -285,6 +319,7 @@ Public Sub DrawTaskBars(ws As Worksheet, ByVal lastRow As Long, ByVal chartStart
     Dim markerText As String
 
     ApplyHierarchySummaryValues ws, lastRow, holidayDict, workdayDict
+    UpdateDevelopmentProgressStatuses ws, lastRow, holidayDict, workdayDict
 
     startCol = ws.Range(COL_GANTT_START & "1").Column
 
@@ -921,7 +956,8 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     Dim rngLevel As Range
     Dim rngProgress As Range
     Dim rngManualProgress As Range
-    Dim rngReportFlags As Range
+    Dim rngWeeklyReport As Range
+    Dim rngDevProgress As Range
     
     lastSheetRow = ws.Rows.Count
     
@@ -1007,26 +1043,35 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     rngManualProgress.Validation.ErrorTitle = "입력 오류"
     rngManualProgress.Validation.ErrorMessage = "Y 또는 N만 입력할 수 있습니다."
     
-    Set rngReportFlags = Union( _
-        ws.Range(COL_WEEKLY_REPORT & DATA_START_ROW & ":" & COL_WEEKLY_REPORT & lastSheetRow), _
-        ws.Range(COL_DEV_PROGRESS & DATA_START_ROW & ":" & COL_DEV_PROGRESS & lastSheetRow))
+    Set rngWeeklyReport = ws.Range(COL_WEEKLY_REPORT & DATA_START_ROW & ":" & COL_WEEKLY_REPORT & lastSheetRow)
+    Set rngDevProgress = ws.Range(COL_DEV_PROGRESS & DATA_START_ROW & ":" & COL_DEV_PROGRESS & lastSheetRow)
 
     On Error Resume Next
-    rngReportFlags.Validation.Delete
+    rngWeeklyReport.Validation.Delete
+    rngDevProgress.Validation.Delete
     On Error GoTo 0
 
-    rngReportFlags.Validation.Add Type:=xlValidateList, _
+    rngWeeklyReport.Validation.Add Type:=xlValidateList, _
+                                   AlertStyle:=xlValidAlertStop, _
+                                   Operator:=xlBetween, _
+                                   Formula1:=REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
+    rngWeeklyReport.Validation.IgnoreBlank = True
+    rngWeeklyReport.Validation.InCellDropdown = True
+    rngWeeklyReport.Validation.InputTitle = "주간보고 상태"
+    rngWeeklyReport.Validation.InputMessage = "In Progress 또는 Completed를 선택하세요."
+    rngWeeklyReport.Validation.ErrorTitle = "입력 오류"
+    rngWeeklyReport.Validation.ErrorMessage = "In Progress 또는 Completed만 입력할 수 있습니다."
+
+    rngDevProgress.Validation.Add Type:=xlValidateList, _
                                   AlertStyle:=xlValidAlertStop, _
                                   Operator:=xlBetween, _
-                                  Formula1:=REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
-
-    rngReportFlags.Validation.IgnoreBlank = True
-    rngReportFlags.Validation.InCellDropdown = True
-    rngReportFlags.Validation.InputTitle = "상태 선택"
-    rngReportFlags.Validation.InputMessage = "In Progress 또는 Completed를 선택하세요. 대상이 아니면 빈칸으로 두세요."
-    rngReportFlags.Validation.ErrorTitle = "입력 오류"
-    rngReportFlags.Validation.ErrorMessage = "In Progress 또는 Completed만 입력할 수 있습니다."
-
+                                  Formula1:=REPORT_STATUS_PLANNED & "," & REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
+    rngDevProgress.Validation.IgnoreBlank = True
+    rngDevProgress.Validation.InCellDropdown = True
+    rngDevProgress.Validation.InputTitle = "개발진행 상태"
+    rngDevProgress.Validation.InputMessage = "Planned, In Progress, Completed 중 자동 계산됩니다."
+    rngDevProgress.Validation.ErrorTitle = "입력 오류"
+    rngDevProgress.Validation.ErrorMessage = "Planned, In Progress, Completed만 입력할 수 있습니다."
     ApplyManualStatusValidation ws, lastSheetRow
 End Sub
 
@@ -1169,10 +1214,10 @@ Private Function HasReportStatusValue(ByVal statusValue As Variant) As Boolean
 
     statusText = UCase$(Trim$(CStr(statusValue)))
     HasReportStatusValue = _
-        (statusText = UCase$(REPORT_STATUS_IN_PROGRESS) Or _
+        (statusText = UCase$(REPORT_STATUS_PLANNED) Or _
+         statusText = UCase$(REPORT_STATUS_IN_PROGRESS) Or _
          statusText = UCase$(REPORT_STATUS_COMPLETED))
 End Function
-
 Public Sub ShowAllDateColumns(ws As Worksheet)
     Dim startCol As Long
     Dim endCol As Long

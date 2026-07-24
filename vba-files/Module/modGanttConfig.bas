@@ -29,6 +29,7 @@ Public Const COL_STATUS As String = "R"
 Public Const COL_GANTT_START As String = "S"
 
 Public Const CONFIG_SHEET_NAME As String = "config"
+Public Const REPORT_HISTORY_SHEET_NAME As String = "ReportHistory"
 Public Const LEGACY_CONFIG_SHEET_NAME As String = "휴일설정"
 Public Const HOLIDAY_HEADER_ROW As Long = 1
 Public Const HOLIDAY_DATA_START_ROW As Long = 2
@@ -68,6 +69,7 @@ Public Const STATUS_REPORT_DONE As String = "보고완료"
 Public Const STATUS_ERROR As String = "오류"
 Public Const REPORT_FILTER_ALL As String = "전체"
 Public Const REPORT_FILTER_EMPTY As String = "빈값"
+Public Const REPORT_STATUS_PLANNED As String = "Planned"
 Public Const REPORT_STATUS_IN_PROGRESS As String = "In Progress"
 Public Const REPORT_STATUS_COMPLETED As String = "Completed"
 Public Const STATUS_DONE_WITH_HOLD_SUFFIX As String = "(보류 포함)"
