@@ -446,6 +446,14 @@ Private Function GetGanttPptNoteCell(ByVal ws As Worksheet, ByVal targetRow As L
     Set GetGanttPptNoteCell = ws.Cells(targetRow, ws.Range(COL_NOTE & "1").Column)
 End Function
 
+Private Sub ApplyGanttPptNoteCellBorder(ByVal noteCell As Range)
+    With noteCell.Borders
+        .LineStyle = xlContinuous
+        .Color = RGB(0, 0, 0)
+        .Weight = xlThin
+    End With
+End Sub
+
 Private Sub SetGanttPptCellIcon(ByVal ws As Worksheet, ByVal targetRow As Long)
     Dim noteCell As Range
     Dim iconFontSize As Double
@@ -482,6 +490,7 @@ Private Sub SetGanttPptCellIcon(ByVal ws As Worksheet, ByVal targetRow As Long)
         .Font.Color = RGB(255, 0, 0)
         .Font.Underline = xlUnderlineStyleNone
     End With
+    ApplyGanttPptNoteCellBorder noteCell
 End Sub
 
 Private Sub ClearGanttPptCellIcon(ByVal ws As Worksheet, ByVal targetRow As Long)
@@ -501,6 +510,7 @@ Private Sub ClearGanttPptCellIcon(ByVal ws As Worksheet, ByVal targetRow As Long
         noteCell.Font.ColorIndex = xlAutomatic
         noteCell.Font.Underline = xlUnderlineStyleNone
     End If
+    ApplyGanttPptNoteCellBorder noteCell
 End Sub
 
 Private Sub PositionHiddenGanttPptOle(ByVal ws As Worksheet, ByVal oleObj As OLEObject, ByVal targetRow As Long)
