@@ -1,4 +1,4 @@
-ÔªøAttribute VB_Name = "modGanttSheet"
+Attribute VB_Name = "modGanttSheet"
 Option Explicit
 
 Public Sub SetupDataHeaders(ws As Worksheet)
@@ -6,21 +6,40 @@ Public Sub SetupDataHeaders(ws As Worksheet)
 
     ws.Cells(HEADER_ROW, COL_NO).Value = "No."
     ws.Cells(HEADER_ROW, COL_LEVEL).Value = "Level"
-    ws.Cells(HEADER_ROW, COL_TASK).Value = "ÎÇ¥Ïö©"
-    ws.Cells(HEADER_ROW, COL_NOTE).Value = "ÎπÑÍ≥†"
-    ws.Cells(HEADER_ROW, COL_PLAN_START).Value = "Í≥ÑÌöç ÏãúÏûëÏùº"
-    ws.Cells(HEADER_ROW, COL_PLAN_END).Value = "Í≥ÑÌöç Ï¢ÖÎ£åÏùº"
-    ws.Cells(HEADER_ROW, COL_ACTUAL_START).Value = "Ïã§Ï†ú ÏãúÏûëÏùº"
-    ws.Cells(HEADER_ROW, COL_ACTUAL_END).Value = "Ïã§Ï†ú Ï¢ÖÎ£åÏùº"
-    ws.Cells(HEADER_ROW, COL_PROGRESS).Value = "ÏßÑÌñâÎ•†"
-    ws.Cells(HEADER_ROW, COL_NORMAL_PROGRESS).Value = "Ï†ïÏÉÅ ÏßÑÌñâÎ•†"
-    ws.Cells(HEADER_ROW, COL_MANUAL_PROGRESS).Value = "ÏßÑÌñâÎ•† ÏàòÎèô"
-    ws.Cells(HEADER_ROW, COL_MANUAL_STATUS).Value = "ÏÉÅÌÉú ÏàòÎèô"
-    ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value = "Ï£ºÍ∞ÑÎ≥¥Í≥†"
-    ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value = "Í∞úÎ∞úÏßÑÌñâ"
-    ws.Cells(HEADER_ROW, COL_PLAN_DAYS).Value = "Í≥ÑÌöçÏùºÏàò"
-    ws.Cells(HEADER_ROW, COL_ACTUAL_DAYS).Value = "Ïã§ÏÜåÏöîÏùºÏàò"
-    ws.Cells(HEADER_ROW, COL_STATUS).Value = "ÏÉÅÌÉú"
+    ws.Cells(HEADER_ROW, COL_TASK).Value = "≥ªøÎ"
+    ws.Cells(HEADER_ROW, COL_NOTE).Value = "∫Ò∞Ì"
+    ws.Cells(HEADER_ROW, COL_PLAN_START).Value = "∞Ë»π Ω√¿€¿œ"
+    ws.Cells(HEADER_ROW, COL_PLAN_END).Value = "∞Ë»π ¡æ∑·¿œ"
+    ws.Cells(HEADER_ROW, COL_ACTUAL_START).Value = "Ω«¡¶ Ω√¿€¿œ"
+    ws.Cells(HEADER_ROW, COL_ACTUAL_END).Value = "Ω«¡¶ ¡æ∑·¿œ"
+    ws.Cells(HEADER_ROW, COL_PROGRESS).Value = "¡¯«‡∑¸"
+    ws.Cells(HEADER_ROW, COL_NORMAL_PROGRESS).Value = "¡§ªÛ ¡¯«‡∑¸"
+    ws.Cells(HEADER_ROW, COL_MANUAL_PROGRESS).Value = "¡¯«‡∑¸ ºˆµø"
+    ws.Cells(HEADER_ROW, COL_MANUAL_STATUS).Value = "ªÛ≈¬ ºˆµø"
+    ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value = "¡÷∞£∫∏∞Ì"
+    ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value = "∞≥πﬂ¡¯«‡"
+    ws.Cells(HEADER_ROW, COL_PLAN_DAYS).Value = "∞Ë»π¿œºˆ"
+    ws.Cells(HEADER_ROW, COL_ACTUAL_DAYS).Value = "Ω«º“ø‰¿œºˆ"
+    ws.Cells(HEADER_ROW, COL_STATUS).Value = "ªÛ≈¬"
+End Sub
+
+Private Sub NormalizeReportStatusCell(ByVal targetCell As Range)
+    Dim statusText As String
+
+    statusText = UCase$(Trim$(CStr(targetCell.Value2)))
+
+    Select Case statusText
+        Case "Y", "TRUE"
+            targetCell.Value = REPORT_STATUS_IN_PROGRESS
+        Case "N", "FALSE"
+            targetCell.ClearContents
+        Case UCase$(REPORT_STATUS_PLANNED)
+            targetCell.Value = REPORT_STATUS_PLANNED
+        Case UCase$(REPORT_STATUS_IN_PROGRESS)
+            targetCell.Value = REPORT_STATUS_IN_PROGRESS
+        Case UCase$(REPORT_STATUS_COMPLETED)
+            targetCell.Value = REPORT_STATUS_COMPLETED
+    End Select
 End Sub
 
 Public Sub UpdateTaskNumbers(ws As Worksheet, ByVal lastRow As Long)
@@ -42,71 +61,6 @@ Public Sub UpdateTaskNumbers(ws As Worksheet, ByVal lastRow As Long)
     Next r
 End Sub
 
-Public Function InsertBlankTaskRowBelow(ws As Worksheet, ByVal baseRow As Long) As Long
-    Dim insertRow As Long
-    Dim startCol As Long
-    Dim endCol As Long
-
-    If baseRow < DATA_START_ROW Then baseRow = DATA_START_ROW
-
-    insertRow = baseRow + 1
-
-    ws.Rows(insertRow).Insert Shift:=xlDown, CopyOrigin:=xlFormatFromLeftOrAbove
-    ws.Rows(insertRow).Hidden = False
-    ws.Rows(insertRow).RowHeight = ws.Rows(baseRow).RowHeight
-
-    ws.Range(COL_NO & insertRow & ":" & COL_STATUS & insertRow).ClearContents
-    ws.Range(COL_NO & insertRow & ":" & COL_STATUS & insertRow).Interior.Pattern = xlNone
-
-    startCol = ws.Range(COL_GANTT_START & "1").Column
-    endCol = ws.Cells(GANTT_HEADER_ROW_DATE, ws.Columns.Count).End(xlToLeft).Column
-
-    If endCol >= startCol Then
-        ws.Range(ws.Cells(insertRow, startCol), ws.Cells(insertRow, endCol)).ClearContents
-        ws.Range(ws.Cells(insertRow, startCol), ws.Cells(insertRow, endCol)).Interior.Pattern = xlNone
-    End If
-
-    InsertBlankTaskRowBelow = insertRow
-End Function
-
-Public Function InsertBlankTaskRowAbove(ws As Worksheet, ByVal baseRow As Long) As Long
-    Dim insertRow As Long
-
-    If baseRow < DATA_START_ROW Then baseRow = DATA_START_ROW
-
-    insertRow = baseRow
-    ws.Rows(insertRow).Insert Shift:=xlDown, CopyOrigin:=xlFormatFromLeftOrAbove
-    ws.Rows(insertRow).Hidden = False
-    ws.Rows(insertRow).RowHeight = ws.Rows(insertRow + 1).RowHeight
-
-    ClearTaskRowData ws, insertRow
-
-    InsertBlankTaskRowAbove = insertRow
-End Function
-
-Public Sub DeleteTaskRow(ws As Worksheet, ByVal targetRow As Long)
-    If targetRow < DATA_START_ROW Then Exit Sub
-
-    ws.Rows(targetRow).Delete Shift:=xlUp
-End Sub
-
-Private Sub ClearTaskRowData(ws As Worksheet, ByVal targetRow As Long)
-    Dim startCol As Long
-    Dim endCol As Long
-
-    ws.Range(COL_NO & targetRow & ":" & COL_STATUS & targetRow).ClearContents
-    ws.Range(COL_NO & targetRow & ":" & COL_STATUS & targetRow).Interior.Pattern = xlNone
-
-    startCol = ws.Range(COL_GANTT_START & "1").Column
-    endCol = ws.Cells(GANTT_HEADER_ROW_DATE, ws.Columns.Count).End(xlToLeft).Column
-
-    If endCol >= startCol Then
-        ws.Range(ws.Cells(targetRow, startCol), ws.Cells(targetRow, endCol)).ClearContents
-        ws.Range(ws.Cells(targetRow, startCol), ws.Cells(targetRow, endCol)).Interior.Pattern = xlNone
-    End If
-End Sub
-
-
 Private Sub NormalizeSheetStructure(ws As Worksheet)
     Dim i As Long
     Dim r As Long
@@ -119,14 +73,14 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
         ws.Columns(COL_NO).Insert Shift:=xlToRight
     End If
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "Ï£ºÍ∞ÑÎ≥¥Í≥†" And _
-       Trim$(CStr(ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value)) <> "Í∞úÎ∞úÏßÑÌñâ" Then
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "¡÷∞£∫∏∞Ì" And _
+       Trim$(CStr(ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value)) <> "∞≥πﬂ¡¯«‡" Then
         ws.Range(COL_WEEKLY_REPORT & ":" & COL_DEV_PROGRESS).EntireColumn.Insert Shift:=xlToRight
     Else
-        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "Ï£ºÍ∞ÑÎ≥¥Í≥†" Then
+        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "¡÷∞£∫∏∞Ì" Then
             ws.Columns(COL_WEEKLY_REPORT).Insert Shift:=xlToRight
         End If
-        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value)) <> "Í∞úÎ∞úÏßÑÌñâ" Then
+        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value)) <> "∞≥πﬂ¡¯«‡" Then
             ws.Columns(COL_DEV_PROGRESS).Insert Shift:=xlToRight
         End If
     End If
@@ -139,12 +93,14 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
         manualStatusText = Trim$(CStr(ws.Cells(r, COL_MANUAL_STATUS).Value))
 
         If manualStatusText = STATUS_WEEKLY_REPORT Then
-            ws.Cells(r, COL_WEEKLY_REPORT).Value = "Y"
+            ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_IN_PROGRESS
             ws.Cells(r, COL_MANUAL_STATUS).ClearContents
-        ElseIf manualStatusText = STATUS_DEV_PROGRESS Or manualStatusText = "Í∞úÎ∞ú ÏßÑÌñâ" Then
-            ws.Cells(r, COL_DEV_PROGRESS).Value = "Y"
+        ElseIf manualStatusText = STATUS_DEV_PROGRESS Or manualStatusText = "∞≥πﬂ ¡¯«‡" Then
+            ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_IN_PROGRESS
             ws.Cells(r, COL_MANUAL_STATUS).ClearContents
         End If
+        NormalizeReportStatusCell ws.Cells(r, COL_WEEKLY_REPORT)
+        NormalizeReportStatusCell ws.Cells(r, COL_DEV_PROGRESS)
     Next r
 
     Set targetRange = ws.Range(COL_NO & HEADER_ROW & ":" & ws.Cells(HEADER_ROW, ws.Columns.Count).Address(False, False))
@@ -169,10 +125,10 @@ Public Sub ClearCalculatedArea(ws As Worksheet, ByVal lastRow As Long)
     
     If lastRow < DATA_START_ROW Then Exit Sub
     
-    normalProgressCol = FindHeaderColumnByName(ws, "Ï†ïÏÉÅ ÏßÑÌñâÎ•†")
-    planDaysCol = FindHeaderColumnByName(ws, "Í≥ÑÌöçÏùºÏàò")
-    actualDaysCol = FindHeaderColumnByName(ws, "Ïã§ÏÜåÏöîÏùºÏàò")
-    statusCol = FindHeaderColumnByName(ws, "ÏÉÅÌÉú")
+    normalProgressCol = FindHeaderColumnByName(ws, "¡§ªÛ ¡¯«‡∑¸")
+    planDaysCol = FindHeaderColumnByName(ws, "∞Ë»π¿œºˆ")
+    actualDaysCol = FindHeaderColumnByName(ws, "Ω«º“ø‰¿œºˆ")
+    statusCol = FindHeaderColumnByName(ws, "ªÛ≈¬")
     
     If normalProgressCol > 0 And planDaysCol > 0 And actualDaysCol > 0 And statusCol > 0 Then
         ws.Range(ws.Cells(DATA_START_ROW, normalProgressCol), ws.Cells(lastRow, normalProgressCol)).ClearContents
@@ -245,8 +201,8 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
         ws.Cells(GANTT_HEADER_ROW_DATE, curCol).HorizontalAlignment = xlCenter
         ws.Cells(GANTT_HEADER_ROW_DATE, curCol).VerticalAlignment = xlCenter
 
-        nextWeekLabel = DatePart("ww", d, vbMonday, vbFirstFourDays) & " Ï£ºÏ∞®"
-        nextMonthLabel = Month(d) & "Ïõî"
+        nextWeekLabel = DatePart("ww", d, vbMonday, vbFirstFourDays) & " ¡÷¬˜"
+        nextMonthLabel = Month(d) & "ø˘"
 
         If currentMonthLabel = "" Then
             currentMonthLabel = nextMonthLabel
@@ -315,6 +271,44 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
     End With
 End Sub
 
+Public Sub UpdateDevelopmentProgressStatuses(ByVal ws As Worksheet, _
+                                             ByVal lastRow As Long, _
+                                             ByVal holidayDict As Object, _
+                                             ByVal workdayDict As Object)
+    Dim r As Long
+    Dim statusText As String
+    Dim actualStart As Variant
+    Dim actualEnd As Variant
+
+    If lastRow < DATA_START_ROW Then Exit Sub
+
+    For r = DATA_START_ROW To lastRow
+        If HasTaskContent(ws, r) Then
+            If HasChildTask(ws, r, lastRow) Then
+                statusText = Trim$(CStr(ws.Cells(r, COL_STATUS).Value2))
+            Else
+                statusText = GetTaskStatus(ws, r, holidayDict, workdayDict)
+            End If
+
+            actualStart = ws.Cells(r, COL_ACTUAL_START).Value
+            actualEnd = ws.Cells(r, COL_ACTUAL_END).Value
+
+            If IsDate(actualEnd) And CLng(CDate(actualEnd)) <= CLng(Date) Then
+                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_COMPLETED
+                ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_COMPLETED
+            ElseIf IsDate(actualStart) And CLng(CDate(actualStart)) <= CLng(Date) Then
+                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_IN_PROGRESS
+                ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_IN_PROGRESS
+            Else
+                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_PLANNED
+                ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_PLANNED
+            End If
+        Else
+            ws.Cells(r, COL_DEV_PROGRESS).ClearContents
+            ws.Cells(r, COL_WEEKLY_REPORT).ClearContents
+        End If
+    Next r
+End Sub
 Public Sub DrawTaskBars(ws As Worksheet, ByVal lastRow As Long, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object)
     Dim r As Long
     Dim d As Date
@@ -331,6 +325,7 @@ Public Sub DrawTaskBars(ws As Worksheet, ByVal lastRow As Long, ByVal chartStart
     Dim markerText As String
 
     ApplyHierarchySummaryValues ws, lastRow, holidayDict, workdayDict
+    UpdateDevelopmentProgressStatuses ws, lastRow, holidayDict, workdayDict
 
     startCol = ws.Range(COL_GANTT_START & "1").Column
 
@@ -346,15 +341,8 @@ Public Sub DrawTaskBars(ws As Worksheet, ByVal lastRow As Long, ByVal chartStart
         markerDate = FindLevelMarkerDate(ws, r, holidayDict, workdayDict)
         markerText = GetTaskLevelMarker(ws, r)
 
-        If statusText = STATUS_HOLD Then
-            actualColor = RGB(191, 191, 191)
-        ElseIf statusText = STATUS_DELAY Then
-            actualColor = RGB(255, 102, 102)
-        ElseIf statusText = STATUS_CAUTION Then
-            actualColor = RGB(255, 192, 0)
-        Else
-            actualColor = RGB(102, 255, 51)
-        End If
+        actualColor = GetTaskStatusFillColor(statusText)
+
 
         If IsDate(planS) And IsDate(planE) Then
             For d = CDate(planS) To CDate(planE)
@@ -626,6 +614,7 @@ Private Sub SetDurationValues(ws As Worksheet, ByVal rowNum As Long, ByVal holid
     Dim actualDays As Variant
     Dim actualStart As Variant
     Dim actualEnd As Variant
+    Dim actualEnd As Variant
     Dim compareEnd As Date
 
     planDays = CountWorkingDaysInclusive(ws.Cells(rowNum, COL_PLAN_START).Value, ws.Cells(rowNum, COL_PLAN_END).Value, holidayDict, workdayDict)
@@ -734,6 +723,65 @@ Private Function BuildParentStatusFromChildren(ws As Worksheet, ByVal rowNum As 
     Else
         BuildParentStatusFromChildren = STATUS_NORMAL
     End If
+End Function
+
+Private Function GetTaskStatusFillColor(ByVal statusText As String) As Long
+    If IsDoneStatusText(statusText) Then
+        GetTaskStatusFillColor = RGB(102, 255, 51)
+        Exit Function
+    End If
+
+    Select Case statusText
+        Case STATUS_NORMAL
+            GetTaskStatusFillColor = RGB(91, 155, 213)
+        Case STATUS_CAUTION
+            GetTaskStatusFillColor = RGB(255, 192, 0)
+        Case STATUS_HOLD
+            GetTaskStatusFillColor = RGB(153, 102, 204)
+        Case STATUS_DELAY
+            GetTaskStatusFillColor = RGB(255, 99, 99)
+        Case STATUS_ERROR
+            GetTaskStatusFillColor = RGB(237, 125, 49)
+        Case Else
+            GetTaskStatusFillColor = RGB(91, 155, 213)
+    End Select
+End Function
+
+Private Function IsTaskPlannedOnDate(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal targetDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object) As Boolean
+    Dim planS As Variant
+    Dim planE As Variant
+
+    planS = ws.Cells(rowNum, COL_PLAN_START).Value
+    planE = ws.Cells(rowNum, COL_PLAN_END).Value
+
+    If Not IsDate(planS) Or Not IsDate(planE) Then Exit Function
+    If Not IsWorkingDay(targetDate, holidayDict, workdayDict) Then Exit Function
+
+    IsTaskPlannedOnDate = (CLng(targetDate) >= CLng(CDate(planS)) And _
+                           CLng(targetDate) <= CLng(CDate(planE)))
+End Function
+
+Private Function IsTaskActualOnDate(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal targetDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object) As Boolean
+    Dim actualS As Variant
+    Dim actualE As Variant
+    Dim actualDrawEnd As Date
+
+    actualS = ws.Cells(rowNum, COL_ACTUAL_START).Value
+    actualE = ws.Cells(rowNum, COL_ACTUAL_END).Value
+
+    If Not IsDate(actualS) Then Exit Function
+    If Not IsWorkingDay(targetDate, holidayDict, workdayDict) Then Exit Function
+
+    If IsDate(actualE) Then
+        actualDrawEnd = CDate(actualE)
+    ElseIf CDate(actualS) <= Date Then
+        actualDrawEnd = Date
+    Else
+        Exit Function
+    End If
+
+    IsTaskActualOnDate = (CLng(targetDate) >= CLng(CDate(actualS)) And _
+                          CLng(targetDate) <= CLng(actualDrawEnd))
 End Function
 
 Private Function IsDoneStatusText(ByVal statusText As String) As Boolean
@@ -857,7 +905,10 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
             For r = DATA_START_ROW To lastRow
                 If HasTaskContent(ws, r) Then
                     If ws.Cells(r, c).Value = "" Then
-                        ws.Cells(r, c).Interior.Color = RGB(255, 199, 206)
+                        If Not IsTaskPlannedOnDate(ws, r, d, holidayDict, workdayDict) And _
+                           Not IsTaskActualOnDate(ws, r, d, holidayDict, workdayDict) Then
+                            ws.Cells(r, c).Interior.Color = RGB(255, 199, 206)
+                        End If
                     End If
                 End If
             Next r
@@ -880,7 +931,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_LEVEL).ColumnWidth = 7
     ws.Columns(COL_TASK).WrapText = False
     ws.Columns(COL_TASK).AutoFit
-    ws.Columns(COL_NOTE).ColumnWidth = 14
+    ws.Columns(COL_NOTE).ColumnWidth = 4.5
     ws.Columns(COL_PLAN_START).ColumnWidth = 11
     ws.Columns(COL_PLAN_END).ColumnWidth = 11
     ws.Columns(COL_ACTUAL_START).ColumnWidth = 11
@@ -889,6 +940,8 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_NORMAL_PROGRESS).ColumnWidth = 11
     ws.Columns(COL_MANUAL_PROGRESS).ColumnWidth = 11
     ws.Columns(COL_MANUAL_STATUS).ColumnWidth = 11
+    ws.Columns(COL_WEEKLY_REPORT).ColumnWidth = 12
+    ws.Columns(COL_DEV_PROGRESS).ColumnWidth = 12
     ws.Columns(COL_PLAN_DAYS).ColumnWidth = 9
     ws.Columns(COL_ACTUAL_DAYS).ColumnWidth = 10
     ws.Columns(COL_STATUS).ColumnWidth = 15
@@ -910,6 +963,8 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     Dim rngLevel As Range
     Dim rngProgress As Range
     Dim rngManualProgress As Range
+    Dim rngWeeklyReport As Range
+    Dim rngDevProgress As Range
     
     lastSheetRow = ws.Rows.Count
     
@@ -933,10 +988,10 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     
     rngDate.Validation.IgnoreBlank = True
     rngDate.Validation.InCellDropdown = True
-    rngDate.Validation.InputTitle = "ÎÇ†Ïßú ÏûÖÎ†•"
-    rngDate.Validation.InputMessage = "ÎÇ†Ïßú ÌòïÏãùÏúºÎ°ú ÏûÖÎ†•ÌïòÏÑ∏Ïöî."
-    rngDate.Validation.ErrorTitle = "ÏûÖÎ†• Ïò§Î•ò"
-    rngDate.Validation.ErrorMessage = "Ïò¨Î∞îÎ•∏ ÎÇ†ÏßúÎßå ÏûÖÎ†•Ìï† Ïàò ÏûàÏäµÎãàÎã§."
+    rngDate.Validation.InputTitle = "≥Ø¬• ¿‘∑¬"
+    rngDate.Validation.InputMessage = "≥Ø¬• «¸Ωƒ¿∏∑Œ ¿‘∑¬«œººø‰."
+    rngDate.Validation.ErrorTitle = "¿‘∑¬ ø¿∑˘"
+    rngDate.Validation.ErrorMessage = "ø√πŸ∏• ≥Ø¬•∏∏ ¿‘∑¬«“ ºˆ ¿÷Ω¿¥œ¥Ÿ."
     
     Set rngLevel = ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & lastSheetRow)
     
@@ -951,10 +1006,10 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
                             Formula2:="3"
     
     rngLevel.Validation.IgnoreBlank = True
-    rngLevel.Validation.InputTitle = "Level ÏûÖÎ†•"
-    rngLevel.Validation.InputMessage = "1~3 ÏÇ¨Ïù¥ Ï†ïÏàòÎßå ÏûÖÎ†•ÌïòÏÑ∏Ïöî."
-    rngLevel.Validation.ErrorTitle = "ÏûÖÎ†• Ïò§Î•ò"
-    rngLevel.Validation.ErrorMessage = "LevelÏùÄ 1~3 ÏÇ¨Ïù¥ Ï†ïÏàòÎßå ÏûÖÎ†•Ìï† Ïàò ÏûàÏäµÎãàÎã§."
+    rngLevel.Validation.InputTitle = "Level ¿‘∑¬"
+    rngLevel.Validation.InputMessage = "1~3 ªÁ¿Ã ¡§ºˆ∏∏ ¿‘∑¬«œººø‰."
+    rngLevel.Validation.ErrorTitle = "¿‘∑¬ ø¿∑˘"
+    rngLevel.Validation.ErrorMessage = "Level¿∫ 1~3 ªÁ¿Ã ¡§ºˆ∏∏ ¿‘∑¬«“ ºˆ ¿÷Ω¿¥œ¥Ÿ."
     
     Set rngProgress = ws.Range(COL_PROGRESS & DATA_START_ROW & ":" & COL_PROGRESS & lastSheetRow)
     
@@ -972,10 +1027,10 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     
     rngProgress.Validation.IgnoreBlank = True
     rngProgress.Validation.InCellDropdown = True
-    rngProgress.Validation.InputTitle = "ÏßÑÌñâÎ•† ÏûÖÎ†•"
-    rngProgress.Validation.InputMessage = "0% ~ 100% ÏÇ¨Ïù¥Î°ú ÏûÖÎ†•ÌïòÏÑ∏Ïöî. Ïòà: 50%"
-    rngProgress.Validation.ErrorTitle = "ÏûÖÎ†• Ïò§Î•ò"
-    rngProgress.Validation.ErrorMessage = "ÏßÑÌñâÎ•†ÏùÄ 0% ~ 100% ÏÇ¨Ïù¥Îßå ÏûÖÎ†•Ìï† Ïàò ÏûàÏäµÎãàÎã§."
+    rngProgress.Validation.InputTitle = "¡¯«‡∑¸ ¿‘∑¬"
+    rngProgress.Validation.InputMessage = "0% ~ 100% ªÁ¿Ã∑Œ ¿‘∑¬«œººø‰. øπ: 50%"
+    rngProgress.Validation.ErrorTitle = "¿‘∑¬ ø¿∑˘"
+    rngProgress.Validation.ErrorMessage = "¡¯«‡∑¸¿∫ 0% ~ 100% ªÁ¿Ã∏∏ ¿‘∑¬«“ ºˆ ¿÷Ω¿¥œ¥Ÿ."
 
     Set rngManualProgress = ws.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & COL_MANUAL_PROGRESS & lastSheetRow)
 
@@ -990,11 +1045,40 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
 
     rngManualProgress.Validation.IgnoreBlank = True
     rngManualProgress.Validation.InCellDropdown = True
-    rngManualProgress.Validation.InputTitle = "ÏßÑÌñâÎ•† ÏàòÎèô ÏûÖÎ†•"
-    rngManualProgress.Validation.InputMessage = "ÏàòÎèô ÏûÖÎ†• ÌóàÏö©ÏùÄ Y, ÏûêÎèô Í≥ÑÏÇ∞ÏùÄ NÏúºÎ°ú ÏûÖÎ†•ÌïòÏÑ∏Ïöî."
-    rngManualProgress.Validation.ErrorTitle = "ÏûÖÎ†• Ïò§Î•ò"
-    rngManualProgress.Validation.ErrorMessage = "Y ÎòêÎäî NÎßå ÏûÖÎ†•Ìï† Ïàò ÏûàÏäµÎãàÎã§."
+    rngManualProgress.Validation.InputTitle = "¡¯«‡∑¸ ºˆµø ¿‘∑¬"
+    rngManualProgress.Validation.InputMessage = "ºˆµø ¿‘∑¬ «„øÎ¿∫ Y, ¿⁄µø ∞ËªÍ¿∫ N¿∏∑Œ ¿‘∑¬«œººø‰."
+    rngManualProgress.Validation.ErrorTitle = "¿‘∑¬ ø¿∑˘"
+    rngManualProgress.Validation.ErrorMessage = "Y ∂«¥¬ N∏∏ ¿‘∑¬«“ ºˆ ¿÷Ω¿¥œ¥Ÿ."
     
+    Set rngWeeklyReport = ws.Range(COL_WEEKLY_REPORT & DATA_START_ROW & ":" & COL_WEEKLY_REPORT & lastSheetRow)
+    Set rngDevProgress = ws.Range(COL_DEV_PROGRESS & DATA_START_ROW & ":" & COL_DEV_PROGRESS & lastSheetRow)
+
+    On Error Resume Next
+    rngWeeklyReport.Validation.Delete
+    rngDevProgress.Validation.Delete
+    On Error GoTo 0
+
+    rngWeeklyReport.Validation.Add Type:=xlValidateList, _
+                                   AlertStyle:=xlValidAlertStop, _
+                                   Operator:=xlBetween, _
+                                   Formula1:=REPORT_STATUS_PLANNED & "," & REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
+    rngWeeklyReport.Validation.IgnoreBlank = True
+    rngWeeklyReport.Validation.InCellDropdown = True
+    rngWeeklyReport.Validation.InputTitle = "¡÷∞£∫∏∞Ì ªÛ≈¬"
+    rngWeeklyReport.Validation.InputMessage = "Planned, In Progress, Completed∏¶ º±≈√«œººø‰."
+    rngWeeklyReport.Validation.ErrorTitle = "¿‘∑¬ ø¿∑˘"
+    rngWeeklyReport.Validation.ErrorMessage = "Planned, In Progress, Completed∏∏ ¿‘∑¬«“ ºˆ ¿÷Ω¿¥œ¥Ÿ."
+
+    rngDevProgress.Validation.Add Type:=xlValidateList, _
+                                  AlertStyle:=xlValidAlertStop, _
+                                  Operator:=xlBetween, _
+                                  Formula1:=REPORT_STATUS_PLANNED & "," & REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
+    rngDevProgress.Validation.IgnoreBlank = True
+    rngDevProgress.Validation.InCellDropdown = True
+    rngDevProgress.Validation.InputTitle = "∞≥πﬂ¡¯«‡ ªÛ≈¬"
+    rngDevProgress.Validation.InputMessage = "Planned, In Progress, Completed ¡ﬂ ¿⁄µø ∞ËªÍµÀ¥œ¥Ÿ."
+    rngDevProgress.Validation.ErrorTitle = "¿‘∑¬ ø¿∑˘"
+    rngDevProgress.Validation.ErrorMessage = "Planned, In Progress, Completed∏∏ ¿‘∑¬«“ ºˆ ¿÷Ω¿¥œ¥Ÿ."
     ApplyManualStatusValidation ws, lastSheetRow
 End Sub
 
@@ -1010,7 +1094,7 @@ Private Sub ApplyManualStatusValidation(ws As Worksheet, ByVal lastSheetRow As L
     rngManualStatus.Validation.Add Type:=xlValidateList, _
                                    AlertStyle:=xlValidAlertStop, _
                                    Operator:=xlBetween, _
-                                   Formula1:=STATUS_WEEKLY_REPORT & "," & STATUS_DEV_PROGRESS & "," & STATUS_HOLD
+                                   Formula1:=STATUS_HOLD
 
     rngManualStatus.Validation.IgnoreBlank = True
     rngManualStatus.Validation.InCellDropdown = True
@@ -1018,13 +1102,13 @@ End Sub
 
 Private Function GetWeekdayKorShort(ByVal targetDate As Date) As String
     Select Case Weekday(targetDate, vbSunday)
-        Case 1: GetWeekdayKorShort = "Ïùº"
-        Case 2: GetWeekdayKorShort = "Ïõî"
-        Case 3: GetWeekdayKorShort = "Ìôî"
-        Case 4: GetWeekdayKorShort = "Ïàò"
-        Case 5: GetWeekdayKorShort = "Î™©"
-        Case 6: GetWeekdayKorShort = "Í∏à"
-        Case 7: GetWeekdayKorShort = "ÌÜ†"
+        Case 1: GetWeekdayKorShort = "¿œ"
+        Case 2: GetWeekdayKorShort = "ø˘"
+        Case 3: GetWeekdayKorShort = "»≠"
+        Case 4: GetWeekdayKorShort = "ºˆ"
+        Case 5: GetWeekdayKorShort = "∏Ò"
+        Case 6: GetWeekdayKorShort = "±›"
+        Case 7: GetWeekdayKorShort = "≈‰"
     End Select
 End Function
 
@@ -1116,13 +1200,31 @@ Private Function IsTaskDateRangeOverlap(ByVal startValue As Variant, ByVal endVa
 End Function
 
 Private Function IsTaskManualStatus(ws As Worksheet, ByVal rowNum As Long, ByVal statusText As String) As Boolean
-    IsTaskManualStatus = (Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value)) = statusText)
+    Select Case statusText
+        Case STATUS_WEEKLY_REPORT
+            IsTaskManualStatus = HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value)
+        Case STATUS_DEV_PROGRESS
+            IsTaskManualStatus = HasReportStatusValue(ws.Cells(rowNum, COL_DEV_PROGRESS).Value)
+        Case Else
+            IsTaskManualStatus = (Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value)) = statusText)
+    End Select
 End Function
 
 Private Function IsTaskManualStatusEmpty(ws As Worksheet, ByVal rowNum As Long) As Boolean
-    IsTaskManualStatusEmpty = (Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value)) = "")
+    IsTaskManualStatusEmpty = _
+        Not HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value) And _
+        Not HasReportStatusValue(ws.Cells(rowNum, COL_DEV_PROGRESS).Value)
 End Function
 
+Private Function HasReportStatusValue(ByVal statusValue As Variant) As Boolean
+    Dim statusText As String
+
+    statusText = UCase$(Trim$(CStr(statusValue)))
+    HasReportStatusValue = _
+        (statusText = UCase$(REPORT_STATUS_PLANNED) Or _
+         statusText = UCase$(REPORT_STATUS_IN_PROGRESS) Or _
+         statusText = UCase$(REPORT_STATUS_COMPLETED))
+End Function
 Public Sub ShowAllDateColumns(ws As Worksheet)
     Dim startCol As Long
     Dim endCol As Long
@@ -1159,112 +1261,6 @@ Public Sub HideCompletedTaskRows(ws As Worksheet, ByVal lastRow As Long)
     Next r
 End Sub
 
-Public Sub HideIdleDateColumns(ws As Worksheet, ByVal lastRow As Long)
-    Dim holidayDict As Object
-    Dim workdayDict As Object
-    Dim excludeDateDict As Object
-    Dim startCol As Long
-    Dim endCol As Long
-    Dim c As Long
-    Dim seqStartCol As Long
-    Dim seqCount As Long
-    Dim thresholdDays As Long
-    Dim targetDate As Date
-    Dim canHideThisCol As Boolean
-
-    ShowAllDateColumns ws
-    EnsureHolidaySheet
-    LoadHolidaySettings holidayDict, workdayDict
-    LoadExcludedDates excludeDateDict
-    thresholdDays = GetHideIdlePeriodDays()
-
-    startCol = ws.Range(COL_GANTT_START & "1").Column
-    endCol = ws.Cells(GANTT_HEADER_ROW_DATE, ws.Columns.Count).End(xlToLeft).Column
-
-    If endCol < startCol Then Exit Sub
-
-    seqStartCol = 0
-    seqCount = 0
-
-    For c = startCol To endCol
-        If IsDate(ws.Cells(GANTT_HEADER_ROW_DATE, c).Value) Then
-            targetDate = CDate(ws.Cells(GANTT_HEADER_ROW_DATE, c).Value)
-            canHideThisCol = CanHideDateColumn(ws, lastRow, targetDate, holidayDict, workdayDict, excludeDateDict)
-        Else
-            canHideThisCol = False
-        End If
-
-        If canHideThisCol Then
-            If seqStartCol = 0 Then seqStartCol = c
-            seqCount = seqCount + 1
-        Else
-            If seqCount >= thresholdDays Then
-                ws.Range(ws.Cells(1, seqStartCol), ws.Cells(1, c - 1)).EntireColumn.Hidden = True
-            End If
-            seqStartCol = 0
-            seqCount = 0
-        End If
-    Next c
-
-    If seqCount >= thresholdDays Then
-        ws.Range(ws.Cells(1, seqStartCol), ws.Cells(1, endCol)).EntireColumn.Hidden = True
-    End If
-End Sub
-
-Private Function CanHideDateColumn(ws As Worksheet, ByVal lastRow As Long, ByVal targetDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object, ByVal excludeDateDict As Object) As Boolean
-    Dim dateKey As String
-
-    dateKey = NormalizeDateKey(targetDate)
-
-    If excludeDateDict.Exists(dateKey) Then
-        CanHideDateColumn = False
-        Exit Function
-    End If
-
-    CanHideDateColumn = Not HasAnyIncompleteActualTaskOnDate(ws, lastRow, targetDate, holidayDict, workdayDict)
-End Function
-
-Private Function HasAnyIncompleteActualTaskOnDate(ws As Worksheet, ByVal lastRow As Long, ByVal targetDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object) As Boolean
-    Dim r As Long
-    Dim actS As Variant
-    Dim actE As Variant
-    Dim compareEnd As Date
-    Dim statusText As String
-
-    If Not IsWorkingDay(targetDate, holidayDict, workdayDict) Then
-        HasAnyIncompleteActualTaskOnDate = False
-        Exit Function
-    End If
-
-    For r = DATA_START_ROW To lastRow
-        If HasTaskContent(ws, r) Then
-            If Not HasChildTask(ws, r, lastRow) Then
-                statusText = CStr(ws.Cells(r, COL_STATUS).Value)
-
-                If Not IsDoneStatusText(statusText) And statusText <> STATUS_ERROR And statusText <> STATUS_HOLD Then
-                    actS = ws.Cells(r, COL_ACTUAL_START).Value
-                    actE = ws.Cells(r, COL_ACTUAL_END).Value
-
-                    If IsDate(actS) Then
-                        If IsDate(actE) Then
-                            compareEnd = CDate(actE)
-                        Else
-                            compareEnd = Date
-                        End If
-
-                        If CDate(actS) <= targetDate And compareEnd >= targetDate Then
-                            HasAnyIncompleteActualTaskOnDate = True
-                            Exit Function
-                        End If
-                    End If
-                End If
-            End If
-        End If
-    Next r
-
-    HasAnyIncompleteActualTaskOnDate = False
-End Function
-
 Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Long)
     Dim normalProgressCol As Long
     Dim planDaysCol As Long
@@ -1276,10 +1272,10 @@ Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Lo
 
     ws.Range(ws.Cells(DATA_START_ROW, ws.Range(COL_NO & "1").Column), ws.Cells(ws.Rows.Count, ws.Range(COL_NO & "1").Column)).Locked = True
 
-    normalProgressCol = FindHeaderColumnByName(ws, "Ï†ïÏÉÅ ÏßÑÌñâÎ•†")
-    planDaysCol = FindHeaderColumnByName(ws, "Í≥ÑÌöçÏùºÏàò")
-    actualDaysCol = FindHeaderColumnByName(ws, "Ïã§ÏÜåÏöîÏùºÏàò")
-    statusCol = FindHeaderColumnByName(ws, "ÏÉÅÌÉú")
+    normalProgressCol = FindHeaderColumnByName(ws, "¡§ªÛ ¡¯«‡∑¸")
+    planDaysCol = FindHeaderColumnByName(ws, "∞Ë»π¿œºˆ")
+    actualDaysCol = FindHeaderColumnByName(ws, "Ω«º“ø‰¿œºˆ")
+    statusCol = FindHeaderColumnByName(ws, "ªÛ≈¬")
 
     If normalProgressCol > 0 Then
         ws.Range(ws.Cells(DATA_START_ROW, normalProgressCol), ws.Cells(ws.Rows.Count, normalProgressCol)).Locked = True
@@ -1309,7 +1305,12 @@ Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Lo
     ws.Unprotect
     On Error GoTo 0
 
-    ws.Protect DrawingObjects:=False, Contents:=True, Scenarios:=True, UserInterfaceOnly:=True
+    ws.Rows("1:" & HEADER_ROW).Locked = True
+    ws.Rows(DATA_START_ROW & ":" & ws.Rows.Count).Locked = False
+
+    ws.Protect DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+               UserInterfaceOnly:=True, AllowFiltering:=True, _
+               AllowInsertingRows:=True, AllowDeletingRows:=True
 End Sub
 
 Public Sub UnprotectTaskSheet(ws As Worksheet)
