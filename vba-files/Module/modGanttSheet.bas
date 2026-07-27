@@ -278,6 +278,7 @@ Public Sub UpdateDevelopmentProgressStatuses(ByVal ws As Worksheet, _
     Dim r As Long
     Dim statusText As String
     Dim actualStart As Variant
+    Dim actualEnd As Variant
 
     If lastRow < DATA_START_ROW Then Exit Sub
 
@@ -290,16 +291,21 @@ Public Sub UpdateDevelopmentProgressStatuses(ByVal ws As Worksheet, _
             End If
 
             actualStart = ws.Cells(r, COL_ACTUAL_START).Value
+            actualEnd = ws.Cells(r, COL_ACTUAL_END).Value
 
-            If IsDoneStatusText(statusText) Then
+            If IsDate(actualEnd) And CLng(CDate(actualEnd)) <= CLng(Date) Then
                 ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_COMPLETED
-            ElseIf IsDate(actualStart) Then
+                ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_COMPLETED
+            ElseIf IsDate(actualStart) And CLng(CDate(actualStart)) <= CLng(Date) Then
                 ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_IN_PROGRESS
+                ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_IN_PROGRESS
             Else
                 ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_PLANNED
+                ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_PLANNED
             End If
         Else
             ws.Cells(r, COL_DEV_PROGRESS).ClearContents
+            ws.Cells(r, COL_WEEKLY_REPORT).ClearContents
         End If
     Next r
 End Sub
@@ -607,6 +613,7 @@ Private Sub SetDurationValues(ws As Worksheet, ByVal rowNum As Long, ByVal holid
     Dim planDays As Variant
     Dim actualDays As Variant
     Dim actualStart As Variant
+    Dim actualEnd As Variant
     Dim actualEnd As Variant
     Dim compareEnd As Date
 
@@ -1054,13 +1061,13 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     rngWeeklyReport.Validation.Add Type:=xlValidateList, _
                                    AlertStyle:=xlValidAlertStop, _
                                    Operator:=xlBetween, _
-                                   Formula1:=REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
+                                   Formula1:=REPORT_STATUS_PLANNED & "," & REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
     rngWeeklyReport.Validation.IgnoreBlank = True
     rngWeeklyReport.Validation.InCellDropdown = True
     rngWeeklyReport.Validation.InputTitle = "주간보고 상태"
-    rngWeeklyReport.Validation.InputMessage = "In Progress 또는 Completed를 선택하세요."
+    rngWeeklyReport.Validation.InputMessage = "Planned, In Progress, Completed를 선택하세요."
     rngWeeklyReport.Validation.ErrorTitle = "입력 오류"
-    rngWeeklyReport.Validation.ErrorMessage = "In Progress 또는 Completed만 입력할 수 있습니다."
+    rngWeeklyReport.Validation.ErrorMessage = "Planned, In Progress, Completed만 입력할 수 있습니다."
 
     rngDevProgress.Validation.Add Type:=xlValidateList, _
                                   AlertStyle:=xlValidAlertStop, _
