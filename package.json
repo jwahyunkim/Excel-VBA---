@@ -3,6 +3,14 @@
     "version": "1.0.0",
     "description": "A XVBA App",
     "main": "index.js",
+    "scripts": {
+        "workflow": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1",
+        "version:start": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action StartVersion",
+        "branch:create": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action CreateBranch",
+        "branch:merge": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action MergeBranch",
+        "version:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action Release",
+        "workflow:status": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action Status"
+    },
     "author": "LocalSmart",
     "license": "ISC",
     "dependencies": {
