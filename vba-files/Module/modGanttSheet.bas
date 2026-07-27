@@ -614,7 +614,6 @@ Private Sub SetDurationValues(ws As Worksheet, ByVal rowNum As Long, ByVal holid
     Dim actualDays As Variant
     Dim actualStart As Variant
     Dim actualEnd As Variant
-    Dim actualEnd As Variant
     Dim compareEnd As Date
 
     planDays = CountWorkingDaysInclusive(ws.Cells(rowNum, COL_PLAN_START).Value, ws.Cells(rowNum, COL_PLAN_END).Value, holidayDict, workdayDict)
