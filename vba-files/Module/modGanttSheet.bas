@@ -6,7 +6,9 @@ Public Sub SetupDataHeaders(ws As Worksheet)
 
     ws.Cells(HEADER_ROW, COL_NO).Value = "No."
     ws.Cells(HEADER_ROW, COL_LEVEL).Value = "Level"
+    ws.Cells(HEADER_ROW, COL_MODULE).Value = "모듈"
     ws.Cells(HEADER_ROW, COL_TASK).Value = "내용"
+    ws.Cells(HEADER_ROW, COL_OWNER).Value = "담당"
     ws.Cells(HEADER_ROW, COL_NOTE).Value = "비고"
     ws.Cells(HEADER_ROW, COL_PLAN_START).Value = "계획 시작일"
     ws.Cells(HEADER_ROW, COL_PLAN_END).Value = "계획 종료일"
@@ -72,6 +74,19 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_NO).Value)) <> "No." Then
         ws.Columns(COL_NO).Insert Shift:=xlToRight
     End If
+
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MODULE).Value)) <> "모듈" Then
+        ws.Columns(COL_MODULE).Insert Shift:=xlToRight
+    End If
+
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_OWNER).Value)) <> "담당" Then
+        ws.Columns(COL_OWNER).Insert Shift:=xlToRight
+    End If
+
+    ' A newly inserted module column can inherit Level validation from its left.
+    On Error Resume Next
+    ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & ws.Rows.Count).Validation.Delete
+    On Error GoTo 0
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" And _
        Trim$(CStr(ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value)) <> "개발진행" Then
@@ -929,7 +944,9 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_NO).ColumnWidth = 6
     ws.Columns(COL_LEVEL).ColumnWidth = 7
     ws.Columns(COL_TASK).WrapText = False
+    ws.Columns(COL_MODULE).ColumnWidth = 14
     ws.Columns(COL_TASK).AutoFit
+    ws.Columns(COL_OWNER).ColumnWidth = 12
     ws.Columns(COL_NOTE).ColumnWidth = 4.5
     ws.Columns(COL_PLAN_START).ColumnWidth = 11
     ws.Columns(COL_PLAN_END).ColumnWidth = 11
@@ -959,6 +976,8 @@ End Sub
 Public Sub ApplyTaskInputValidation(ws As Worksheet)
     Dim lastSheetRow As Long
     Dim rngDate As Range
+    Dim rngModule As Range
+    Dim rngTask As Range
     Dim rngLevel As Range
     Dim rngProgress As Range
     Dim rngManualProgress As Range
@@ -966,6 +985,26 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     Dim rngDevProgress As Range
     
     lastSheetRow = ws.Rows.Count
+
+    Set rngModule = ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & lastSheetRow)
+    On Error Resume Next
+    rngModule.Validation.Delete
+    On Error GoTo 0
+
+    Set rngTask = ws.Range(COL_TASK & DATA_START_ROW & ":" & COL_TASK & lastSheetRow)
+    On Error Resume Next
+    rngTask.Validation.Delete
+    On Error GoTo 0
+
+    rngTask.Validation.Add Type:=xlValidateTextLength, _
+                           AlertStyle:=xlValidAlertStop, _
+                           Operator:=xlLessEqual, _
+                           Formula1:="30"
+    rngTask.Validation.IgnoreBlank = True
+    rngTask.Validation.InputTitle = "내용 입력"
+    rngTask.Validation.InputMessage = "내용은 30자 이내로 입력하세요."
+    rngTask.Validation.ErrorTitle = "입력 오류"
+    rngTask.Validation.ErrorMessage = "내용은 최대 30자까지 입력할 수 있습니다."
     
     Set rngDate = Union( _
         ws.Range(COL_PLAN_START & DATA_START_ROW & ":" & COL_PLAN_START & lastSheetRow), _

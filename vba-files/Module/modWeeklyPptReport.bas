@@ -1,4 +1,4 @@
-Attribute VB_Name = "modWeeklyPptReport"
+﻿Attribute VB_Name = "modWeeklyPptReport"
 Option Explicit
 
 Private Const WEEKLY_PPT_TEMPLATE_SHEET_NAME As String = "WeeklyPptTemplate"
@@ -10,45 +10,6 @@ Private Const PPT_SAVE_AS_OPEN_XML_PRESENTATION As Long = 24
 Public Sub 주간보고PPT_생성()
     Call GenerateWeeklyPptReport(True)
 End Sub
-
-Public Function WeeklyPptReportSelfTest() As String
-    Dim ws As Worksheet
-    Dim holidayDict As Object
-    Dim workdayDict As Object
-    Dim lastRow As Long
-    Dim r As Long
-    Dim inProgressCount As Long
-    Dim completedCount As Long
-    Dim plannedCount As Long
-    Dim statusText As String
-
-    Set ws = ActiveSheet
-    lastRow = GetLastDataRow(ws)
-    LoadHolidaySettings holidayDict, workdayDict
-    UpdateDevelopmentProgressStatuses ws, lastRow, holidayDict, workdayDict
-
-    For r = DATA_START_ROW To lastRow
-        If HasTaskContent(ws, r) Then
-            If Not HasChildTask(ws, r, lastRow) Then
-                statusText = UCase$(Trim$(CStr(ws.Cells(r, COL_DEV_PROGRESS).Value2)))
-
-                Select Case statusText
-                    Case UCase$(REPORT_STATUS_IN_PROGRESS)
-                        inProgressCount = inProgressCount + 1
-                    Case UCase$(REPORT_STATUS_COMPLETED)
-                        completedCount = completedCount + 1
-                    Case UCase$(REPORT_STATUS_PLANNED)
-                        plannedCount = plannedCount + 1
-                End Select
-            End If
-        End If
-    Next r
-
-    WeeklyPptReportSelfTest = _
-        "In Progress=" & CStr(inProgressCount) & _
-        "; Completed=" & CStr(completedCount) & _
-        "; Planned=" & CStr(plannedCount)
-End Function
 
 Public Sub 주간보고PPT_버튼_생성()
     Dim ws As Worksheet
@@ -142,6 +103,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim currentDates As Collection
     Dim currentLevels As Collection
     Dim plannedItems As Collection
+    Dim currentRows As Collection
+    Dim plannedRows As Collection
     Dim reportFriday As Date
     Dim currentWeekStart As Date
     Dim currentWeekEnd As Date
@@ -154,6 +117,9 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim r As Long
     Dim statusText As String
     Dim taskText As String
+    Dim moduleText As String
+    Dim ownerText As String
+    Dim useLegacyLayout As Boolean
     Dim pptApp As Object
     Dim presentation As Object
     Dim slide As Object
@@ -183,6 +149,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Set currentDates = New Collection
     Set currentLevels = New Collection
     Set plannedItems = New Collection
+    Set currentRows = New Collection
+    Set plannedRows = New Collection
 
     lastRow = GetLastDataRow(ws)
     LoadHolidaySettings holidayDict, workdayDict
@@ -190,31 +158,44 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
 
     For r = DATA_START_ROW To lastRow
         If HasTaskContent(ws, r) Then
-            statusText = Trim$(CStr(ws.Cells(r, COL_DEV_PROGRESS).Value2))
+            statusText = Trim$(CStr(ws.Cells(r, COL_WEEKLY_REPORT).Value2))
             taskText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_TASK).Value2))
+            moduleText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_MODULE).Value2))
+            ownerText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_OWNER).Value2))
+            useLegacyLayout = (Len(moduleText) = 0 Or Len(ownerText) = 0)
 
             If Len(taskText) > 0 Then
                 Select Case UCase$(statusText)
                     Case UCase$(REPORT_STATUS_IN_PROGRESS)
-                        currentItems.Add taskText
-                        currentDates.Add BuildInProgressEndDateText(ws.Cells(r, COL_PLAN_END).Value)
-                        currentLevels.Add GetTaskLevel(ws, r)
+                        AddSortedWeeklyRow currentRows, Array( _
+                            moduleText, _
+                            taskText, 2, GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty), _
+                            BuildInProgressEndDateText(ws.Cells(r, COL_PLAN_END).Value), _
+                            useLegacyLayout, GetTaskLevel(ws, r))
 
                     Case UCase$(REPORT_STATUS_COMPLETED)
                         If IsCompletedInReportWeek(ws, r, currentWeekStart, currentWeekEnd) Then
-                            currentItems.Add taskText
-                            currentDates.Add BuildCompletedEndDateText(ws, r)
-                            currentLevels.Add GetTaskLevel(ws, r)
+                            AddSortedWeeklyRow currentRows, Array( _
+                                moduleText, _
+                                taskText, 1, GetWeeklySortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value), _
+                                BuildCompletedEndDateText(ws, r), _
+                                useLegacyLayout, GetTaskLevel(ws, r))
                         End If
 
                     Case UCase$(REPORT_STATUS_PLANNED)
                         If IsPlannedForNextWeek(ws, r, nextWeekStart, nextWeekEnd) Then
-                            plannedItems.Add taskText
+                            AddSortedWeeklyRow plannedRows, Array( _
+                                moduleText, _
+                                taskText, 3, GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty), "", _
+                                useLegacyLayout, GetTaskLevel(ws, r))
                         End If
                 End Select
             End If
         End If
     Next r
+
+    BuildWeeklyGroupedCurrentItems currentRows, currentItems, currentDates, currentLevels
+    BuildWeeklyGroupedPlanItems plannedRows, plannedItems
 
     outputFolder = ThisWorkbook.Path & Application.PathSeparator & WEEKLY_PPT_OUTPUT_FOLDER
     If Len(Dir$(outputFolder, vbDirectory)) = 0 Then MkDir outputFolder
@@ -258,8 +239,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     If showCompletionMessage Then
         MsgBox "주간보고 PPT 생성 완료" & vbCrLf & _
                "보고 기준일: " & Format$(reportFriday, "yyyy-mm-dd") & vbCrLf & _
-               "업무 현황: " & currentItems.Count & "개" & vbCrLf & _
-               "개발 계획: " & plannedItems.Count & "개" & vbCrLf & vbCrLf & _
+               "업무 현황: " & currentRows.Count & "개" & vbCrLf & _
+               "개발 계획: " & plannedRows.Count & "개" & vbCrLf & vbCrLf & _
                outputPath, vbInformation
     End If
     Exit Function
@@ -281,6 +262,113 @@ EH:
         Err.Raise errNumber, "GenerateWeeklyPptReport", errDescription
     End If
 End Function
+
+Private Function GetWeeklySortDate(ByVal primaryDate As Variant, _
+                                   ByVal fallbackDate As Variant) As Double
+    If IsDate(primaryDate) Then
+        GetWeeklySortDate = CDbl(CDate(primaryDate))
+    ElseIf IsDate(fallbackDate) Then
+        GetWeeklySortDate = CDbl(CDate(fallbackDate))
+    Else
+        GetWeeklySortDate = CDbl(DateSerial(9999, 12, 31))
+    End If
+End Function
+
+Private Sub AddSortedWeeklyRow(ByVal rows As Collection, ByVal newRow As Variant)
+    Dim i As Long
+    Dim existingRow As Variant
+
+    For i = 1 To rows.Count
+        existingRow = rows(i)
+        If CLng(newRow(2)) < CLng(existingRow(2)) Or _
+           (CLng(newRow(2)) = CLng(existingRow(2)) And _
+            CDbl(newRow(3)) < CDbl(existingRow(3))) Then
+            rows.Add newRow, Before:=i
+            Exit Sub
+        End If
+    Next i
+
+    rows.Add newRow
+End Sub
+
+Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
+                                           ByVal items As Collection, _
+                                           ByVal dates As Collection, _
+                                           ByVal levels As Collection)
+    Dim moduleNames As Collection
+    Dim moduleSeen As Object
+    Dim rowItem As Variant
+    Dim moduleName As Variant
+
+    Set moduleNames = New Collection
+    Set moduleSeen = CreateObject("Scripting.Dictionary")
+    moduleSeen.CompareMode = vbTextCompare
+
+    For Each rowItem In rows
+        If Not CBool(rowItem(5)) And Not moduleSeen.Exists(CStr(rowItem(0))) Then
+            moduleSeen.Add CStr(rowItem(0)), True
+            moduleNames.Add CStr(rowItem(0))
+        End If
+    Next rowItem
+
+    For Each moduleName In moduleNames
+        items.Add CStr(moduleName)
+        dates.Add ""
+        levels.Add 1
+
+        For Each rowItem In rows
+            If Not CBool(rowItem(5)) And _
+               StrComp(CStr(rowItem(0)), CStr(moduleName), vbTextCompare) = 0 Then
+                items.Add CStr(rowItem(1))
+                dates.Add CStr(rowItem(4))
+                levels.Add 2
+            End If
+        Next rowItem
+    Next moduleName
+
+    For Each rowItem In rows
+        If CBool(rowItem(5)) Then
+            items.Add CStr(rowItem(1))
+            dates.Add CStr(rowItem(4))
+            levels.Add CLng(rowItem(6))
+        End If
+    Next rowItem
+End Sub
+
+Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
+                                        ByVal items As Collection)
+    Dim moduleNames As Collection
+    Dim moduleSeen As Object
+    Dim rowItem As Variant
+    Dim moduleName As Variant
+    Dim blockText As String
+
+    Set moduleNames = New Collection
+    Set moduleSeen = CreateObject("Scripting.Dictionary")
+    moduleSeen.CompareMode = vbTextCompare
+
+    For Each rowItem In rows
+        If Not CBool(rowItem(5)) And Not moduleSeen.Exists(CStr(rowItem(0))) Then
+            moduleSeen.Add CStr(rowItem(0)), True
+            moduleNames.Add CStr(rowItem(0))
+        End If
+    Next rowItem
+
+    For Each moduleName In moduleNames
+        blockText = CStr(moduleName)
+        For Each rowItem In rows
+            If Not CBool(rowItem(5)) And _
+               StrComp(CStr(rowItem(0)), CStr(moduleName), vbTextCompare) = 0 Then
+                blockText = blockText & ChrW(11) & "    " & ChrW(&H2022) & " " & CStr(rowItem(1))
+            End If
+        Next rowItem
+        items.Add blockText
+    Next moduleName
+
+    For Each rowItem In rows
+        If CBool(rowItem(5)) Then items.Add CStr(rowItem(1))
+    Next rowItem
+End Sub
 
 Private Function GetWeeklyReportFriday(ByVal targetDate As Date) As Date
     Dim weekdayNumber As Long

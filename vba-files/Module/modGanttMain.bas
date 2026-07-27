@@ -641,9 +641,16 @@ Private Sub NormalizeGanttPptArtifactNames(ByVal ws As Worksheet)
 End Sub
 
 Private Function IsGanttPptShape(ByVal shp As Shape) As Boolean
-    IsGanttPptShape = (Left$(shp.Name, Len("shpGanttPpt_")) = "shpGanttPpt_" Or _
-                       Left$(shp.Name, Len("tmpGanttPptShape_")) = "tmpGanttPptShape_" Or _
-                       shp.OnAction = "칸트차트_PPT개체열기")
+    If Left$(shp.Name, Len("shpGanttPpt_")) = "shpGanttPpt_" Or _
+       Left$(shp.Name, Len("tmpGanttPptShape_")) = "tmpGanttPptShape_" Then
+        IsGanttPptShape = True
+        Exit Function
+    End If
+
+    ' Some embedded/OLE shapes raise error 1004 when OnAction is queried.
+    On Error Resume Next
+    IsGanttPptShape = (CStr(shp.OnAction) = "칸트차트_PPT개체열기")
+    On Error GoTo 0
 End Function
 
 Private Function IsGanttPptOleObject(ByVal oleObj As OLEObject) As Boolean

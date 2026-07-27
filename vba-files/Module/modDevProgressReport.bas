@@ -14,9 +14,7 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
     Dim previousStatusDict As Object
     Dim holidayDict As Object
     Dim workdayDict As Object
-    Dim completedItems As Collection
-    Dim inProgressItems As Collection
-    Dim plannedItems As Collection
+    Dim reportItems As Collection
     Dim snapshots As Collection
     Dim reportDate As Date
     Dim previousReportDate As Variant
@@ -25,6 +23,13 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
     Dim statusText As String
     Dim taskText As String
     Dim taskKey As String
+    Dim moduleText As String
+    Dim ownerText As String
+    Dim useLegacyLayout As Boolean
+    Dim sortDate As Double
+    Dim completedCount As Long
+    Dim inProgressCount As Long
+    Dim plannedCount As Long
     Dim reportText As String
     Dim reportPath As String
     Dim snapshot As Variant
@@ -52,9 +57,7 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
     previousStatusDict.CompareMode = vbTextCompare
     LoadPreviousStatuses historyWs, ws.Name, previousReportDate, previousStatusDict
 
-    Set completedItems = New Collection
-    Set inProgressItems = New Collection
-    Set plannedItems = New Collection
+    Set reportItems = New Collection
     Set snapshots = New Collection
 
     lastRow = GetLastDataRow(ws)
@@ -70,21 +73,32 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
                    StrComp(statusText, REPORT_STATUS_IN_PROGRESS, vbTextCompare) = 0 Or _
                    StrComp(statusText, REPORT_STATUS_COMPLETED, vbTextCompare) = 0 Then
                     taskText = CleanReportTaskText(CStr(ws.Cells(r, COL_TASK).Value2))
+                    moduleText = CleanReportTaskText(CStr(ws.Cells(r, COL_MODULE).Value2))
+                    ownerText = CleanReportTaskText(CStr(ws.Cells(r, COL_OWNER).Value2))
+                    useLegacyLayout = (Len(moduleText) = 0 Or Len(ownerText) = 0)
                     taskKey = BuildReportTaskKey(ws, r, taskText)
 
                     If StrComp(statusText, REPORT_STATUS_COMPLETED, vbTextCompare) = 0 Then
                         statusText = REPORT_STATUS_COMPLETED
                         If Not previousStatusDict.Exists(taskKey) Then
-                            completedItems.Add taskText
+                            sortDate = GetReportSortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value)
+                            AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, useLegacyLayout)
+                            completedCount = completedCount + 1
                         ElseIf StrComp(CStr(previousStatusDict(taskKey)), REPORT_STATUS_COMPLETED, vbTextCompare) <> 0 Then
-                            completedItems.Add taskText
+                            sortDate = GetReportSortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value)
+                            AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, useLegacyLayout)
+                            completedCount = completedCount + 1
                         End If
                     ElseIf StrComp(statusText, REPORT_STATUS_IN_PROGRESS, vbTextCompare) = 0 Then
                         statusText = REPORT_STATUS_IN_PROGRESS
-                        inProgressItems.Add taskText
+                        sortDate = GetReportSortDate(ws.Cells(r, COL_PLAN_END).Value, Empty)
+                        AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, useLegacyLayout)
+                        inProgressCount = inProgressCount + 1
                     Else
                         statusText = REPORT_STATUS_PLANNED
-                        plannedItems.Add taskText
+                        sortDate = GetReportSortDate(ws.Cells(r, COL_PLAN_END).Value, Empty)
+                        AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, useLegacyLayout)
+                        plannedCount = plannedCount + 1
                     End If
 
                     snapshots.Add Array( _
@@ -102,7 +116,7 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
         End If
     Next r
 
-    reportText = BuildDevProgressReportText(reportDate, previousReportDate, completedItems, inProgressItems, plannedItems)
+    reportText = BuildDevProgressReportText(reportDate, previousReportDate, reportItems)
     reportPath = ThisWorkbook.Path & Application.PathSeparator & _
                  "개발진행보고_" & Format$(reportDate, "yyyy-mm-dd") & ".txt"
 
@@ -119,9 +133,9 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
     If showCompletionMessage Then
         MsgBox "개발 진행 보고 생성 완료" & vbCrLf & _
                "보고 기준일: " & Format$(reportDate, "yyyy-mm-dd") & vbCrLf & _
-               "완료 건: " & completedItems.Count & "개" & vbCrLf & _
-               "진행 중: " & inProgressItems.Count & "개" & vbCrLf & _
-               "예정: " & plannedItems.Count & "개" & vbCrLf & vbCrLf & _
+               "완료 건: " & completedCount & "개" & vbCrLf & _
+               "진행 중: " & inProgressCount & "개" & vbCrLf & _
+               "예정: " & plannedCount & "개" & vbCrLf & vbCrLf & _
                reportPath, vbInformation
     End If
     Exit Function
@@ -254,6 +268,48 @@ Private Function BuildReportTaskKey(ByVal ws As Worksheet, _
     BuildReportTaskKey = UCase$(Trim$(taskText)) & "|" & planStartKey
 End Function
 
+Private Function GetReportSortDate(ByVal primaryDate As Variant, _
+                                   ByVal fallbackDate As Variant) As Double
+    If IsDate(primaryDate) Then
+        GetReportSortDate = CDbl(CDate(primaryDate))
+    ElseIf IsDate(fallbackDate) Then
+        GetReportSortDate = CDbl(CDate(fallbackDate))
+    Else
+        GetReportSortDate = CDbl(DateSerial(9999, 12, 31))
+    End If
+End Function
+
+Private Function GetReportStatusRank(ByVal statusText As String) As Long
+    If StrComp(statusText, REPORT_STATUS_COMPLETED, vbTextCompare) = 0 Then
+        GetReportStatusRank = 1
+    ElseIf StrComp(statusText, REPORT_STATUS_IN_PROGRESS, vbTextCompare) = 0 Then
+        GetReportStatusRank = 2
+    Else
+        GetReportStatusRank = 3
+    End If
+End Function
+
+Private Sub AddSortedDevReportItem(ByVal items As Collection, ByVal newItem As Variant)
+    Dim i As Long
+    Dim existingItem As Variant
+    Dim newRank As Long
+    Dim existingRank As Long
+
+    newRank = GetReportStatusRank(CStr(newItem(3)))
+    For i = 1 To items.Count
+        existingItem = items(i)
+        existingRank = GetReportStatusRank(CStr(existingItem(3)))
+
+        If newRank < existingRank Or _
+           (newRank = existingRank And CDbl(newItem(4)) < CDbl(existingItem(4))) Then
+            items.Add newItem, Before:=i
+            Exit Sub
+        End If
+    Next i
+
+    items.Add newItem
+End Sub
+
 Private Function CleanReportTaskText(ByVal taskText As String) As String
     taskText = Replace$(taskText, vbCr, " ")
     taskText = Replace$(taskText, vbLf, " ")
@@ -268,44 +324,129 @@ End Function
 
 Private Function BuildDevProgressReportText(ByVal reportDate As Date, _
                                             ByVal previousReportDate As Variant, _
-                                            ByVal completedItems As Collection, _
-                                            ByVal inProgressItems As Collection, _
-                                            ByVal plannedItems As Collection) As String
+                                            ByVal reportItems As Collection) As String
     Dim textValue As String
     Dim item As Variant
+    Dim moduleNames As Collection
+    Dim ownerNames As Collection
+    Dim moduleSeen As Object
+    Dim ownerSeen As Object
+    Dim moduleName As Variant
+    Dim moduleIndex As Long
+    Dim hasGroupedItems As Boolean
+    Dim hasLegacyItems As Boolean
 
-    textValue = "개발 진행 보고" & vbCrLf
-    textValue = textValue & "보고 기준일: " & Format$(reportDate, "yyyy-mm-dd") & " (" & GetKoreanWeekdayName(reportDate) & ")" & vbCrLf
+    For Each item In reportItems
+        If CBool(item(5)) Then
+            hasLegacyItems = True
+        Else
+            hasGroupedItems = True
+        End If
+    Next item
 
-    If IsDate(previousReportDate) Then
-        textValue = textValue & "비교 기준: " & Format$(CDate(previousReportDate), "yyyy-mm-dd") & " 이후" & vbCrLf
+    If hasGroupedItems Then
+        textValue = Format$(reportDate, "yyyy-mm-dd") & " 개발 진행 현황입니다." & vbCrLf & vbCrLf
     Else
-        textValue = textValue & "비교 기준: 최초 보고" & vbCrLf
+        textValue = BuildLegacyReportHeader(reportDate, previousReportDate)
     End If
 
-    textValue = textValue & vbCrLf & "완료 건" & vbCrLf & vbCrLf
-    AppendReportCollection textValue, completedItems
+    If reportItems.Count = 0 Then
+        textValue = textValue & "보고 내역이 없습니다." & vbCrLf
+    Else
+        Set moduleNames = New Collection
+        Set moduleSeen = CreateObject("Scripting.Dictionary")
+        moduleSeen.CompareMode = vbTextCompare
 
-    textValue = textValue & vbCrLf & "진행 중" & vbCrLf & vbCrLf
-    AppendReportCollection textValue, inProgressItems
+        For Each item In reportItems
+            If Not CBool(item(5)) And Not moduleSeen.Exists(CStr(item(0))) Then
+                moduleSeen.Add CStr(item(0)), True
+                moduleNames.Add CStr(item(0))
+            End If
+        Next item
 
-    textValue = textValue & vbCrLf & "예정" & vbCrLf & vbCrLf
-    AppendReportCollection textValue, plannedItems
+        moduleIndex = 0
+        For Each moduleName In moduleNames
+            moduleIndex = moduleIndex + 1
+            Set ownerNames = New Collection
+            Set ownerSeen = CreateObject("Scripting.Dictionary")
+            ownerSeen.CompareMode = vbTextCompare
+
+            For Each item In reportItems
+                If Not CBool(item(5)) And _
+                   StrComp(CStr(item(0)), CStr(moduleName), vbTextCompare) = 0 Then
+                    If Not ownerSeen.Exists(CStr(item(1))) Then
+                        ownerSeen.Add CStr(item(1)), True
+                        ownerNames.Add CStr(item(1))
+                    End If
+                End If
+            Next item
+
+            textValue = textValue & GetCircledReportNumber(moduleIndex) & "     " & _
+                        CStr(moduleName) & " (" & JoinReportText(ownerNames, ", ") & ")" & vbCrLf
+
+            For Each item In reportItems
+                If Not CBool(item(5)) And _
+                   StrComp(CStr(item(0)), CStr(moduleName), vbTextCompare) = 0 Then
+                    textValue = textValue & "     -     " & CStr(item(2)) & _
+                                " (" & CStr(item(1)) & "): " & _
+                                GetReportStatusLabel(CStr(item(3))) & _
+                                BuildPlannedDateSuffix(CStr(item(3)), CDbl(item(4))) & vbCrLf
+                End If
+            Next item
+            textValue = textValue & vbCrLf
+        Next moduleName
+
+        If hasLegacyItems Then AppendLegacyReportItems textValue, reportItems
+    End If
 
     BuildDevProgressReportText = textValue
 End Function
 
-Private Sub AppendReportCollection(ByRef textValue As String, ByVal items As Collection)
-    Dim item As Variant
+Private Function BuildLegacyReportHeader(ByVal reportDate As Date, _
+                                         ByVal previousReportDate As Variant) As String
+    Dim textValue As String
 
-    If items.Count = 0 Then
-        textValue = textValue & ChrW(&H2022) & " 없음" & vbCrLf
+    textValue = "개발 진행 보고" & vbCrLf
+    textValue = textValue & "보고 기준일: " & Format$(reportDate, "yyyy-mm-dd") & _
+                " (" & GetKoreanWeekdayName(reportDate) & ")" & vbCrLf
+
+    If IsDate(previousReportDate) Then
+        textValue = textValue & "비교 기준: " & _
+                    Format$(CDate(previousReportDate), "yyyy-mm-dd") & " 이후" & vbCrLf
     Else
-        For Each item In items
-            textValue = textValue & ChrW(&H2022) & " " & CStr(item) & vbCrLf
-        Next item
+        textValue = textValue & "비교 기준: 최초 보고" & vbCrLf
     End If
+
+    BuildLegacyReportHeader = textValue & vbCrLf
+End Function
+
+Private Sub AppendLegacyReportItems(ByRef textValue As String, _
+                                    ByVal reportItems As Collection)
+    AppendLegacyStatusSection textValue, reportItems, REPORT_STATUS_COMPLETED, "완료 건"
+    AppendLegacyStatusSection textValue, reportItems, REPORT_STATUS_IN_PROGRESS, "진행 중"
+    AppendLegacyStatusSection textValue, reportItems, REPORT_STATUS_PLANNED, "예정"
 End Sub
+
+Private Sub AppendLegacyStatusSection(ByRef textValue As String, _
+                                      ByVal reportItems As Collection, _
+                                      ByVal targetStatus As String, _
+                                      ByVal sectionTitle As String)
+    Dim item As Variant
+    Dim itemCount As Long
+
+    textValue = textValue & sectionTitle & vbCrLf & vbCrLf
+    For Each item In reportItems
+        If CBool(item(5)) And _
+           StrComp(CStr(item(3)), targetStatus, vbTextCompare) = 0 Then
+            textValue = textValue & ChrW(&H2022) & " " & CStr(item(2)) & vbCrLf
+            itemCount = itemCount + 1
+        End If
+    Next item
+
+    If itemCount = 0 Then textValue = textValue & ChrW(&H2022) & " 없음" & vbCrLf
+    textValue = textValue & vbCrLf
+End Sub
+
 Private Function GetKoreanWeekdayName(ByVal targetDate As Date) As String
     Select Case Weekday(targetDate, vbSunday)
         Case vbSunday: GetKoreanWeekdayName = "일요일"
@@ -316,6 +457,44 @@ Private Function GetKoreanWeekdayName(ByVal targetDate As Date) As String
         Case vbFriday: GetKoreanWeekdayName = "금요일"
         Case vbSaturday: GetKoreanWeekdayName = "토요일"
     End Select
+End Function
+
+Private Function GetCircledReportNumber(ByVal indexValue As Long) As String
+    If indexValue >= 1 And indexValue <= 20 Then
+        GetCircledReportNumber = ChrW(&H2460 + indexValue - 1)
+    Else
+        GetCircledReportNumber = CStr(indexValue) & "."
+    End If
+End Function
+
+Private Function JoinReportText(ByVal items As Collection, _
+                                ByVal delimiter As String) As String
+    Dim item As Variant
+    Dim result As String
+
+    For Each item In items
+        If Len(result) > 0 Then result = result & delimiter
+        result = result & CStr(item)
+    Next item
+
+    JoinReportText = result
+End Function
+
+Private Function GetReportStatusLabel(ByVal statusText As String) As String
+    If StrComp(statusText, REPORT_STATUS_COMPLETED, vbTextCompare) = 0 Then
+        GetReportStatusLabel = "완료"
+    ElseIf StrComp(statusText, REPORT_STATUS_IN_PROGRESS, vbTextCompare) = 0 Then
+        GetReportStatusLabel = "진행중"
+    Else
+        GetReportStatusLabel = "예정"
+    End If
+End Function
+
+Private Function BuildPlannedDateSuffix(ByVal statusText As String, _
+                                        ByVal sortDate As Double) As String
+    If StrComp(statusText, REPORT_STATUS_PLANNED, vbTextCompare) <> 0 Then Exit Function
+    If sortDate >= CDbl(DateSerial(9999, 12, 31)) Then Exit Function
+    BuildPlannedDateSuffix = " (" & Format$(CDate(sortDate), "mm/dd") & ")"
 End Function
 
 Private Sub WriteUtf8TextFile(ByVal filePath As String, ByVal textValue As String)
