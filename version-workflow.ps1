@@ -405,6 +405,36 @@ function Create-WorkBranch {
     Write-Host "$RequestedBaseBranch -> $RequestedBranchName 자식 브랜치를 만들었습니다." -ForegroundColor Green
 }
 
+function Ensure-ReleaseBranch {
+    param(
+        [Parameter(Mandatory = $true)][string]$RequestedBaseBranch,
+        [Parameter(Mandatory = $true)][string]$RequestedBranchName
+    )
+
+    if (-not (Test-LocalBranch -Name $RequestedBranchName) -and
+        -not (Test-RemoteTrackingBranch -Name $RequestedBranchName)) {
+        Create-WorkBranch `
+            -RequestedBaseBranch $RequestedBaseBranch `
+            -RequestedBranchName $RequestedBranchName
+        return
+    }
+
+    Assert-CleanWorkingTree
+    Switch-ToUpdatedBranch -Name $RequestedBranchName
+
+    $configuredParent = Get-ConfiguredParentBranch -Name $RequestedBranchName
+    if (-not [string]::IsNullOrWhiteSpace($configuredParent) -and
+        $configuredParent -ne $RequestedBaseBranch) {
+        throw "기존 릴리즈 브랜치의 부모가 다릅니다: $RequestedBranchName -> $configuredParent"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($configuredParent)) {
+        Set-ConfiguredParentBranch -Name $RequestedBranchName -Parent $RequestedBaseBranch
+    }
+
+    Write-Host "기존 릴리즈 브랜치를 사용해 중단 지점부터 계속합니다: $RequestedBranchName" -ForegroundColor Yellow
+}
+
 function Start-VersionDevelopment {
     Invoke-Git -Arguments @("fetch", "origin", "--tags", "--prune")
 
@@ -527,8 +557,17 @@ function Ensure-PullRequest {
         [string]$Body = ""
     )
 
-    $existingUrl = & $GhCommand pr view $HeadBranch --json url --jq .url 2> $null
-    if ($LASTEXITCODE -eq 0) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "SilentlyContinue"
+        $existingUrl = & $GhCommand pr view $HeadBranch --json url --jq .url 2> $null
+        $viewExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($viewExitCode -eq 0) {
         Write-Host "기존 PR을 사용합니다: $existingUrl" -ForegroundColor Yellow
         return
     }
@@ -688,7 +727,7 @@ function Release-Version {
         throw "태그가 이미 존재합니다: $tagName"
     }
 
-    Create-WorkBranch `
+    Ensure-ReleaseBranch `
         -RequestedBaseBranch $releaseBaseBranch `
         -RequestedBranchName $releaseBranch
 
