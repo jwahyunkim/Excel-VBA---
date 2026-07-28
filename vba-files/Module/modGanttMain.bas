@@ -45,6 +45,8 @@ Public Sub 칸트차트_생성()
 
     UnprotectTaskSheet ws
     SetupDataHeaders ws
+    SynchronizeTaskHierarchyModules ws, lastRow, True
+    ShowTaskInputErrorReasons ws, lastRow
     UpdateTaskNumbers ws, lastRow
     NormalizeGanttPptArtifactNames ws
     ApplyTaskInputValidation ws

@@ -101,6 +101,7 @@ Private Function GenerateScopedDevProgressReport(ByVal showCompletionMessage As 
     Set snapshots = New Collection
 
     lastRow = GetLastDataRow(ws)
+    SynchronizeTaskHierarchyModules ws, lastRow, True
     LoadHolidaySettings holidayDict, workdayDict
     UpdateDevelopmentProgressStatuses ws, lastRow, holidayDict, workdayDict
 
