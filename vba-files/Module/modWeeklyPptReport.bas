@@ -6,6 +6,7 @@ Private Const WEEKLY_PPT_TEMPLATE_MARKER As String = "REO_WEEKLY_PPT_TEMPLATE_BA
 Private Const WEEKLY_PPT_OUTPUT_FOLDER As String = "주간보고"
 Private Const WEEKLY_PPT_FILE_PREFIX As String = "Digital MFG팀_주간보고_김좌현_"
 Private Const PPT_SAVE_AS_OPEN_XML_PRESENTATION As Long = 24
+Private Const WEEKLY_UNASSIGNED_MODULE As String = "모듈 미지정"
 
 Public Sub 주간보고PPT_생성()
     Call GenerateWeeklyPptReport(True)
@@ -105,6 +106,11 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim plannedItems As Collection
     Dim currentRows As Collection
     Dim plannedRows As Collection
+    Dim pageCurrentRows As Collection
+    Dim pagePlannedRows As Collection
+    Dim pageModuleGroups As Collection
+    Dim pageModuleGroup As Object
+    Dim customPageAssignments As Object
     Dim reportFriday As Date
     Dim currentWeekStart As Date
     Dim currentWeekEnd As Date
@@ -121,9 +127,12 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim ownerText As String
     Dim useLegacyLayout As Boolean
     Dim showOwnerNames As Boolean
+    Dim pageMode As String
+    Dim pageIndex As Long
     Dim pptApp As Object
     Dim presentation As Object
     Dim slide As Object
+    Dim duplicatedSlides As Object
     Dim errNumber As Long
     Dim errDescription As String
 
@@ -156,6 +165,10 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     lastRow = GetLastDataRow(ws)
     EnsureConfigSheet
     showOwnerNames = GetWeeklyReportShowOwnerFlag()
+    pageMode = GetWeeklyReportPageMode()
+    If pageMode = WEEKLY_REPORT_PAGE_MODE_CUSTOM Then
+        LoadWeeklyReportCustomPageAssignments customPageAssignments
+    End If
     LoadHolidaySettings holidayDict, workdayDict
     UpdateDevelopmentProgressStatuses ws, lastRow, holidayDict, workdayDict
 
@@ -197,8 +210,11 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         End If
     Next r
 
-    BuildWeeklyGroupedCurrentItems currentRows, currentItems, currentDates, currentLevels, showOwnerNames
-    BuildWeeklyGroupedPlanItems plannedRows, plannedItems, showOwnerNames
+    Set pageModuleGroups = BuildWeeklyPageModuleGroups( _
+                               currentRows, _
+                               plannedRows, _
+                               pageMode, _
+                               customPageAssignments)
 
     outputFolder = ThisWorkbook.Path & Application.PathSeparator & WEEKLY_PPT_OUTPUT_FOLDER
     If Len(Dir$(outputFolder, vbDirectory)) = 0 Then MkDir outputFolder
@@ -218,11 +234,33 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
 
     Set pptApp = CreateObject("PowerPoint.Application")
     Set presentation = pptApp.Presentations.Open(templatePath, False, False, False)
-    Set slide = presentation.Slides(1)
 
-    FillWeeklyReportPeriodText slide, currentWeekStart, currentWeekEnd, nextWeekStart, nextWeekEnd
-    FillWeeklyReportCurrentTable slide, currentItems, currentDates, currentLevels
-    FillWeeklyReportPlanArea slide, plannedItems
+    For pageIndex = 2 To pageModuleGroups.Count
+        Set duplicatedSlides = presentation.Slides(1).Duplicate
+        Set duplicatedSlides = Nothing
+    Next pageIndex
+
+    For pageIndex = 1 To pageModuleGroups.Count
+        Set pageModuleGroup = pageModuleGroups(pageIndex)
+        Set pageCurrentRows = New Collection
+        Set pagePlannedRows = New Collection
+        CopyWeeklyRowsForModuleGroup currentRows, pageModuleGroup, pageCurrentRows
+        CopyWeeklyRowsForModuleGroup plannedRows, pageModuleGroup, pagePlannedRows
+
+        Set currentItems = New Collection
+        Set currentDates = New Collection
+        Set currentLevels = New Collection
+        Set plannedItems = New Collection
+        BuildWeeklyGroupedCurrentItems _
+            pageCurrentRows, currentItems, currentDates, currentLevels, showOwnerNames
+        BuildWeeklyGroupedPlanItems pagePlannedRows, plannedItems, showOwnerNames
+
+        Set slide = presentation.Slides(pageIndex)
+        FillWeeklyReportPeriodText _
+            slide, currentWeekStart, currentWeekEnd, nextWeekStart, nextWeekEnd
+        FillWeeklyReportCurrentTable slide, currentItems, currentDates, currentLevels
+        FillWeeklyReportPlanArea slide, plannedItems
+    Next pageIndex
 
     presentation.SaveAs outputPath, PPT_SAVE_AS_OPEN_XML_PRESENTATION
     presentation.Close
@@ -243,7 +281,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         MsgBox "주간보고 PPT 생성 완료" & vbCrLf & _
                "보고 기준일: " & Format$(reportFriday, "yyyy-mm-dd") & vbCrLf & _
                "업무 현황: " & currentRows.Count & "개" & vbCrLf & _
-               "개발 계획: " & plannedRows.Count & "개" & vbCrLf & vbCrLf & _
+               "개발 계획: " & plannedRows.Count & "개" & vbCrLf & _
+               "PPT 페이지: " & pageModuleGroups.Count & "개" & vbCrLf & vbCrLf & _
                outputPath, vbInformation
     End If
     Exit Function
@@ -347,6 +386,136 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
         End If
     Next rowItem
 End Sub
+
+Private Function BuildWeeklyPageModuleGroups(ByVal currentRows As Collection, _
+                                             ByVal plannedRows As Collection, _
+                                             ByVal pageMode As String, _
+                                             ByVal customPageAssignments As Object) As Collection
+    Dim result As Collection
+    Dim moduleNames As Collection
+    Dim pageGroupsByNumber As Object
+    Dim unassignedModules As Collection
+    Dim moduleName As Variant
+    Dim moduleGroup As Object
+    Dim pageNumber As Long
+    Dim pageKey As String
+
+    Set result = New Collection
+
+    If pageMode = WEEKLY_REPORT_PAGE_MODE_ALL Then
+        Set moduleGroup = CreateObject("Scripting.Dictionary")
+        moduleGroup.CompareMode = vbTextCompare
+        result.Add moduleGroup
+        Set BuildWeeklyPageModuleGroups = result
+        Exit Function
+    End If
+
+    Set moduleNames = New Collection
+    CollectWeeklyModuleNames currentRows, moduleNames
+    CollectWeeklyModuleNames plannedRows, moduleNames
+
+    If pageMode = WEEKLY_REPORT_PAGE_MODE_MODULE Then
+        For Each moduleName In moduleNames
+            Set moduleGroup = CreateObject("Scripting.Dictionary")
+            moduleGroup.CompareMode = vbTextCompare
+            moduleGroup.Add CStr(moduleName), True
+            result.Add moduleGroup
+        Next moduleName
+    Else
+        If customPageAssignments Is Nothing Then
+            Err.Raise vbObjectError + 7530, "BuildWeeklyPageModuleGroups", _
+                      "커스텀 페이지 모드에서는 config 시트에 페이지 번호와 모듈을 한 건 이상 설정해야 합니다."
+        End If
+        If customPageAssignments.Count = 0 Then
+            Err.Raise vbObjectError + 7530, "BuildWeeklyPageModuleGroups", _
+                      "커스텀 페이지 모드에서는 config 시트에 페이지 번호와 모듈을 한 건 이상 설정해야 합니다."
+        End If
+
+        Set pageGroupsByNumber = CreateObject("Scripting.Dictionary")
+        Set unassignedModules = New Collection
+
+        For Each moduleName In moduleNames
+            If customPageAssignments.Exists(CStr(moduleName)) Then
+                pageNumber = CLng(customPageAssignments(CStr(moduleName)))
+                pageKey = CStr(pageNumber)
+                If Not pageGroupsByNumber.Exists(pageKey) Then
+                    Set moduleGroup = CreateObject("Scripting.Dictionary")
+                    moduleGroup.CompareMode = vbTextCompare
+                    pageGroupsByNumber.Add pageKey, moduleGroup
+                End If
+                Set moduleGroup = pageGroupsByNumber(pageKey)
+                moduleGroup.Add CStr(moduleName), True
+            Else
+                unassignedModules.Add CStr(moduleName)
+            End If
+        Next moduleName
+
+        For pageNumber = 1 To 1000
+            pageKey = CStr(pageNumber)
+            If pageGroupsByNumber.Exists(pageKey) Then
+                result.Add pageGroupsByNumber(pageKey)
+            End If
+        Next pageNumber
+
+        For Each moduleName In unassignedModules
+            Set moduleGroup = CreateObject("Scripting.Dictionary")
+            moduleGroup.CompareMode = vbTextCompare
+            moduleGroup.Add CStr(moduleName), True
+            result.Add moduleGroup
+        Next moduleName
+    End If
+
+    If result.Count = 0 Then
+        Set moduleGroup = CreateObject("Scripting.Dictionary")
+        moduleGroup.CompareMode = vbTextCompare
+        result.Add moduleGroup
+    End If
+
+    Set BuildWeeklyPageModuleGroups = result
+End Function
+
+Private Sub CollectWeeklyModuleNames(ByVal rows As Collection, _
+                                     ByVal moduleNames As Collection)
+    Dim moduleSeen As Object
+    Dim existingName As Variant
+    Dim rowItem As Variant
+    Dim moduleName As String
+
+    Set moduleSeen = CreateObject("Scripting.Dictionary")
+    moduleSeen.CompareMode = vbTextCompare
+    For Each existingName In moduleNames
+        moduleSeen.Add CStr(existingName), True
+    Next existingName
+
+    For Each rowItem In rows
+        moduleName = GetWeeklyRowModuleName(rowItem)
+        If Not moduleSeen.Exists(moduleName) Then
+            moduleSeen.Add moduleName, True
+            moduleNames.Add moduleName
+        End If
+    Next rowItem
+End Sub
+
+Private Sub CopyWeeklyRowsForModuleGroup(ByVal sourceRows As Collection, _
+                                         ByVal moduleGroup As Object, _
+                                         ByVal destinationRows As Collection)
+    Dim rowItem As Variant
+    Dim moduleName As String
+
+    For Each rowItem In sourceRows
+        moduleName = GetWeeklyRowModuleName(rowItem)
+        If moduleGroup.Count = 0 Or moduleGroup.Exists(moduleName) Then
+            destinationRows.Add rowItem
+        End If
+    Next rowItem
+End Sub
+
+Private Function GetWeeklyRowModuleName(ByVal rowItem As Variant) As String
+    GetWeeklyRowModuleName = Trim$(CStr(rowItem(0)))
+    If Len(GetWeeklyRowModuleName) = 0 Then
+        GetWeeklyRowModuleName = WEEKLY_UNASSIGNED_MODULE
+    End If
+End Function
 
 Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
                                          ByVal items As Collection, _

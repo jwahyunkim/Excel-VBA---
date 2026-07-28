@@ -16,6 +16,8 @@ Public Sub EnsureConfigSheet()
     Dim rngReportLayout As Range
     Dim rngReportBullets As Range
     Dim rngWeeklyReportOwner As Range
+    Dim rngWeeklyReportPageMode As Range
+    Dim rngWeeklyCustomPageNumbers As Range
     Dim legacyTaskMaxLength As Variant
 
     On Error Resume Next
@@ -66,6 +68,9 @@ Public Sub EnsureConfigSheet()
     ws.Range(DEV_REPORT_BULLET_LEVEL3_LABEL_CELL).Value = "Level 3"
     ws.Range(WEEKLY_REPORT_SETTING_TITLE_CELL).Value = "주간보고 설정"
     ws.Range(WEEKLY_REPORT_OWNER_LABEL_CELL).Value = "담당자 이름 출력"
+    ws.Range(WEEKLY_REPORT_PAGE_MODE_LABEL_CELL).Value = "페이지 출력 모드"
+    ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_HEADER_CELL).Value = "커스텀 페이지 번호"
+    ws.Range(WEEKLY_REPORT_CUSTOM_MODULE_HEADER_CELL).Value = "모듈명"
     ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "숨김 제외 No."
     ws.Range(HIDE_EXCLUDE_DATE_HEADER_CELL).Value = "숨김 제외 날짜"
 
@@ -95,6 +100,8 @@ Public Sub EnsureConfigSheet()
         ws.Range(DEV_REPORT_BULLET_LEVEL3_VALUE_CELL).Value = ChrW(&HB7)
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value = "Y"
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_ALL
 
 
     ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
@@ -135,7 +142,10 @@ Public Sub EnsureConfigSheet()
     ws.Range("L1:M2,L4:M7").Borders.LineStyle = xlContinuous
     ws.Range("O1:P1").Font.Bold = True
     ws.Range("O1:P1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O1:P2").Borders.LineStyle = xlContinuous
+    ws.Range("O1:P3").Borders.LineStyle = xlContinuous
+    ws.Range("O5:P5").Font.Bold = True
+    ws.Range("O5:P5").Interior.Color = RGB(252, 228, 214)
+    ws.Range("O5:P" & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).Borders.LineStyle = xlContinuous
 
     ws.Range("F2:G2").Borders.LineStyle = xlContinuous
     ws.Range("I2:J5").Borders.LineStyle = xlContinuous
@@ -153,6 +163,9 @@ Public Sub EnsureConfigSheet()
     ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).NumberFormat = "0"
     ws.Range("M2:M7").NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).NumberFormat = "General"
+    ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).NumberFormat = "General"
+    ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
+             WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).NumberFormat = "0"
 
     lastSheetRow = ws.rows.Count
     Set rngType = ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_DATA_START_ROW & ":" & HOLIDAY_COL_TYPE & lastSheetRow)
@@ -167,6 +180,10 @@ Public Sub EnsureConfigSheet()
     Set rngReportLayout = ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL)
     Set rngReportBullets = ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & DEV_REPORT_BULLET_LEVEL3_VALUE_CELL)
     Set rngWeeklyReportOwner = ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL)
+    Set rngWeeklyReportPageMode = ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL)
+    Set rngWeeklyCustomPageNumbers = ws.Range( _
+        WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
+        WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW))
 
     On Error Resume Next
     rngType.Validation.Delete
@@ -181,6 +198,8 @@ Public Sub EnsureConfigSheet()
     rngReportLayout.Validation.Delete
     rngReportBullets.Validation.Delete
     rngWeeklyReportOwner.Validation.Delete
+    rngWeeklyReportPageMode.Validation.Delete
+    rngWeeklyCustomPageNumbers.Validation.Delete
     On Error GoTo 0
 
     rngType.Validation.Add Type:=xlValidateList, _
@@ -301,6 +320,32 @@ Public Sub EnsureConfigSheet()
         "모듈명과 업무명 뒤에 담당자를 표시하려면 Y, 숨기려면 N을 선택하세요."
     rngWeeklyReportOwner.Validation.ErrorTitle = "설정값 오류"
     rngWeeklyReportOwner.Validation.ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
+
+    rngWeeklyReportPageMode.Validation.Add Type:=xlValidateList, _
+                                           AlertStyle:=xlValidAlertStop, _
+                                           Operator:=xlBetween, _
+                                           Formula1:=WEEKLY_REPORT_PAGE_MODE_ALL & "," & _
+                                                     WEEKLY_REPORT_PAGE_MODE_MODULE & "," & _
+                                                     WEEKLY_REPORT_PAGE_MODE_CUSTOM
+    rngWeeklyReportPageMode.Validation.IgnoreBlank = False
+    rngWeeklyReportPageMode.Validation.InCellDropdown = True
+    rngWeeklyReportPageMode.Validation.InputTitle = "주간보고 페이지 출력"
+    rngWeeklyReportPageMode.Validation.InputMessage = _
+        "전체 통합, 모듈별 페이지 또는 커스텀 페이지를 선택하세요."
+    rngWeeklyReportPageMode.Validation.ErrorTitle = "설정값 오류"
+    rngWeeklyReportPageMode.Validation.ErrorMessage = "목록에 있는 페이지 출력 모드만 선택할 수 있습니다."
+
+    rngWeeklyCustomPageNumbers.Validation.Add Type:=xlValidateWholeNumber, _
+                                                AlertStyle:=xlValidAlertStop, _
+                                                Operator:=xlBetween, _
+                                                Formula1:="1", _
+                                                Formula2:="1000"
+    rngWeeklyCustomPageNumbers.Validation.IgnoreBlank = True
+    rngWeeklyCustomPageNumbers.Validation.InputTitle = "커스텀 페이지 번호"
+    rngWeeklyCustomPageNumbers.Validation.InputMessage = _
+        "같은 페이지에 넣을 모듈에는 같은 페이지 번호를 입력하세요."
+    rngWeeklyCustomPageNumbers.Validation.ErrorTitle = "설정값 오류"
+    rngWeeklyCustomPageNumbers.Validation.ErrorMessage = "페이지 번호는 1~1000 사이 정수여야 합니다."
 End Sub
 
 Public Sub LoadHolidaySettings(ByRef holidayDict As Object, ByRef workdayDict As Object)
@@ -472,6 +517,78 @@ Public Function GetWeeklyReportShowOwnerFlag() As Boolean
     settingValue = UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value2)))
     If settingValue = "N" Then GetWeeklyReportShowOwnerFlag = False
 End Function
+
+Public Function GetWeeklyReportPageMode() As String
+    Dim ws As Worksheet
+    Dim settingValue As String
+
+    GetWeeklyReportPageMode = WEEKLY_REPORT_PAGE_MODE_ALL
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    settingValue = Trim$(CStr(ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value2))
+    Select Case settingValue
+        Case WEEKLY_REPORT_PAGE_MODE_ALL, _
+             WEEKLY_REPORT_PAGE_MODE_MODULE, _
+             WEEKLY_REPORT_PAGE_MODE_CUSTOM
+            GetWeeklyReportPageMode = settingValue
+    End Select
+End Function
+
+Public Sub LoadWeeklyReportCustomPageAssignments(ByRef modulePageDict As Object)
+    Dim ws As Worksheet
+    Dim lastPageRow As Long
+    Dim lastModuleRow As Long
+    Dim lastRow As Long
+    Dim r As Long
+    Dim pageValue As Variant
+    Dim pageNumber As Long
+    Dim moduleName As String
+
+    Set modulePageDict = CreateObject("Scripting.Dictionary")
+    modulePageDict.CompareMode = vbTextCompare
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+
+    lastPageRow = ws.Cells(ws.Rows.Count, WEEKLY_REPORT_CUSTOM_PAGE_COLUMN).End(xlUp).Row
+    lastModuleRow = ws.Cells(ws.Rows.Count, WEEKLY_REPORT_CUSTOM_MODULE_COLUMN).End(xlUp).Row
+    lastRow = lastPageRow
+    If lastModuleRow > lastRow Then lastRow = lastModuleRow
+    If lastRow < WEEKLY_REPORT_CUSTOM_START_ROW Then Exit Sub
+
+    For r = WEEKLY_REPORT_CUSTOM_START_ROW To lastRow
+        pageValue = ws.Cells(r, WEEKLY_REPORT_CUSTOM_PAGE_COLUMN).Value2
+        moduleName = Trim$(CStr(ws.Cells(r, WEEKLY_REPORT_CUSTOM_MODULE_COLUMN).Value2))
+
+        If Len(Trim$(CStr(pageValue))) > 0 Or Len(moduleName) > 0 Then
+            If Len(Trim$(CStr(pageValue))) = 0 Or Len(moduleName) = 0 Then
+                Err.Raise vbObjectError + 7120, "LoadWeeklyReportCustomPageAssignments", _
+                          "config 시트의 커스텀 페이지 설정 " & CStr(r) & _
+                          "행에 페이지 번호와 모듈명을 모두 입력하세요."
+            End If
+
+            If Not IsNumeric(pageValue) Or CDbl(pageValue) <> Fix(CDbl(pageValue)) Then
+                Err.Raise vbObjectError + 7121, "LoadWeeklyReportCustomPageAssignments", _
+                          "config 시트의 커스텀 페이지 번호는 정수여야 합니다: " & CStr(r) & "행"
+            End If
+
+            pageNumber = CLng(pageValue)
+            If pageNumber < 1 Or pageNumber > 1000 Then
+                Err.Raise vbObjectError + 7122, "LoadWeeklyReportCustomPageAssignments", _
+                          "config 시트의 커스텀 페이지 번호는 1~1000 사이여야 합니다: " & CStr(r) & "행"
+            End If
+
+            If modulePageDict.Exists(moduleName) Then
+                Err.Raise vbObjectError + 7123, "LoadWeeklyReportCustomPageAssignments", _
+                          "config 시트의 커스텀 페이지 설정에 같은 모듈이 중복되었습니다: " & moduleName
+            End If
+
+            modulePageDict.Add moduleName, pageNumber
+        End If
+    Next r
+End Sub
 
 Public Sub RefreshTaskTextLengthValidation()
     Dim ws As Worksheet
