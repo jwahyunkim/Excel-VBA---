@@ -205,6 +205,10 @@ Public Function GetTaskSubtreeEndRow(ws As Worksheet, ByVal rowNum As Long, ByVa
 End Function
 
 Public Function HasTaskError(ws As Worksheet, ByVal rowNum As Long) As Boolean
+    HasTaskError = (Len(GetTaskErrorReason(ws, rowNum)) > 0)
+End Function
+
+Public Function GetTaskErrorReason(ws As Worksheet, ByVal rowNum As Long) As String
     Dim planS As Variant
     Dim planE As Variant
     Dim actS As Variant
@@ -213,19 +217,49 @@ Public Function HasTaskError(ws As Worksheet, ByVal rowNum As Long) As Boolean
     Dim hasPlanE As Boolean
     Dim hasActS As Boolean
     Dim hasActE As Boolean
+    Dim taskText As String
+    Dim rawLevel As Variant
+    Dim taskLevel As Long
+    Dim parentRow As Long
+    Dim parentModule As String
+    Dim childModule As String
+    Dim maxTaskLength As Long
     
     planS = ws.Cells(rowNum, COL_PLAN_START).Value
     planE = ws.Cells(rowNum, COL_PLAN_END).Value
     actS = ws.Cells(rowNum, COL_ACTUAL_START).Value
     actE = ws.Cells(rowNum, COL_ACTUAL_END).Value
+    taskText = CStr(ws.Cells(rowNum, COL_TASK).Value2)
+    rawLevel = ws.Cells(rowNum, COL_LEVEL).Value2
     
     If Not HasAnyTaskInput(ws, rowNum) Then
-        HasTaskError = False
+        Exit Function
+    End If
+
+    If Len(Trim$(CStr(rawLevel))) > 0 Then
+        If Not IsNumeric(rawLevel) Then
+            GetTaskErrorReason = "Level 값이 숫자가 아닙니다. 1~3 사이 정수를 입력하세요."
+            Exit Function
+        End If
+        If CDbl(rawLevel) <> Fix(CDbl(rawLevel)) Or _
+           CLng(rawLevel) < 1 Or CLng(rawLevel) > 3 Then
+            GetTaskErrorReason = "Level은 1~3 사이 정수여야 합니다."
+            Exit Function
+        End If
+    End If
+
+    taskLevel = GetTaskLevel(ws, rowNum)
+    maxTaskLength = GetTaskMaxLength(taskLevel)
+    If Len(taskText) > maxTaskLength Then
+        GetTaskErrorReason = "Level " & taskLevel & _
+                             " 내용이 config 시트의 최대 글자 수(" & _
+                             maxTaskLength & "자)를 초과했습니다. 현재 " & _
+                             Len(taskText) & "자입니다."
         Exit Function
     End If
     
     If Not HasTaskContent(ws, rowNum) And HasAnyTaskDate(ws, rowNum) Then
-        HasTaskError = True
+        GetTaskErrorReason = "날짜가 입력되어 있지만 내용이 비어 있습니다."
         Exit Function
     End If
     
@@ -236,35 +270,54 @@ Public Function HasTaskError(ws As Worksheet, ByVal rowNum As Long) As Boolean
     
     If (hasPlanS And Not IsDate(planS)) Or (hasPlanE And Not IsDate(planE)) Or _
        (hasActS And Not IsDate(actS)) Or (hasActE And Not IsDate(actE)) Then
-        HasTaskError = True
+        GetTaskErrorReason = "날짜 열에 날짜 형식이 아닌 값이 있습니다."
         Exit Function
     End If
     
     If hasPlanS <> hasPlanE Then
-        HasTaskError = True
+        GetTaskErrorReason = "계획 시작일과 계획 종료일은 둘 다 입력하거나 둘 다 비워야 합니다."
         Exit Function
     End If
     
     If hasActE And Not hasActS Then
-        HasTaskError = True
+        GetTaskErrorReason = "실제 종료일이 있지만 실제 시작일이 없습니다."
         Exit Function
     End If
     
     If IsDate(planS) And IsDate(planE) Then
         If CDate(planS) > CDate(planE) Then
-            HasTaskError = True
+            GetTaskErrorReason = "계획 시작일이 계획 종료일보다 늦습니다."
             Exit Function
         End If
     End If
     
     If IsDate(actS) And IsDate(actE) Then
         If CDate(actS) > CDate(actE) Then
-            HasTaskError = True
+            GetTaskErrorReason = "실제 시작일이 실제 종료일보다 늦습니다."
             Exit Function
         End If
     End If
-    
-    HasTaskError = False
+
+    If taskLevel > 1 Then
+        parentRow = GetNearestParentTaskRow(ws, rowNum)
+        If parentRow = 0 Then
+            GetTaskErrorReason = "Level " & taskLevel & _
+                                 "이지만 위쪽에 부모 작업이 없습니다."
+            Exit Function
+        End If
+
+        parentModule = Trim$(CStr(ws.Cells(parentRow, COL_MODULE).Value2))
+        childModule = Trim$(CStr(ws.Cells(rowNum, COL_MODULE).Value2))
+        If Len(parentModule) = 0 Then
+            GetTaskErrorReason = "부모 작업(행 " & parentRow & ")의 모듈이 비어 있습니다."
+            Exit Function
+        End If
+        If StrComp(parentModule, childModule, vbTextCompare) <> 0 Then
+            GetTaskErrorReason = "하위 모듈 '" & childModule & _
+                                 "'이 부모 모듈 '" & parentModule & "'과 다릅니다."
+            Exit Function
+        End If
+    End If
 End Function
 
 Public Function GetTaskProgressValue(ws As Worksheet, ByVal rowNum As Long) As Double

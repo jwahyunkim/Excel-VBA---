@@ -1,12 +1,17 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
 
+Private Const TASK_VALIDATION_MIN_LAST_ROW As Long = 5000
+Private Const TASK_VALIDATION_EXTRA_ROWS As Long = 1000
+
 Public Sub SetupDataHeaders(ws As Worksheet)
     NormalizeSheetStructure ws
 
     ws.Cells(HEADER_ROW, COL_NO).Value = "No."
     ws.Cells(HEADER_ROW, COL_LEVEL).Value = "Level"
+    ws.Cells(HEADER_ROW, COL_MODULE).Value = "모듈"
     ws.Cells(HEADER_ROW, COL_TASK).Value = "내용"
+    ws.Cells(HEADER_ROW, COL_OWNER).Value = "담당"
     ws.Cells(HEADER_ROW, COL_NOTE).Value = "비고"
     ws.Cells(HEADER_ROW, COL_PLAN_START).Value = "계획 시작일"
     ws.Cells(HEADER_ROW, COL_PLAN_END).Value = "계획 종료일"
@@ -72,6 +77,19 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_NO).Value)) <> "No." Then
         ws.Columns(COL_NO).Insert Shift:=xlToRight
     End If
+
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MODULE).Value)) <> "모듈" Then
+        ws.Columns(COL_MODULE).Insert Shift:=xlToRight
+    End If
+
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_OWNER).Value)) <> "담당" Then
+        ws.Columns(COL_OWNER).Insert Shift:=xlToRight
+    End If
+
+    ' A newly inserted module column can inherit Level validation from its left.
+    On Error Resume Next
+    ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & ws.Rows.Count).Validation.Delete
+    On Error GoTo 0
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" And _
        Trim$(CStr(ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value)) <> "개발진행" Then
@@ -929,7 +947,9 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_NO).ColumnWidth = 6
     ws.Columns(COL_LEVEL).ColumnWidth = 7
     ws.Columns(COL_TASK).WrapText = False
+    ws.Columns(COL_MODULE).ColumnWidth = 14
     ws.Columns(COL_TASK).AutoFit
+    ws.Columns(COL_OWNER).ColumnWidth = 12
     ws.Columns(COL_NOTE).ColumnWidth = 4.5
     ws.Columns(COL_PLAN_START).ColumnWidth = 11
     ws.Columns(COL_PLAN_END).ColumnWidth = 11
@@ -956,9 +976,219 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ActiveWindow.DisplayGridlines = False
 End Sub
 
+Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Range)
+    Dim watchedRange As Range
+    Dim changedRange As Range
+    Dim lastRow As Long
+    Dim r As Long
+    Dim changedArea As Range
+    Dim issueMessages As String
+    Dim changedModuleOrLevel As Boolean
+
+    If ws Is Nothing Or Target Is Nothing Then Exit Sub
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = REPORT_HISTORY_SHEET_NAME Then Exit Sub
+
+    Set watchedRange = Union( _
+        ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
+        ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & ws.Rows.Count))
+    Set changedRange = Intersect(Target, watchedRange)
+    If changedRange Is Nothing Then Exit Sub
+
+    lastRow = GetLastDataRow(ws)
+    For Each changedArea In changedRange.Areas
+        If changedArea.Row + changedArea.Rows.Count - 1 > lastRow Then
+            lastRow = changedArea.Row + changedArea.Rows.Count - 1
+        End If
+    Next changedArea
+
+    For r = DATA_START_ROW To lastRow
+        changedModuleOrLevel = _
+            Not Intersect(changedRange, ws.Cells(r, COL_LEVEL)) Is Nothing Or _
+            Not Intersect(changedRange, ws.Cells(r, COL_MODULE)) Is Nothing
+
+        If changedModuleOrLevel Then
+            EnforceTaskModuleFromParent ws, r, issueMessages
+            PropagateTaskModuleToDescendants ws, r, lastRow
+        End If
+    Next r
+
+    If Len(issueMessages) > 0 Then
+        MsgBox "모듈 계층 정합성을 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
+               issueMessages & vbCrLf & _
+               "하위 작업의 모듈은 가장 가까운 부모 모듈과 같아야 합니다.", _
+               vbExclamation, _
+               "모듈 정합성 오류"
+    End If
+End Sub
+
+Public Sub SynchronizeTaskHierarchyModules(ByVal ws As Worksheet, _
+                                           ByVal lastRow As Long, _
+                                           Optional ByVal showIssueMessage As Boolean = True)
+    Dim r As Long
+    Dim issueMessages As String
+
+    If ws Is Nothing Then Exit Sub
+    If lastRow < DATA_START_ROW Then Exit Sub
+
+    For r = DATA_START_ROW To lastRow
+        If HasTaskContent(ws, r) Or _
+           Len(Trim$(CStr(ws.Cells(r, COL_LEVEL).Value2))) > 0 Then
+            EnforceTaskModuleFromParent ws, r, issueMessages
+        End If
+    Next r
+
+    If showIssueMessage And Len(issueMessages) > 0 Then
+        MsgBox "기존 모듈 계층 오류를 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
+               issueMessages, _
+               vbExclamation, _
+               "모듈 정합성 오류"
+    End If
+End Sub
+
+Public Sub ShowTaskInputErrorReasons(ByVal ws As Worksheet, ByVal lastRow As Long)
+    Const MAX_DISPLAY_ERROR_COUNT As Long = 20
+    Dim r As Long
+    Dim errorCount As Long
+    Dim errorText As String
+    Dim reasonText As String
+    Dim taskText As String
+    Dim taskNo As String
+
+    If ws Is Nothing Then Exit Sub
+
+    For r = DATA_START_ROW To lastRow
+        reasonText = GetTaskErrorReason(ws, r)
+        If Len(reasonText) > 0 Then
+            errorCount = errorCount + 1
+            If errorCount <= MAX_DISPLAY_ERROR_COUNT Then
+                taskText = Trim$(CStr(ws.Cells(r, COL_TASK).Value2))
+                taskNo = Trim$(CStr(ws.Cells(r, COL_NO).Value2))
+                If Len(taskText) = 0 Then taskText = "내용 미입력"
+                If Len(taskNo) = 0 Then taskNo = "-"
+
+                If Len(errorText) > 0 Then errorText = errorText & vbCrLf
+                errorText = errorText & "- 행 " & r & " / No. " & taskNo & _
+                            " [" & taskText & "]: " & reasonText
+            End If
+        End If
+    Next r
+
+    If errorCount > MAX_DISPLAY_ERROR_COUNT Then
+        errorText = errorText & vbCrLf & "- 그 외 " & _
+                    (errorCount - MAX_DISPLAY_ERROR_COUNT) & "건"
+    End If
+
+    If errorCount > 0 Then
+        MsgBox "입력 오류 " & errorCount & "건이 있습니다." & vbCrLf & vbCrLf & _
+               errorText, _
+               vbExclamation, _
+               "간트 입력 오류 상세"
+    End If
+End Sub
+
+Public Function GetNearestParentTaskRow(ByVal ws As Worksheet, _
+                                        ByVal rowNum As Long) As Long
+    Dim currentLevel As Long
+    Dim candidateLevel As Long
+    Dim r As Long
+
+    currentLevel = GetTaskLevel(ws, rowNum)
+    If currentLevel <= 1 Then Exit Function
+
+    For r = rowNum - 1 To DATA_START_ROW Step -1
+        If HasTaskContent(ws, r) Then
+            candidateLevel = GetTaskLevel(ws, r)
+            If candidateLevel < currentLevel Then
+                GetNearestParentTaskRow = r
+                Exit Function
+            End If
+        End If
+    Next r
+End Function
+
+Private Sub EnforceTaskModuleFromParent(ByVal ws As Worksheet, _
+                                        ByVal rowNum As Long, _
+                                        ByRef issueMessages As String)
+    Dim taskLevel As Long
+    Dim parentRow As Long
+    Dim parentModule As String
+    Dim childModule As String
+    Dim parentTask As String
+    Dim childTask As String
+
+    taskLevel = GetTaskLevel(ws, rowNum)
+    If taskLevel <= 1 Then Exit Sub
+
+    parentRow = GetNearestParentTaskRow(ws, rowNum)
+    childTask = Trim$(CStr(ws.Cells(rowNum, COL_TASK).Value2))
+
+    If parentRow = 0 Then
+        ws.Cells(rowNum, COL_MODULE).ClearContents
+        AppendModuleConsistencyIssue issueMessages, rowNum, childTask, _
+            "Level " & taskLevel & "이지만 위쪽에 부모 작업이 없습니다. " & _
+            "부모 작업을 먼저 만들거나 Level을 1로 변경하세요."
+        Exit Sub
+    End If
+
+    parentTask = Trim$(CStr(ws.Cells(parentRow, COL_TASK).Value2))
+    parentModule = Trim$(CStr(ws.Cells(parentRow, COL_MODULE).Value2))
+    childModule = Trim$(CStr(ws.Cells(rowNum, COL_MODULE).Value2))
+
+    If Len(parentModule) = 0 Then
+        ws.Cells(rowNum, COL_MODULE).ClearContents
+        AppendModuleConsistencyIssue issueMessages, rowNum, childTask, _
+            "부모 작업 '" & parentTask & "'(행 " & parentRow & ")의 모듈이 비어 있습니다. " & _
+            "부모 모듈을 먼저 입력하세요."
+    ElseIf Len(childModule) = 0 Then
+        ws.Cells(rowNum, COL_MODULE).Value = parentModule
+    ElseIf StrComp(childModule, parentModule, vbTextCompare) <> 0 Then
+        ws.Cells(rowNum, COL_MODULE).Value = parentModule
+        AppendModuleConsistencyIssue issueMessages, rowNum, childTask, _
+            "입력한 모듈 '" & childModule & "'이 부모 작업 '" & parentTask & _
+            "'(행 " & parentRow & ")의 모듈 '" & parentModule & "'과 다릅니다. " & _
+            "부모 모듈로 되돌렸습니다."
+    End If
+End Sub
+
+Private Sub PropagateTaskModuleToDescendants(ByVal ws As Worksheet, _
+                                             ByVal rowNum As Long, _
+                                             ByVal lastRow As Long)
+    Dim parentLevel As Long
+    Dim subtreeEndRow As Long
+    Dim moduleText As String
+    Dim r As Long
+
+    parentLevel = GetTaskLevel(ws, rowNum)
+    subtreeEndRow = GetTaskSubtreeEndRow(ws, rowNum, lastRow)
+    If subtreeEndRow <= rowNum Then Exit Sub
+
+    moduleText = Trim$(CStr(ws.Cells(rowNum, COL_MODULE).Value2))
+    For r = rowNum + 1 To subtreeEndRow
+        If GetTaskLevel(ws, r) > parentLevel And _
+           (HasTaskContent(ws, r) Or _
+            Len(Trim$(CStr(ws.Cells(r, COL_LEVEL).Value2))) > 0) Then
+            If Len(moduleText) = 0 Then
+                ws.Cells(r, COL_MODULE).ClearContents
+            Else
+                ws.Cells(r, COL_MODULE).Value = moduleText
+            End If
+        End If
+    Next r
+End Sub
+
+Private Sub AppendModuleConsistencyIssue(ByRef issueMessages As String, _
+                                         ByVal rowNum As Long, _
+                                         ByVal taskText As String, _
+                                         ByVal reasonText As String)
+    If Len(taskText) = 0 Then taskText = "내용 미입력"
+    If Len(issueMessages) > 0 Then issueMessages = issueMessages & vbCrLf
+    issueMessages = issueMessages & "- 행 " & rowNum & " [" & taskText & "]: " & reasonText
+End Sub
+
 Public Sub ApplyTaskInputValidation(ws As Worksheet)
     Dim lastSheetRow As Long
     Dim rngDate As Range
+    Dim rngModule As Range
     Dim rngLevel As Range
     Dim rngProgress As Range
     Dim rngManualProgress As Range
@@ -966,6 +1196,13 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     Dim rngDevProgress As Range
     
     lastSheetRow = ws.Rows.Count
+
+    Set rngModule = ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & lastSheetRow)
+    On Error Resume Next
+    rngModule.Validation.Delete
+    On Error GoTo 0
+
+    ApplyTaskTextLengthValidation ws
     
     Set rngDate = Union( _
         ws.Range(COL_PLAN_START & DATA_START_ROW & ":" & COL_PLAN_START & lastSheetRow), _
@@ -1079,6 +1316,49 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     rngDevProgress.Validation.ErrorTitle = "입력 오류"
     rngDevProgress.Validation.ErrorMessage = "Planned, In Progress, Completed만 입력할 수 있습니다."
     ApplyManualStatusValidation ws, lastSheetRow
+End Sub
+
+Public Sub ApplyTaskTextLengthValidation(ByVal ws As Worksheet)
+    Dim lastValidationRow As Long
+    Dim rngTask As Range
+    Dim validationFormula As String
+
+    If ws Is Nothing Then Exit Sub
+
+    lastValidationRow = GetLastDataRow(ws) + TASK_VALIDATION_EXTRA_ROWS
+    If lastValidationRow < TASK_VALIDATION_MIN_LAST_ROW Then
+        lastValidationRow = TASK_VALIDATION_MIN_LAST_ROW
+    End If
+    If lastValidationRow > ws.Rows.Count Then lastValidationRow = ws.Rows.Count
+
+    Set rngTask = ws.Range(COL_TASK & DATA_START_ROW & ":" & _
+                           COL_TASK & lastValidationRow)
+
+    On Error Resume Next
+    rngTask.Validation.Delete
+    On Error GoTo 0
+
+    validationFormula = "=LEN(" & COL_TASK & DATA_START_ROW & ")<=" & _
+        "IF(" & COL_LEVEL & DATA_START_ROW & "=2," & _
+        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+        TASK_MAX_LENGTH_LEVEL2_VALUE_CELL & """)," & _
+        "IF(" & COL_LEVEL & DATA_START_ROW & "=3," & _
+        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+        TASK_MAX_LENGTH_LEVEL3_VALUE_CELL & """)," & _
+        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+        TASK_MAX_LENGTH_LEVEL1_VALUE_CELL & """)))"
+
+    rngTask.Validation.Add Type:=xlValidateCustom, _
+                           AlertStyle:=xlValidAlertStop, _
+                           Formula1:=validationFormula
+    rngTask.Validation.IgnoreBlank = True
+    rngTask.Validation.InputTitle = "내용 입력"
+    rngTask.Validation.InputMessage = _
+        "내용은 config 시트의 Level별 최대 글자 수 이내로 입력하세요."
+    rngTask.Validation.ErrorTitle = "내용 글자 수 초과"
+    rngTask.Validation.ErrorMessage = _
+        "입력한 내용이 현재 Level에 설정된 최대 글자 수를 초과했습니다. " & _
+        "config 시트의 입력 제한 설정을 확인하세요."
 End Sub
 
 Private Sub ApplyManualStatusValidation(ws As Worksheet, ByVal lastSheetRow As Long)
