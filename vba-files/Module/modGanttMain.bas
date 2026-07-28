@@ -45,6 +45,8 @@ Public Sub 칸트차트_생성()
 
     UnprotectTaskSheet ws
     SetupDataHeaders ws
+    SynchronizeTaskHierarchyModules ws, lastRow, True
+    ShowTaskInputErrorReasons ws, lastRow
     UpdateTaskNumbers ws, lastRow
     NormalizeGanttPptArtifactNames ws
     ApplyTaskInputValidation ws
@@ -172,8 +174,18 @@ Public Sub 칸트차트_항목숨기기버튼_생성()
     CreateGanttActionButton ActiveSheet, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", 4
 End Sub
 
-Public Sub 개발진행보고_버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnDevProgressReport", "개발 보고", "개발진행보고_텍스트생성", 6
+Public Sub 개발진행보고_버튼_생성(Optional ByVal showCompletionMessage As Boolean = True)
+    On Error Resume Next
+    ActiveSheet.Shapes("btnDevProgressReport").Delete
+    On Error GoTo 0
+
+    CreateGanttActionButton ActiveSheet, "btnPersonalDevReport", "개인 보고", "개인개발보고_텍스트생성", 6, False
+    CreateGanttActionButton ActiveSheet, "btnTeamDevReport", "팀 보고", "팀개발보고_텍스트생성", 7, False
+    CreateGanttActionButton ActiveSheet, "btnModuleDevReport", "모듈 보고", "모듈개발보고_텍스트생성", 8, False
+
+    If showCompletionMessage Then
+        MsgBox "개발 보고 버튼 생성 완료: 개인 / 팀 / 모듈", vbInformation
+    End If
 End Sub
 
 Public Sub 칸트차트_개체삽입버튼_생성()
@@ -324,7 +336,12 @@ Public Sub 칸트차트_PPT개체열기()
 EH:
     MsgBox "PPT 편집 화면을 여는 중 오류가 발생했습니다: " & Err.Description, vbExclamation
 End Sub
-Private Sub CreateGanttActionButton(ByVal ws As Worksheet, ByVal buttonName As String, ByVal buttonCaption As String, ByVal macroName As String, ByVal buttonOrder As Long)
+Private Sub CreateGanttActionButton(ByVal ws As Worksheet, _
+                                    ByVal buttonName As String, _
+                                    ByVal buttonCaption As String, _
+                                    ByVal macroName As String, _
+                                    ByVal buttonOrder As Long, _
+                                    Optional ByVal showCompletionMessage As Boolean = True)
     Dim btn As Shape
     Dim anchorCell As Range
     Dim btnLeft As Double
@@ -408,7 +425,9 @@ Private Sub CreateGanttActionButton(ByVal ws As Worksheet, ByVal buttonName As S
         ApplyCalculatedColumnsProtection ws, lastRow
     End If
 
-    MsgBox "버튼 생성 완료: " & buttonCaption, vbInformation
+    If showCompletionMessage Then
+        MsgBox "버튼 생성 완료: " & buttonCaption, vbInformation
+    End If
     Exit Sub
 
 EH:
@@ -641,9 +660,16 @@ Private Sub NormalizeGanttPptArtifactNames(ByVal ws As Worksheet)
 End Sub
 
 Private Function IsGanttPptShape(ByVal shp As Shape) As Boolean
-    IsGanttPptShape = (Left$(shp.Name, Len("shpGanttPpt_")) = "shpGanttPpt_" Or _
-                       Left$(shp.Name, Len("tmpGanttPptShape_")) = "tmpGanttPptShape_" Or _
-                       shp.OnAction = "칸트차트_PPT개체열기")
+    If Left$(shp.Name, Len("shpGanttPpt_")) = "shpGanttPpt_" Or _
+       Left$(shp.Name, Len("tmpGanttPptShape_")) = "tmpGanttPptShape_" Then
+        IsGanttPptShape = True
+        Exit Function
+    End If
+
+    ' Some embedded/OLE shapes raise error 1004 when OnAction is queried.
+    On Error Resume Next
+    IsGanttPptShape = (CStr(shp.OnAction) = "칸트차트_PPT개체열기")
+    On Error GoTo 0
 End Function
 
 Private Function IsGanttPptOleObject(ByVal oleObj As OLEObject) As Boolean

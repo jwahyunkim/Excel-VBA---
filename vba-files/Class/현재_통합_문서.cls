@@ -7,6 +7,35 @@ Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+    On Error GoTo EH
+
+    If Not TypeOf Sh Is Worksheet Then Exit Sub
+
+    If Sh.Name = CONFIG_SHEET_NAME Then
+        If Intersect(Target, Sh.Range(TASK_MAX_LENGTH_VALUE_RANGE)) Is Nothing Then Exit Sub
+        Application.EnableEvents = False
+        RefreshTaskTextLengthValidation
+        GoTo SafeExit
+    End If
+
+    If Sh.Name = REPORT_HISTORY_SHEET_NAME Then Exit Sub
+
+    Application.EnableEvents = False
+    HandleTaskHierarchyChange Sh, Target
+
+SafeExit:
+    Application.EnableEvents = True
+    Exit Sub
+
+EH:
+    MsgBox "모듈 계층을 자동 처리하는 중 오류가 발생했습니다." & vbCrLf & _
+           "원인: " & Err.Description, _
+           vbExclamation, _
+           "모듈 자동 상속 오류"
+    Resume SafeExit
+End Sub
+
 Private Sub Workbook_SheetFollowHyperlink(ByVal Sh As Object, ByVal Target As Hyperlink)
     Dim anchorCell As Range
 
