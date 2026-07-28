@@ -504,8 +504,6 @@ Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
     Dim taskTextRange As Object
     Dim dateTextRange As Object
     Dim taskParagraph As Object
-    Dim taskSlotCount As Long
-    Dim dateSlotCount As Long
     Dim levelValue As Long
     Dim displayText As String
     Dim dateDisplayText As String
@@ -532,18 +530,10 @@ Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
     Set taskTextRange = table.Cell(2, 2).Shape.TextFrame.TextRange
     Set dateTextRange = table.Cell(2, 3).Shape.TextFrame.TextRange
 
-    taskSlotCount = taskTextRange.Paragraphs.Count
-    dateSlotCount = dateTextRange.Paragraphs.Count
-    If taskSlotCount > dateSlotCount Then taskSlotCount = dateSlotCount
-
-    If items.Count > taskSlotCount Then
-        Err.Raise vbObjectError + 7522, "FillWeeklyReportCurrentTable", _
-                  "원본 PPT 업무 현황 영역의 최대 항목 수(" & _
-                  CStr(taskSlotCount) & "개)를 초과했습니다."
-    End If
-
     ClearPowerPointTextRangeParagraphs taskTextRange
     ClearPowerPointTextRangeParagraphs dateTextRange
+    EnsurePowerPointParagraphCount taskTextRange, items.Count
+    EnsurePowerPointParagraphCount dateTextRange, items.Count
 
     For i = 1 To items.Count
         levelValue = CLng(levelItems(i))
@@ -587,6 +577,13 @@ Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
     ' PowerPoint expands tables automatically when text wraps.
     ' Restore the exact template height so the original layout never changes.
     tableShape.Height = originalTableHeight
+End Sub
+
+Private Sub EnsurePowerPointParagraphCount(ByVal textRange As Object, _
+                                           ByVal requiredParagraphCount As Long)
+    Do While textRange.Paragraphs.Count < requiredParagraphCount
+        textRange.InsertAfter vbCr
+    Loop
 End Sub
 
 Private Sub FillWeeklyReportPlanArea(ByVal slide As Object, ByVal plannedItems As Collection)
