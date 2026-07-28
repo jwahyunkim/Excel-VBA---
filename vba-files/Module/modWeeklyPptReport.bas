@@ -120,6 +120,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim moduleText As String
     Dim ownerText As String
     Dim useLegacyLayout As Boolean
+    Dim showOwnerNames As Boolean
     Dim pptApp As Object
     Dim presentation As Object
     Dim slide As Object
@@ -153,6 +154,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Set plannedRows = New Collection
 
     lastRow = GetLastDataRow(ws)
+    EnsureConfigSheet
+    showOwnerNames = GetWeeklyReportShowOwnerFlag()
     LoadHolidaySettings holidayDict, workdayDict
     UpdateDevelopmentProgressStatuses ws, lastRow, holidayDict, workdayDict
 
@@ -171,7 +174,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                             moduleText, _
                             taskText, 2, GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty), _
                             BuildInProgressEndDateText(ws.Cells(r, COL_PLAN_END).Value), _
-                            useLegacyLayout, GetTaskLevel(ws, r))
+                            useLegacyLayout, GetTaskLevel(ws, r), ownerText)
 
                     Case UCase$(REPORT_STATUS_COMPLETED)
                         If IsCompletedInReportWeek(ws, r, currentWeekStart, currentWeekEnd) Then
@@ -179,7 +182,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                                 moduleText, _
                                 taskText, 1, GetWeeklySortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value), _
                                 BuildCompletedEndDateText(ws, r), _
-                                useLegacyLayout, GetTaskLevel(ws, r))
+                                useLegacyLayout, GetTaskLevel(ws, r), ownerText)
                         End If
 
                     Case UCase$(REPORT_STATUS_PLANNED)
@@ -187,15 +190,15 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                             AddSortedWeeklyRow plannedRows, Array( _
                                 moduleText, _
                                 taskText, 3, GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty), "", _
-                                useLegacyLayout, GetTaskLevel(ws, r))
+                                useLegacyLayout, GetTaskLevel(ws, r), ownerText)
                         End If
                 End Select
             End If
         End If
     Next r
 
-    BuildWeeklyGroupedCurrentItems currentRows, currentItems, currentDates, currentLevels
-    BuildWeeklyGroupedPlanItems plannedRows, plannedItems
+    BuildWeeklyGroupedCurrentItems currentRows, currentItems, currentDates, currentLevels, showOwnerNames
+    BuildWeeklyGroupedPlanItems plannedRows, plannedItems, showOwnerNames
 
     outputFolder = ThisWorkbook.Path & Application.PathSeparator & WEEKLY_PPT_OUTPUT_FOLDER
     If Len(Dir$(outputFolder, vbDirectory)) = 0 Then MkDir outputFolder
@@ -294,7 +297,8 @@ End Sub
 Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
                                            ByVal items As Collection, _
                                            ByVal dates As Collection, _
-                                           ByVal levels As Collection)
+                                           ByVal levels As Collection, _
+                                           ByVal showOwnerNames As Boolean)
     Dim moduleNames As Collection
     Dim moduleSeen As Object
     Dim rowItem As Variant
@@ -312,14 +316,20 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
     Next rowItem
 
     For Each moduleName In moduleNames
-        items.Add CStr(moduleName)
+        items.Add AppendWeeklyOwnerText( _
+                      CStr(moduleName), _
+                      GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
+                      showOwnerNames)
         dates.Add ""
         levels.Add 1
 
         For Each rowItem In rows
             If Not CBool(rowItem(5)) And _
                StrComp(CStr(rowItem(0)), CStr(moduleName), vbTextCompare) = 0 Then
-                items.Add CStr(rowItem(1))
+                items.Add AppendWeeklyOwnerText( _
+                              CStr(rowItem(1)), _
+                              CStr(rowItem(7)), _
+                              showOwnerNames)
                 dates.Add CStr(rowItem(4))
                 levels.Add 2
             End If
@@ -328,7 +338,10 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
 
     For Each rowItem In rows
         If CBool(rowItem(5)) Then
-            items.Add CStr(rowItem(1))
+            items.Add AppendWeeklyOwnerText( _
+                          CStr(rowItem(1)), _
+                          CStr(rowItem(7)), _
+                          showOwnerNames)
             dates.Add CStr(rowItem(4))
             levels.Add CLng(rowItem(6))
         End If
@@ -336,7 +349,8 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
 End Sub
 
 Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
-                                        ByVal items As Collection)
+                                         ByVal items As Collection, _
+                                         ByVal showOwnerNames As Boolean)
     Dim moduleNames As Collection
     Dim moduleSeen As Object
     Dim rowItem As Variant
@@ -355,20 +369,75 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
     Next rowItem
 
     For Each moduleName In moduleNames
-        blockText = CStr(moduleName)
+        blockText = AppendWeeklyOwnerText( _
+                        CStr(moduleName), _
+                        GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
+                        showOwnerNames)
         For Each rowItem In rows
             If Not CBool(rowItem(5)) And _
                StrComp(CStr(rowItem(0)), CStr(moduleName), vbTextCompare) = 0 Then
-                blockText = blockText & ChrW(11) & "    " & ChrW(&H2022) & " " & CStr(rowItem(1))
+                blockText = blockText & ChrW(11) & "    " & ChrW(&H2022) & " " & _
+                            AppendWeeklyOwnerText( _
+                                CStr(rowItem(1)), _
+                                CStr(rowItem(7)), _
+                                showOwnerNames)
             End If
         Next rowItem
         items.Add blockText
     Next moduleName
 
     For Each rowItem In rows
-        If CBool(rowItem(5)) Then items.Add CStr(rowItem(1))
+        If CBool(rowItem(5)) Then
+            items.Add AppendWeeklyOwnerText( _
+                          CStr(rowItem(1)), _
+                          CStr(rowItem(7)), _
+                          showOwnerNames)
+        End If
     Next rowItem
 End Sub
+
+Private Function AppendWeeklyOwnerText(ByVal displayText As String, _
+                                       ByVal ownerText As String, _
+                                       ByVal showOwnerNames As Boolean) As String
+    AppendWeeklyOwnerText = displayText
+    ownerText = Trim$(ownerText)
+
+    If showOwnerNames And Len(ownerText) > 0 Then
+        AppendWeeklyOwnerText = displayText & " (" & ownerText & ")"
+    End If
+End Function
+
+Private Function GetWeeklyModuleOwnerText(ByVal rows As Collection, _
+                                          ByVal moduleName As String) As String
+    Dim ownerNames As Collection
+    Dim ownerSeen As Object
+    Dim rowItem As Variant
+    Dim ownerText As String
+    Dim ownerName As Variant
+    Dim result As String
+
+    Set ownerNames = New Collection
+    Set ownerSeen = CreateObject("Scripting.Dictionary")
+    ownerSeen.CompareMode = vbTextCompare
+
+    For Each rowItem In rows
+        If Not CBool(rowItem(5)) And _
+           StrComp(CStr(rowItem(0)), moduleName, vbTextCompare) = 0 Then
+            ownerText = Trim$(CStr(rowItem(7)))
+            If Len(ownerText) > 0 And Not ownerSeen.Exists(ownerText) Then
+                ownerSeen.Add ownerText, True
+                ownerNames.Add ownerText
+            End If
+        End If
+    Next rowItem
+
+    For Each ownerName In ownerNames
+        If Len(result) > 0 Then result = result & ", "
+        result = result & CStr(ownerName)
+    Next ownerName
+
+    GetWeeklyModuleOwnerText = result
+End Function
 
 Private Function GetWeeklyReportFriday(ByVal targetDate As Date) As Date
     Dim weekdayNumber As Long

@@ -1,4 +1,4 @@
-Attribute VB_Name = "modHoliday"
+ï»¿Attribute VB_Name = "modHoliday"
 Option Explicit
 
 Public Sub EnsureConfigSheet()
@@ -15,6 +15,7 @@ Public Sub EnsureConfigSheet()
     Dim rngTaskMaxLength As Range
     Dim rngReportLayout As Range
     Dim rngReportBullets As Range
+    Dim rngWeeklyReportOwner As Range
     Dim legacyTaskMaxLength As Variant
 
     On Error Resume Next
@@ -36,35 +37,37 @@ Public Sub EnsureConfigSheet()
         ws.Name = CONFIG_SHEET_NAME
     End If
 
-    ws.Range(HOLIDAY_COL_DATE & HOLIDAY_HEADER_ROW).Value = "³¯Â¥"
-    ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_HEADER_ROW).Value = "±¸ºĞ"
-    ws.Range(HOLIDAY_COL_DESC & HOLIDAY_HEADER_ROW).Value = "¼³¸í"
+    ws.Range(HOLIDAY_COL_DATE & HOLIDAY_HEADER_ROW).Value = "ë‚ ì§œ"
+    ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_HEADER_ROW).Value = "êµ¬ë¶„"
+    ws.Range(HOLIDAY_COL_DESC & HOLIDAY_HEADER_ROW).Value = "ì„¤ëª…"
 
-    ws.Range("E1").Value = "ÀÔ·Â ¿¹½Ã"
-    ws.Range("E2").Value = "A¿­: ³¯Â¥"
-    ws.Range("E3").Value = "B¿­: ÈŞÀÏ ¶Ç´Â ±Ù¹«ÀÏ"
-    ws.Range("E4").Value = "C¿­: ¼³¸í(¼±ÅÃ)"
+    ws.Range("E1").Value = "ê°„íŠ¸ - íœ´ì¼ ì…ë ¥ ì˜ˆì‹œ"
+    ws.Range("E2").Value = "Aì—´: ë‚ ì§œ"
+    ws.Range("E3").Value = "Bì—´: íœ´ì¼ ë˜ëŠ” ê·¼ë¬´ì¼"
+    ws.Range("E4").Value = "Cì—´: ì„¤ëª…(ì„ íƒ)"
 
-    ws.Range(HIDE_SETTING_TITLE_CELL).Value = "¼û±è ¼³Á¤"
-    ws.Range(HIDE_SETTING_LEVEL_LABEL_CELL).Value = "¿Ï·á ¼û±è ·¹º§"
-    ws.Range(DISPLAY_SETTING_TITLE_CELL).Value = "Ç¥½Ã ±â°£ ¼³Á¤"
-    ws.Range(DISPLAY_SETTING_START_LABEL_CELL).Value = "Ç¥½Ã ½ÃÀÛÀÏ"
-    ws.Range(DISPLAY_SETTING_END_LABEL_CELL).Value = "Ç¥½Ã Á¾·áÀÏ"
-    ws.Range(DISPLAY_SETTING_GANTT_ONLY_LABEL_CELL).Value = "°£Æ® only"
-    ws.Range(DISPLAY_SETTING_REPORT_ONLY_LABEL_CELL).Value = "º¸°í only"
-    ws.Range(INPUT_SETTING_TITLE_CELL).Value = "ÀÔ·Â Á¦ÇÑ ¼³Á¤"
+    ws.Range(HIDE_SETTING_TITLE_CELL).Value = "ê°„íŠ¸ - ìˆ¨ê¹€ ì„¤ì •"
+    ws.Range(HIDE_SETTING_LEVEL_LABEL_CELL).Value = "ì™„ë£Œ ìˆ¨ê¹€ ë ˆë²¨"
+    ws.Range(DISPLAY_SETTING_TITLE_CELL).Value = "ê°„íŠ¸ - í‘œì‹œ ê¸°ê°„ ì„¤ì •"
+    ws.Range(DISPLAY_SETTING_START_LABEL_CELL).Value = "í‘œì‹œ ì‹œì‘ì¼"
+    ws.Range(DISPLAY_SETTING_END_LABEL_CELL).Value = "í‘œì‹œ ì¢…ë£Œì¼"
+    ws.Range(DISPLAY_SETTING_GANTT_ONLY_LABEL_CELL).Value = "ê°„íŠ¸ only"
+    ws.Range(DISPLAY_SETTING_REPORT_ONLY_LABEL_CELL).Value = "ë³´ê³  only"
+    ws.Range(INPUT_SETTING_TITLE_CELL).Value = "ê°„íŠ¸ - ì…ë ¥ ì œí•œ ì„¤ì •"
     legacyTaskMaxLength = ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value
-    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 ³»¿ë ÃÖ´ë ±ÛÀÚ ¼ö"
-    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 ³»¿ë ÃÖ´ë ±ÛÀÚ ¼ö"
-    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 ³»¿ë ÃÖ´ë ±ÛÀÚ ¼ö"
-    ws.Range(DEV_REPORT_SETTING_TITLE_CELL).Value = "°³¹ß º¸°í ¼³Á¤"
-    ws.Range(DEV_REPORT_LAYOUT_LABEL_CELL).Value = "Ãâ·Â Çü½Ä"
-    ws.Range(DEV_REPORT_BULLET_TITLE_CELL).Value = "·¹º§º° ±Û¸Ó¸® ±âÈ£"
+    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 ë‚´ìš© ìµœëŒ€ ê¸€ì ìˆ˜"
+    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 ë‚´ìš© ìµœëŒ€ ê¸€ì ìˆ˜"
+    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 ë‚´ìš© ìµœëŒ€ ê¸€ì ìˆ˜"
+    ws.Range(DEV_REPORT_SETTING_TITLE_CELL).Value = "ê°œë°œë³´ê³  ì„¤ì •"
+    ws.Range(DEV_REPORT_LAYOUT_LABEL_CELL).Value = "ì¶œë ¥ í˜•ì‹"
+    ws.Range(DEV_REPORT_BULLET_TITLE_CELL).Value = "ë ˆë²¨ë³„ ê¸€ë¨¸ë¦¬ ê¸°í˜¸"
     ws.Range(DEV_REPORT_BULLET_LEVEL1_LABEL_CELL).Value = "Level 1"
     ws.Range(DEV_REPORT_BULLET_LEVEL2_LABEL_CELL).Value = "Level 2"
     ws.Range(DEV_REPORT_BULLET_LEVEL3_LABEL_CELL).Value = "Level 3"
-    ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "¼û±è Á¦¿Ü No."
-    ws.Range(HIDE_EXCLUDE_DATE_HEADER_CELL).Value = "¼û±è Á¦¿Ü ³¯Â¥"
+    ws.Range(WEEKLY_REPORT_SETTING_TITLE_CELL).Value = "ì£¼ê°„ë³´ê³  ì„¤ì •"
+    ws.Range(WEEKLY_REPORT_OWNER_LABEL_CELL).Value = "ë‹´ë‹¹ì ì´ë¦„ ì¶œë ¥"
+    ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "ìˆ¨ê¹€ ì œì™¸ No."
+    ws.Range(HIDE_EXCLUDE_DATE_HEADER_CELL).Value = "ìˆ¨ê¹€ ì œì™¸ ë‚ ì§œ"
 
     If Trim$(CStr(ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value)) = "" Then
         ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value = 3
@@ -80,7 +83,7 @@ Public Sub EnsureConfigSheet()
         ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value = legacyTaskMaxLength
     End If
     If StrComp(Trim$(CStr(ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value)), _
-               "ÇöÀç Çü½Ä", vbTextCompare) = 0 Then _
+               "í˜„ì¬ í˜•ì‹", vbTextCompare) = 0 Then _
         ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value = DEV_REPORT_LAYOUT_CURRENT
     If Trim$(CStr(ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value)) = "" Then _
         ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value = DEV_REPORT_LAYOUT_CURRENT
@@ -90,6 +93,8 @@ Public Sub EnsureConfigSheet()
         ws.Range(DEV_REPORT_BULLET_LEVEL2_VALUE_CELL).Value = "-"
     If Trim$(CStr(ws.Range(DEV_REPORT_BULLET_LEVEL3_VALUE_CELL).Value)) = "" Then _
         ws.Range(DEV_REPORT_BULLET_LEVEL3_VALUE_CELL).Value = ChrW(&HB7)
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value = "Y"
 
 
     ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
@@ -102,26 +107,35 @@ Public Sub EnsureConfigSheet()
     ws.Columns("J").ColumnWidth = 14
     ws.Columns("L").ColumnWidth = 20
     ws.Columns("M").ColumnWidth = 16
+    ws.Columns("O").ColumnWidth = 20
+    ws.Columns("P").ColumnWidth = 14
 
     ws.Range("A1:C1").Font.Bold = True
     ws.Range("A1:C1").Interior.Color = RGB(242, 242, 242)
     ws.Range("A1:C1").Borders.LineStyle = xlContinuous
 
+    ws.Range("E1").Font.Bold = True
+    ws.Range("E1").Interior.Color = RGB(221, 235, 247)
+    ws.Range("E1").Borders.LineStyle = xlContinuous
+
     ws.Range("F1:G1").Font.Bold = True
-    ws.Range("F1:G1").Interior.Color = RGB(242, 242, 242)
+    ws.Range("F1:G1").Interior.Color = RGB(221, 235, 247)
     ws.Range("F1:G1").Borders.LineStyle = xlContinuous
 
     ws.Range("I1:J1").Font.Bold = True
-    ws.Range("I1:J1").Interior.Color = RGB(242, 242, 242)
+    ws.Range("I1:J1").Interior.Color = RGB(221, 235, 247)
     ws.Range("I1:J1").Borders.LineStyle = xlContinuous
 
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Font.Bold = True
-    ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(242, 242, 242)
+    ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(221, 235, 247)
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Borders.LineStyle = xlContinuous
     ws.Range("I8:J10").Borders.LineStyle = xlContinuous
     ws.Range("L1:M1,L4:M4").Font.Bold = True
-    ws.Range("L1:M1,L4:M4").Interior.Color = RGB(242, 242, 242)
+    ws.Range("L1:M1,L4:M4").Interior.Color = RGB(226, 239, 218)
     ws.Range("L1:M2,L4:M7").Borders.LineStyle = xlContinuous
+    ws.Range("O1:P1").Font.Bold = True
+    ws.Range("O1:P1").Interior.Color = RGB(252, 228, 214)
+    ws.Range("O1:P2").Borders.LineStyle = xlContinuous
 
     ws.Range("F2:G2").Borders.LineStyle = xlContinuous
     ws.Range("I2:J5").Borders.LineStyle = xlContinuous
@@ -138,8 +152,9 @@ Public Sub EnsureConfigSheet()
     ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).NumberFormat = "0"
     ws.Range("M2:M7").NumberFormat = "General"
+    ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).NumberFormat = "General"
 
-    lastSheetRow = ws.Rows.Count
+    lastSheetRow = ws.rows.Count
     Set rngType = ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_DATA_START_ROW & ":" & HOLIDAY_COL_TYPE & lastSheetRow)
     Set rngHideLevel = ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL)
     Set rngExcludeNo = ws.Range(HIDE_EXCLUDE_NO_START_CELL & ":F" & lastSheetRow)
@@ -151,6 +166,7 @@ Public Sub EnsureConfigSheet()
     Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_RANGE)
     Set rngReportLayout = ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL)
     Set rngReportBullets = ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & DEV_REPORT_BULLET_LEVEL3_VALUE_CELL)
+    Set rngWeeklyReportOwner = ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL)
 
     On Error Resume Next
     rngType.Validation.Delete
@@ -164,6 +180,7 @@ Public Sub EnsureConfigSheet()
     rngTaskMaxLength.Validation.Delete
     rngReportLayout.Validation.Delete
     rngReportBullets.Validation.Delete
+    rngWeeklyReportOwner.Validation.Delete
     On Error GoTo 0
 
     rngType.Validation.Add Type:=xlValidateList, _
@@ -173,10 +190,10 @@ Public Sub EnsureConfigSheet()
 
     rngType.Validation.IgnoreBlank = True
     rngType.Validation.InCellDropdown = True
-    rngType.Validation.InputTitle = "±¸ºĞ ¼±ÅÃ"
-    rngType.Validation.InputMessage = "ÈŞÀÏ ¶Ç´Â ±Ù¹«ÀÏ¸¸ ¼±ÅÃÇÒ ¼ö ÀÖ½À´Ï´Ù."
-    rngType.Validation.ErrorTitle = "ÀÔ·Â ¿À·ù"
-    rngType.Validation.ErrorMessage = "ÈŞÀÏ ¶Ç´Â ±Ù¹«ÀÏ¸¸ ÀÔ·ÂÇÒ ¼ö ÀÖ½À´Ï´Ù."
+    rngType.Validation.InputTitle = "êµ¬ë¶„ ì„ íƒ"
+    rngType.Validation.InputMessage = "íœ´ì¼ ë˜ëŠ” ê·¼ë¬´ì¼ë§Œ ì„ íƒí•  ìˆ˜ ìˆìŠµë‹ˆë‹¤."
+    rngType.Validation.ErrorTitle = "ì…ë ¥ ì˜¤ë¥˜"
+    rngType.Validation.ErrorMessage = "íœ´ì¼ ë˜ëŠ” ê·¼ë¬´ì¼ë§Œ ì…ë ¥í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤."
 
     rngHideLevel.Validation.Add Type:=xlValidateWholeNumber, _
                                 AlertStyle:=xlValidAlertStop, _
@@ -205,10 +222,10 @@ Public Sub EnsureConfigSheet()
                                    Formula1:="2000-01-01", _
                                    Formula2:="2100-12-31"
     rngDisplayStart.Validation.IgnoreBlank = True
-    rngDisplayStart.Validation.InputTitle = "Ç¥½Ã ½ÃÀÛÀÏ"
-    rngDisplayStart.Validation.InputMessage = "°£Æ®¿¡¼­ Ã³À½ º¸¿©ÁÙ ³¯Â¥¸¦ ÀÔ·ÂÇÏ¼¼¿ä."
-    rngDisplayStart.Validation.ErrorTitle = "ÀÔ·Â ¿À·ù"
-    rngDisplayStart.Validation.ErrorMessage = "¿Ã¹Ù¸¥ ³¯Â¥¸¦ ÀÔ·ÂÇÏ¼¼¿ä."
+    rngDisplayStart.Validation.InputTitle = "í‘œì‹œ ì‹œì‘ì¼"
+    rngDisplayStart.Validation.InputMessage = "ê°„íŠ¸ì—ì„œ ì²˜ìŒ ë³´ì—¬ì¤„ ë‚ ì§œë¥¼ ì…ë ¥í•˜ì„¸ìš”."
+    rngDisplayStart.Validation.ErrorTitle = "ì…ë ¥ ì˜¤ë¥˜"
+    rngDisplayStart.Validation.ErrorMessage = "ì˜¬ë°”ë¥¸ ë‚ ì§œë¥¼ ì…ë ¥í•˜ì„¸ìš”."
 
     rngDisplayEnd.Validation.Add Type:=xlValidateDate, _
                                  AlertStyle:=xlValidAlertStop, _
@@ -216,10 +233,10 @@ Public Sub EnsureConfigSheet()
                                  Formula1:="2000-01-01", _
                                  Formula2:="2100-12-31"
     rngDisplayEnd.Validation.IgnoreBlank = True
-    rngDisplayEnd.Validation.InputTitle = "Ç¥½Ã Á¾·áÀÏ"
-    rngDisplayEnd.Validation.InputMessage = "°£Æ®¿¡¼­ ¸¶Áö¸·À¸·Î º¸¿©ÁÙ ³¯Â¥¸¦ ÀÔ·ÂÇÏ¼¼¿ä."
-    rngDisplayEnd.Validation.ErrorTitle = "ÀÔ·Â ¿À·ù"
-    rngDisplayEnd.Validation.ErrorMessage = "¿Ã¹Ù¸¥ ³¯Â¥¸¦ ÀÔ·ÂÇÏ¼¼¿ä."
+    rngDisplayEnd.Validation.InputTitle = "í‘œì‹œ ì¢…ë£Œì¼"
+    rngDisplayEnd.Validation.InputMessage = "ê°„íŠ¸ì—ì„œ ë§ˆì§€ë§‰ìœ¼ë¡œ ë³´ì—¬ì¤„ ë‚ ì§œë¥¼ ì…ë ¥í•˜ì„¸ìš”."
+    rngDisplayEnd.Validation.ErrorTitle = "ì…ë ¥ ì˜¤ë¥˜"
+    rngDisplayEnd.Validation.ErrorMessage = "ì˜¬ë°”ë¥¸ ë‚ ì§œë¥¼ ì…ë ¥í•˜ì„¸ìš”."
 
     rngDisplayGanttOnly.Validation.Add Type:=xlValidateList, _
                                         AlertStyle:=xlValidAlertStop, _
@@ -241,13 +258,13 @@ Public Sub EnsureConfigSheet()
                                     Formula1:=CStr(MIN_TASK_MAX_LENGTH), _
                                     Formula2:=CStr(MAX_TASK_MAX_LENGTH)
     rngTaskMaxLength.Validation.IgnoreBlank = False
-    rngTaskMaxLength.Validation.InputTitle = "³»¿ë ±ÛÀÚ ¼ö Á¦ÇÑ"
+    rngTaskMaxLength.Validation.InputTitle = "ë‚´ìš© ê¸€ì ìˆ˜ ì œí•œ"
     rngTaskMaxLength.Validation.InputMessage = _
-        MIN_TASK_MAX_LENGTH & "~" & MAX_TASK_MAX_LENGTH & " »çÀÌ Á¤¼ö¸¦ ÀÔ·ÂÇÏ¼¼¿ä."
-    rngTaskMaxLength.Validation.ErrorTitle = "¼³Á¤°ª ¿À·ù"
+        MIN_TASK_MAX_LENGTH & "~" & MAX_TASK_MAX_LENGTH & " ì‚¬ì´ ì •ìˆ˜ë¥¼ ì…ë ¥í•˜ì„¸ìš”."
+    rngTaskMaxLength.Validation.ErrorTitle = "ì„¤ì •ê°’ ì˜¤ë¥˜"
     rngTaskMaxLength.Validation.ErrorMessage = _
-        "·¹º§º° ³»¿ë ÃÖ´ë ±ÛÀÚ ¼ö´Â " & MIN_TASK_MAX_LENGTH & "~" & _
-        MAX_TASK_MAX_LENGTH & " »çÀÌ Á¤¼ö¿©¾ß ÇÕ´Ï´Ù."
+        "ë ˆë²¨ë³„ ë‚´ìš© ìµœëŒ€ ê¸€ì ìˆ˜ëŠ” " & MIN_TASK_MAX_LENGTH & "~" & _
+        MAX_TASK_MAX_LENGTH & " ì‚¬ì´ ì •ìˆ˜ì—¬ì•¼ í•©ë‹ˆë‹¤."
 
     rngReportLayout.Validation.Add Type:=xlValidateList, _
                                    AlertStyle:=xlValidAlertStop, _
@@ -255,12 +272,12 @@ Public Sub EnsureConfigSheet()
                                    Formula1:=DEV_REPORT_LAYOUT_CURRENT & "," & DEV_REPORT_LAYOUT_BY_STATUS
     rngReportLayout.Validation.IgnoreBlank = False
     rngReportLayout.Validation.InCellDropdown = True
-    rngReportLayout.Validation.InputTitle = "°³¹ß º¸°í Ãâ·Â Çü½Ä"
+    rngReportLayout.Validation.InputTitle = "ê°œë°œ ë³´ê³  ì¶œë ¥ í˜•ì‹"
     rngReportLayout.Validation.InputMessage = _
-        "¸ğµâº° ÅëÇÕ ¶Ç´Â »óÅÂº° ±¸ºĞÀ» ¼±ÅÃÇÏ¼¼¿ä. º¸°í¼­´Â Ç×»ó ÇÏ³ªÀÇ ÆÄÀÏ·Î »ı¼ºµË´Ï´Ù."
-    rngReportLayout.Validation.ErrorTitle = "¼³Á¤°ª ¿À·ù"
+        "ëª¨ë“ˆë³„ í†µí•© ë˜ëŠ” ìƒíƒœë³„ êµ¬ë¶„ì„ ì„ íƒí•˜ì„¸ìš”. ë³´ê³ ì„œëŠ” í•­ìƒ í•˜ë‚˜ì˜ íŒŒì¼ë¡œ ìƒì„±ë©ë‹ˆë‹¤."
+    rngReportLayout.Validation.ErrorTitle = "ì„¤ì •ê°’ ì˜¤ë¥˜"
     rngReportLayout.Validation.ErrorMessage = _
-        "¸ğµâº° ÅëÇÕ ¶Ç´Â »óÅÂº° ±¸ºĞ¸¸ ¼±ÅÃÇÒ ¼ö ÀÖ½À´Ï´Ù."
+        "ëª¨ë“ˆë³„ í†µí•© ë˜ëŠ” ìƒíƒœë³„ êµ¬ë¶„ë§Œ ì„ íƒí•  ìˆ˜ ìˆìŠµë‹ˆë‹¤."
 
     rngReportBullets.Validation.Add Type:=xlValidateTextLength, _
                                     AlertStyle:=xlValidAlertStop, _
@@ -268,10 +285,22 @@ Public Sub EnsureConfigSheet()
                                     Formula1:="1", _
                                     Formula2:="5"
     rngReportBullets.Validation.IgnoreBlank = False
-    rngReportBullets.Validation.InputTitle = "·¹º§º° ±Û¸Ó¸® ±âÈ£"
-    rngReportBullets.Validation.InputMessage = "°¢ Level¿¡ »ç¿ëÇÒ ±Û¸Ó¸® ±âÈ£¸¦ 1~5ÀÚ·Î ÀÔ·ÂÇÏ¼¼¿ä."
-    rngReportBullets.Validation.ErrorTitle = "¼³Á¤°ª ¿À·ù"
-    rngReportBullets.Validation.ErrorMessage = "±Û¸Ó¸® ±âÈ£´Â 1~5ÀÚ·Î ÀÔ·ÂÇØ¾ß ÇÕ´Ï´Ù."
+    rngReportBullets.Validation.InputTitle = "ë ˆë²¨ë³„ ê¸€ë¨¸ë¦¬ ê¸°í˜¸"
+    rngReportBullets.Validation.InputMessage = "ê° Levelì— ì‚¬ìš©í•  ê¸€ë¨¸ë¦¬ ê¸°í˜¸ë¥¼ 1~5ìë¡œ ì…ë ¥í•˜ì„¸ìš”."
+    rngReportBullets.Validation.ErrorTitle = "ì„¤ì •ê°’ ì˜¤ë¥˜"
+    rngReportBullets.Validation.ErrorMessage = "ê¸€ë¨¸ë¦¬ ê¸°í˜¸ëŠ” 1~5ìë¡œ ì…ë ¥í•´ì•¼ í•©ë‹ˆë‹¤."
+
+    rngWeeklyReportOwner.Validation.Add Type:=xlValidateList, _
+                                        AlertStyle:=xlValidAlertStop, _
+                                        Operator:=xlBetween, _
+                                        Formula1:="Y,N"
+    rngWeeklyReportOwner.Validation.IgnoreBlank = False
+    rngWeeklyReportOwner.Validation.InCellDropdown = True
+    rngWeeklyReportOwner.Validation.InputTitle = "ì£¼ê°„ë³´ê³  ë‹´ë‹¹ì í‘œì‹œ"
+    rngWeeklyReportOwner.Validation.InputMessage = _
+        "ëª¨ë“ˆëª…ê³¼ ì—…ë¬´ëª… ë’¤ì— ë‹´ë‹¹ìë¥¼ í‘œì‹œí•˜ë ¤ë©´ Y, ìˆ¨ê¸°ë ¤ë©´ Nì„ ì„ íƒí•˜ì„¸ìš”."
+    rngWeeklyReportOwner.Validation.ErrorTitle = "ì„¤ì •ê°’ ì˜¤ë¥˜"
+    rngWeeklyReportOwner.Validation.ErrorMessage = "Y ë˜ëŠ” Në§Œ ì„ íƒí•  ìˆ˜ ìˆìŠµë‹ˆë‹¤."
 End Sub
 
 Public Sub LoadHolidaySettings(ByRef holidayDict As Object, ByRef workdayDict As Object)
@@ -287,7 +316,7 @@ Public Sub LoadHolidaySettings(ByRef holidayDict As Object, ByRef workdayDict As
     Set workdayDict = CreateObject("Scripting.Dictionary")
 
     Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    lastRow = ws.Cells(ws.Rows.Count, HOLIDAY_COL_DATE).End(xlUp).Row
+    lastRow = ws.Cells(ws.rows.Count, HOLIDAY_COL_DATE).End(xlUp).Row
 
     If lastRow < HOLIDAY_DATA_START_ROW Then Exit Sub
 
@@ -323,18 +352,18 @@ Public Function TryGetDisplayDateRange(ByRef displayStartDate As Date, ByRef dis
     If Trim$(CStr(startValue)) = "" And Trim$(CStr(endValue)) = "" Then Exit Function
 
     If Trim$(CStr(startValue)) = "" Or Trim$(CStr(endValue)) = "" Then
-        Err.Raise vbObjectError + 7101, "TryGetDisplayDateRange", "config ½ÃÆ®ÀÇ Ç¥½Ã ½ÃÀÛÀÏ°ú Ç¥½Ã Á¾·áÀÏÀ» ¸ğµÎ ÀÔ·ÂÇØ¾ß ÇÕ´Ï´Ù."
+        Err.Raise vbObjectError + 7101, "TryGetDisplayDateRange", "config ì‹œíŠ¸ì˜ í‘œì‹œ ì‹œì‘ì¼ê³¼ í‘œì‹œ ì¢…ë£Œì¼ì„ ëª¨ë‘ ì…ë ¥í•´ì•¼ í•©ë‹ˆë‹¤."
     End If
 
     If Not IsDate(startValue) Or Not IsDate(endValue) Then
-        Err.Raise vbObjectError + 7102, "TryGetDisplayDateRange", "config ½ÃÆ®ÀÇ Ç¥½Ã ±â°£Àº ³¯Â¥¸¸ ÀÔ·ÂÇÒ ¼ö ÀÖ½À´Ï´Ù."
+        Err.Raise vbObjectError + 7102, "TryGetDisplayDateRange", "config ì‹œíŠ¸ì˜ í‘œì‹œ ê¸°ê°„ì€ ë‚ ì§œë§Œ ì…ë ¥í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤."
     End If
 
     displayStartDate = CDate(startValue)
     displayEndDate = CDate(endValue)
 
     If CLng(displayStartDate) > CLng(displayEndDate) Then
-        Err.Raise vbObjectError + 7103, "TryGetDisplayDateRange", "config ½ÃÆ®ÀÇ Ç¥½Ã ½ÃÀÛÀÏÀº Ç¥½Ã Á¾·áÀÏº¸´Ù ´ÊÀ» ¼ö ¾ø½À´Ï´Ù."
+        Err.Raise vbObjectError + 7103, "TryGetDisplayDateRange", "config ì‹œíŠ¸ì˜ í‘œì‹œ ì‹œì‘ì¼ì€ í‘œì‹œ ì¢…ë£Œì¼ë³´ë‹¤ ëŠ¦ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤."
     End If
 
     TryGetDisplayDateRange = True
@@ -429,6 +458,21 @@ Public Function GetDevReportLevelBullet(ByVal taskLevel As Long) As String
     GetDevReportLevelBullet = bulletText
 End Function
 
+Public Function GetWeeklyReportShowOwnerFlag() As Boolean
+    Dim ws As Worksheet
+    Dim settingValue As String
+
+    GetWeeklyReportShowOwnerFlag = True
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    settingValue = UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value2)))
+    If settingValue = "N" Then GetWeeklyReportShowOwnerFlag = False
+End Function
+
 Public Sub RefreshTaskTextLengthValidation()
     Dim ws As Worksheet
     Dim wasProtected As Boolean
@@ -498,7 +542,7 @@ Public Sub LoadExcludedRowNos(ByRef excludeNoDict As Object)
 
     Set excludeNoDict = CreateObject("Scripting.Dictionary")
     Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    lastRow = ws.Cells(ws.Rows.Count, "F").End(xlUp).Row
+    lastRow = ws.Cells(ws.rows.Count, "F").End(xlUp).Row
 
     If lastRow < 6 Then Exit Sub
 
@@ -523,7 +567,7 @@ Public Sub LoadExcludedDates(ByRef excludeDateDict As Object)
 
     Set excludeDateDict = CreateObject("Scripting.Dictionary")
     Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    lastRow = ws.Cells(ws.Rows.Count, "G").End(xlUp).Row
+    lastRow = ws.Cells(ws.rows.Count, "G").End(xlUp).Row
 
     If lastRow < 6 Then Exit Sub
 
