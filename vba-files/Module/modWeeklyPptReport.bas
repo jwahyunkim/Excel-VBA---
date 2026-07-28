@@ -111,6 +111,10 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim pageModuleGroups As Collection
     Dim pageModuleGroup As Object
     Dim customPageAssignments As Object
+    Dim outputCurrentItemPages As Collection
+    Dim outputCurrentDatePages As Collection
+    Dim outputCurrentLevelPages As Collection
+    Dim outputPlannedItemPages As Collection
     Dim reportFriday As Date
     Dim currentWeekStart As Date
     Dim currentWeekEnd As Date
@@ -128,7 +132,11 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim useLegacyLayout As Boolean
     Dim showOwnerNames As Boolean
     Dim pageMode As String
+    Dim overflowMode As String
     Dim pageIndex As Long
+    Dim modulePageIndex As Long
+    Dim currentPageCapacity As Long
+    Dim planPageCapacity As Long
     Dim pptApp As Object
     Dim presentation As Object
     Dim slide As Object
@@ -166,6 +174,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     EnsureConfigSheet
     showOwnerNames = GetWeeklyReportShowOwnerFlag()
     pageMode = GetWeeklyReportPageMode()
+    overflowMode = GetWeeklyReportOverflowMode()
     If pageMode = WEEKLY_REPORT_PAGE_MODE_CUSTOM Then
         LoadWeeklyReportCustomPageAssignments customPageAssignments
     End If
@@ -235,13 +244,18 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Set pptApp = CreateObject("PowerPoint.Application")
     Set presentation = pptApp.Presentations.Open(templatePath, False, False, False)
 
-    For pageIndex = 2 To pageModuleGroups.Count
-        Set duplicatedSlides = presentation.Slides(1).Duplicate
-        Set duplicatedSlides = Nothing
-    Next pageIndex
+    Set outputCurrentItemPages = New Collection
+    Set outputCurrentDatePages = New Collection
+    Set outputCurrentLevelPages = New Collection
+    Set outputPlannedItemPages = New Collection
 
-    For pageIndex = 1 To pageModuleGroups.Count
-        Set pageModuleGroup = pageModuleGroups(pageIndex)
+    If overflowMode = WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE Then
+        currentPageCapacity = GetWeeklyReportCurrentPageCapacity(presentation.Slides(1))
+        planPageCapacity = GetWeeklyReportPlanPageCapacity(presentation.Slides(1))
+    End If
+
+    For modulePageIndex = 1 To pageModuleGroups.Count
+        Set pageModuleGroup = pageModuleGroups(modulePageIndex)
         Set pageCurrentRows = New Collection
         Set pagePlannedRows = New Collection
         CopyWeeklyRowsForModuleGroup currentRows, pageModuleGroup, pageCurrentRows
@@ -255,11 +269,32 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
             pageCurrentRows, currentItems, currentDates, currentLevels, showOwnerNames
         BuildWeeklyGroupedPlanItems pagePlannedRows, plannedItems, showOwnerNames
 
+        AppendWeeklyOutputPages _
+            currentItems, currentDates, currentLevels, plannedItems, _
+            overflowMode, currentPageCapacity, planPageCapacity, _
+            outputCurrentItemPages, outputCurrentDatePages, _
+            outputCurrentLevelPages, outputPlannedItemPages
+    Next modulePageIndex
+
+    For pageIndex = 2 To outputCurrentItemPages.Count
+        Set duplicatedSlides = presentation.Slides(1).Duplicate
+        Set duplicatedSlides = Nothing
+    Next pageIndex
+
+    For pageIndex = 1 To outputCurrentItemPages.Count
+        Set currentItems = outputCurrentItemPages(pageIndex)
+        Set currentDates = outputCurrentDatePages(pageIndex)
+        Set currentLevels = outputCurrentLevelPages(pageIndex)
+        Set plannedItems = outputPlannedItemPages(pageIndex)
+
         Set slide = presentation.Slides(pageIndex)
         FillWeeklyReportPeriodText _
             slide, currentWeekStart, currentWeekEnd, nextWeekStart, nextWeekEnd
         FillWeeklyReportCurrentTable slide, currentItems, currentDates, currentLevels
-        FillWeeklyReportPlanArea slide, plannedItems
+        FillWeeklyReportPlanArea _
+            slide, _
+            plannedItems, _
+            (overflowMode = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND)
     Next pageIndex
 
     presentation.SaveAs outputPath, PPT_SAVE_AS_OPEN_XML_PRESENTATION
@@ -282,7 +317,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                "보고 기준일: " & Format$(reportFriday, "yyyy-mm-dd") & vbCrLf & _
                "업무 현황: " & currentRows.Count & "개" & vbCrLf & _
                "개발 계획: " & plannedRows.Count & "개" & vbCrLf & _
-               "PPT 페이지: " & pageModuleGroups.Count & "개" & vbCrLf & vbCrLf & _
+               "PPT 페이지: " & outputCurrentItemPages.Count & "개" & vbCrLf & vbCrLf & _
                outputPath, vbInformation
     End If
     Exit Function
@@ -515,6 +550,267 @@ Private Function GetWeeklyRowModuleName(ByVal rowItem As Variant) As String
     If Len(GetWeeklyRowModuleName) = 0 Then
         GetWeeklyRowModuleName = WEEKLY_UNASSIGNED_MODULE
     End If
+End Function
+
+Private Function GetWeeklyReportCurrentPageCapacity(ByVal slide As Object) As Long
+    Dim tableShape As Object
+    Dim taskSlotCount As Long
+    Dim dateSlotCount As Long
+
+    Set tableShape = FindFirstTableShape(slide)
+    If tableShape Is Nothing Then
+        Err.Raise vbObjectError + 7540, "GetWeeklyReportCurrentPageCapacity", _
+                  "PPT에서 업무 현황 표를 찾을 수 없습니다."
+    End If
+
+    taskSlotCount = tableShape.Table.Cell(2, 2).Shape.TextFrame.TextRange.Paragraphs.Count
+    dateSlotCount = tableShape.Table.Cell(2, 3).Shape.TextFrame.TextRange.Paragraphs.Count
+    GetWeeklyReportCurrentPageCapacity = taskSlotCount
+    If dateSlotCount < GetWeeklyReportCurrentPageCapacity Then
+        GetWeeklyReportCurrentPageCapacity = dateSlotCount
+    End If
+    If GetWeeklyReportCurrentPageCapacity < 1 Then GetWeeklyReportCurrentPageCapacity = 1
+End Function
+
+Private Function GetWeeklyReportPlanPageCapacity(ByVal slide As Object) As Long
+    Dim planShape As Object
+    Dim planTextRange As Object
+    Dim maintenanceParagraphIndex As Long
+    Dim lineHeight As Double
+    Dim blankSlotHeight As Double
+    Dim fixedContentHeight As Double
+    Dim availableContentHeight As Double
+
+    Set planShape = FindTextShape(slide, "(개발 항목)")
+    If planShape Is Nothing Then
+        Err.Raise vbObjectError + 7541, "GetWeeklyReportPlanPageCapacity", _
+                  "PPT에서 '(개발 항목)' 영역을 찾을 수 없습니다."
+    End If
+
+    Set planTextRange = planShape.TextFrame.TextRange
+    maintenanceParagraphIndex = FindPowerPointParagraphIndex( _
+                                    planTextRange, _
+                                    "(유지보수 항목)")
+    If maintenanceParagraphIndex < 3 Then
+        Err.Raise vbObjectError + 7542, "GetWeeklyReportPlanPageCapacity", _
+                  "원본 PPT 개발 항목 영역의 문단 구조가 예상과 다릅니다."
+    End If
+
+    lineHeight = planTextRange.Paragraphs(2).BoundHeight
+    If lineHeight <= 0 Then lineHeight = planTextRange.Paragraphs(2).Font.Size * 1.2
+    If lineHeight <= 0 Then lineHeight = 12
+
+    blankSlotHeight = 0
+    blankSlotHeight = blankSlotHeight + planTextRange.Paragraphs(2).BoundHeight
+    blankSlotHeight = blankSlotHeight + planTextRange.Paragraphs(3).BoundHeight
+    fixedContentHeight = planTextRange.BoundHeight - blankSlotHeight
+    availableContentHeight = planShape.Height - _
+                             planShape.TextFrame.MarginTop - _
+                             planShape.TextFrame.MarginBottom - _
+                             fixedContentHeight
+    GetWeeklyReportPlanPageCapacity = CLng(Fix(availableContentHeight / lineHeight))
+    If GetWeeklyReportPlanPageCapacity < 1 Then GetWeeklyReportPlanPageCapacity = 1
+End Function
+
+Private Sub AppendWeeklyOutputPages(ByVal currentItems As Collection, _
+                                    ByVal currentDates As Collection, _
+                                    ByVal currentLevels As Collection, _
+                                    ByVal plannedItems As Collection, _
+                                    ByVal overflowMode As String, _
+                                    ByVal currentPageCapacity As Long, _
+                                    ByVal planPageCapacity As Long, _
+                                    ByVal outputCurrentItemPages As Collection, _
+                                    ByVal outputCurrentDatePages As Collection, _
+                                    ByVal outputCurrentLevelPages As Collection, _
+                                    ByVal outputPlannedItemPages As Collection)
+    Dim currentItemPages As Collection
+    Dim currentDatePages As Collection
+    Dim currentLevelPages As Collection
+    Dim plannedItemPages As Collection
+    Dim pageItems As Collection
+    Dim pageDates As Collection
+    Dim pageLevels As Collection
+    Dim pagePlans As Collection
+    Dim pageCount As Long
+    Dim pageIndex As Long
+
+    If overflowMode = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND Then
+        outputCurrentItemPages.Add currentItems
+        outputCurrentDatePages.Add currentDates
+        outputCurrentLevelPages.Add currentLevels
+        outputPlannedItemPages.Add plannedItems
+        Exit Sub
+    End If
+
+    SplitWeeklyCurrentItems _
+        currentItems, currentDates, currentLevels, currentPageCapacity, _
+        currentItemPages, currentDatePages, currentLevelPages
+    Set plannedItemPages = SplitWeeklyPlannedItems(plannedItems, planPageCapacity)
+
+    pageCount = currentItemPages.Count
+    If plannedItemPages.Count > pageCount Then pageCount = plannedItemPages.Count
+
+    For pageIndex = 1 To pageCount
+        If pageIndex <= currentItemPages.Count Then
+            Set pageItems = currentItemPages(pageIndex)
+            Set pageDates = currentDatePages(pageIndex)
+            Set pageLevels = currentLevelPages(pageIndex)
+        Else
+            Set pageItems = New Collection
+            Set pageDates = New Collection
+            Set pageLevels = New Collection
+        End If
+
+        If pageIndex <= plannedItemPages.Count Then
+            Set pagePlans = plannedItemPages(pageIndex)
+        Else
+            Set pagePlans = New Collection
+        End If
+
+        outputCurrentItemPages.Add pageItems
+        outputCurrentDatePages.Add pageDates
+        outputCurrentLevelPages.Add pageLevels
+        outputPlannedItemPages.Add pagePlans
+    Next pageIndex
+End Sub
+
+Private Sub SplitWeeklyCurrentItems(ByVal items As Collection, _
+                                    ByVal dates As Collection, _
+                                    ByVal levels As Collection, _
+                                    ByVal pageCapacity As Long, _
+                                    ByRef itemPages As Collection, _
+                                    ByRef datePages As Collection, _
+                                    ByRef levelPages As Collection)
+    Dim pageItems As Collection
+    Dim pageDates As Collection
+    Dim pageLevels As Collection
+    Dim sourceIndex As Long
+    Dim levelValue As Long
+
+    Set itemPages = New Collection
+    Set datePages = New Collection
+    Set levelPages = New Collection
+    If pageCapacity < 1 Then pageCapacity = 1
+
+    If items.Count = 0 Then
+        Set pageItems = New Collection
+        Set pageDates = New Collection
+        Set pageLevels = New Collection
+        itemPages.Add pageItems
+        datePages.Add pageDates
+        levelPages.Add pageLevels
+        Exit Sub
+    End If
+
+    sourceIndex = 1
+    Do While sourceIndex <= items.Count
+        Set pageItems = New Collection
+        Set pageDates = New Collection
+        Set pageLevels = New Collection
+
+        Do While sourceIndex <= items.Count And pageItems.Count < pageCapacity
+            levelValue = CLng(levels(sourceIndex))
+            If levelValue = 1 And _
+               pageItems.Count = pageCapacity - 1 And _
+               sourceIndex < items.Count And _
+               pageItems.Count > 0 Then
+                Exit Do
+            End If
+
+            pageItems.Add CStr(items(sourceIndex))
+            pageDates.Add CStr(dates(sourceIndex))
+            pageLevels.Add levelValue
+            sourceIndex = sourceIndex + 1
+        Loop
+
+        itemPages.Add pageItems
+        datePages.Add pageDates
+        levelPages.Add pageLevels
+    Loop
+End Sub
+
+Private Function SplitWeeklyPlannedItems(ByVal items As Collection, _
+                                         ByVal pageCapacity As Long) As Collection
+    Dim result As Collection
+    Dim pageItems As Collection
+    Dim itemChunks As Collection
+    Dim itemText As Variant
+    Dim itemChunk As Variant
+    Dim chunkLineCount As Long
+    Dim usedLineCount As Long
+
+    Set result = New Collection
+    If pageCapacity < 1 Then pageCapacity = 1
+
+    If items.Count = 0 Then
+        Set pageItems = New Collection
+        result.Add pageItems
+        Set SplitWeeklyPlannedItems = result
+        Exit Function
+    End If
+
+    Set pageItems = New Collection
+    usedLineCount = 0
+
+    For Each itemText In items
+        Set itemChunks = SplitWeeklyPlanItemText(CStr(itemText), pageCapacity)
+        For Each itemChunk In itemChunks
+            chunkLineCount = CountWeeklyPlanItemLines(CStr(itemChunk))
+            If pageItems.Count > 0 And usedLineCount + chunkLineCount > pageCapacity Then
+                result.Add pageItems
+                Set pageItems = New Collection
+                usedLineCount = 0
+            End If
+
+            pageItems.Add CStr(itemChunk)
+            usedLineCount = usedLineCount + chunkLineCount
+        Next itemChunk
+    Next itemText
+
+    If pageItems.Count > 0 Then result.Add pageItems
+
+    Set SplitWeeklyPlannedItems = result
+End Function
+
+Private Function SplitWeeklyPlanItemText(ByVal itemText As String, _
+                                         ByVal pageCapacity As Long) As Collection
+    Dim result As Collection
+    Dim lines As Variant
+    Dim firstLine As String
+    Dim chunkText As String
+    Dim lineIndex As Long
+    Dim chunkLineCount As Long
+
+    Set result = New Collection
+    If pageCapacity < 1 Then pageCapacity = 1
+    lines = Split(itemText, ChrW(11))
+    firstLine = CStr(lines(LBound(lines)))
+    lineIndex = LBound(lines)
+
+    Do While lineIndex <= UBound(lines)
+        chunkText = ""
+        chunkLineCount = 0
+
+        If lineIndex > LBound(lines) And pageCapacity > 1 Then
+            chunkText = firstLine
+            chunkLineCount = 1
+        End If
+
+        Do While lineIndex <= UBound(lines) And chunkLineCount < pageCapacity
+            If Len(chunkText) > 0 Then chunkText = chunkText & ChrW(11)
+            chunkText = chunkText & CStr(lines(lineIndex))
+            chunkLineCount = chunkLineCount + 1
+            lineIndex = lineIndex + 1
+        Loop
+
+        result.Add chunkText
+    Loop
+
+    Set SplitWeeklyPlanItemText = result
+End Function
+
+Private Function CountWeeklyPlanItemLines(ByVal itemText As String) As Long
+    CountWeeklyPlanItemLines = UBound(Split(itemText, ChrW(11))) + 1
 End Function
 
 Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
@@ -824,7 +1120,9 @@ Private Sub EnsurePowerPointParagraphCount(ByVal textRange As Object, _
     Loop
 End Sub
 
-Private Sub FillWeeklyReportPlanArea(ByVal slide As Object, ByVal plannedItems As Collection)
+Private Sub FillWeeklyReportPlanArea(ByVal slide As Object, _
+                                     ByVal plannedItems As Collection, _
+                                     ByVal allowHeightExpansion As Boolean)
     Dim planShape As Object
     Dim planTextRange As Object
     Dim i As Long
@@ -905,7 +1203,7 @@ Private Sub FillWeeklyReportPlanArea(ByVal slide As Object, ByVal plannedItems A
     planShape.Left = originalLeft
     planShape.Top = originalTop
     planShape.Width = originalWidth
-    If requiredHeight > originalHeight Then
+    If allowHeightExpansion And requiredHeight > originalHeight Then
         planShape.Height = requiredHeight
     Else
         planShape.Height = originalHeight

@@ -17,6 +17,7 @@ Public Sub EnsureConfigSheet()
     Dim rngReportBullets As Range
     Dim rngWeeklyReportOwner As Range
     Dim rngWeeklyReportPageMode As Range
+    Dim rngWeeklyReportOverflowMode As Range
     Dim rngWeeklyCustomPageNumbers As Range
     Dim legacyTaskMaxLength As Variant
 
@@ -69,6 +70,7 @@ Public Sub EnsureConfigSheet()
     ws.Range(WEEKLY_REPORT_SETTING_TITLE_CELL).Value = "주간보고 설정"
     ws.Range(WEEKLY_REPORT_OWNER_LABEL_CELL).Value = "담당자 이름 출력"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_LABEL_CELL).Value = "페이지 출력 모드"
+    ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_LABEL_CELL).Value = "내용 넘침 처리"
     ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_HEADER_CELL).Value = "커스텀 페이지 번호"
     ws.Range(WEEKLY_REPORT_CUSTOM_MODULE_HEADER_CELL).Value = "모듈명"
     ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "숨김 제외 No."
@@ -102,6 +104,8 @@ Public Sub EnsureConfigSheet()
         ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value = "Y"
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_ALL
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND
 
 
     ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
@@ -142,7 +146,7 @@ Public Sub EnsureConfigSheet()
     ws.Range("L1:M2,L4:M7").Borders.LineStyle = xlContinuous
     ws.Range("O1:P1").Font.Bold = True
     ws.Range("O1:P1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O1:P3").Borders.LineStyle = xlContinuous
+    ws.Range("O1:P4").Borders.LineStyle = xlContinuous
     ws.Range("O5:P5").Font.Bold = True
     ws.Range("O5:P5").Interior.Color = RGB(252, 228, 214)
     ws.Range("O5:P" & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).Borders.LineStyle = xlContinuous
@@ -164,6 +168,7 @@ Public Sub EnsureConfigSheet()
     ws.Range("M2:M7").NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).NumberFormat = "General"
+    ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
              WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).NumberFormat = "0"
 
@@ -181,6 +186,7 @@ Public Sub EnsureConfigSheet()
     Set rngReportBullets = ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & DEV_REPORT_BULLET_LEVEL3_VALUE_CELL)
     Set rngWeeklyReportOwner = ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL)
     Set rngWeeklyReportPageMode = ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL)
+    Set rngWeeklyReportOverflowMode = ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL)
     Set rngWeeklyCustomPageNumbers = ws.Range( _
         WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
         WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW))
@@ -199,6 +205,7 @@ Public Sub EnsureConfigSheet()
     rngReportBullets.Validation.Delete
     rngWeeklyReportOwner.Validation.Delete
     rngWeeklyReportPageMode.Validation.Delete
+    rngWeeklyReportOverflowMode.Validation.Delete
     rngWeeklyCustomPageNumbers.Validation.Delete
     On Error GoTo 0
 
@@ -334,6 +341,19 @@ Public Sub EnsureConfigSheet()
         "전체 통합, 모듈별 페이지 또는 커스텀 페이지를 선택하세요."
     rngWeeklyReportPageMode.Validation.ErrorTitle = "설정값 오류"
     rngWeeklyReportPageMode.Validation.ErrorMessage = "목록에 있는 페이지 출력 모드만 선택할 수 있습니다."
+
+    rngWeeklyReportOverflowMode.Validation.Add Type:=xlValidateList, _
+                                               AlertStyle:=xlValidAlertStop, _
+                                               Operator:=xlBetween, _
+                                               Formula1:=WEEKLY_REPORT_OVERFLOW_MODE_EXPAND & "," & _
+                                                         WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
+    rngWeeklyReportOverflowMode.Validation.IgnoreBlank = False
+    rngWeeklyReportOverflowMode.Validation.InCellDropdown = True
+    rngWeeklyReportOverflowMode.Validation.InputTitle = "주간보고 내용 넘침 처리"
+    rngWeeklyReportOverflowMode.Validation.InputMessage = _
+        "영역을 계속 늘리거나 템플릿 수용량에 맞춰 새 슬라이드로 나눌 수 있습니다."
+    rngWeeklyReportOverflowMode.Validation.ErrorTitle = "설정값 오류"
+    rngWeeklyReportOverflowMode.Validation.ErrorMessage = "목록에 있는 내용 넘침 처리 모드만 선택할 수 있습니다."
 
     rngWeeklyCustomPageNumbers.Validation.Add Type:=xlValidateWholeNumber, _
                                                 AlertStyle:=xlValidAlertStop, _
@@ -537,6 +557,25 @@ Public Function GetWeeklyReportPageMode() As String
              WEEKLY_REPORT_PAGE_MODE_MODULE, _
              WEEKLY_REPORT_PAGE_MODE_CUSTOM
             GetWeeklyReportPageMode = settingValue
+    End Select
+End Function
+
+Public Function GetWeeklyReportOverflowMode() As String
+    Dim ws As Worksheet
+    Dim settingValue As String
+
+    GetWeeklyReportOverflowMode = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    settingValue = Trim$(CStr(ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value2))
+    Select Case settingValue
+        Case WEEKLY_REPORT_OVERFLOW_MODE_EXPAND, _
+             WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
+            GetWeeklyReportOverflowMode = settingValue
     End Select
 End Function
 
