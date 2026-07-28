@@ -3,12 +3,48 @@ Option Explicit
 
 Private Const HISTORY_HEADER_ROW As Long = 1
 Private Const HISTORY_DATA_START_ROW As Long = 2
+Private Const REPORT_SCOPE_PERSONAL As String = "PERSONAL"
+Private Const REPORT_SCOPE_TEAM As String = "TEAM"
+Private Const REPORT_SCOPE_MODULE As String = "MODULE"
+Private Const REPORT_UNASSIGNED_MODULE As String = "모듈 미지정"
+Private Const REPORT_UNASSIGNED_OWNER As String = "담당 미지정"
 
 Public Sub 개발진행보고_텍스트생성()
-    Call GenerateDevProgressReport(True)
+    팀개발보고_텍스트생성
+End Sub
+
+Public Sub 개인개발보고_텍스트생성()
+    Dim selectedOwner As String
+
+    selectedOwner = PromptReportFilterValue(ActiveSheet, COL_OWNER, "담당자")
+    If Len(selectedOwner) = 0 Then Exit Sub
+
+    Call GenerateScopedDevProgressReport(True, REPORT_SCOPE_PERSONAL, selectedOwner)
+End Sub
+
+Public Sub 팀개발보고_텍스트생성()
+    Call GenerateScopedDevProgressReport(True, REPORT_SCOPE_TEAM, "")
+End Sub
+
+Public Sub 모듈개발보고_텍스트생성()
+    Dim selectedModule As String
+
+    selectedModule = PromptReportFilterValue(ActiveSheet, COL_MODULE, "모듈")
+    If Len(selectedModule) = 0 Then Exit Sub
+
+    Call GenerateScopedDevProgressReport(True, REPORT_SCOPE_MODULE, selectedModule)
 End Sub
 
 Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean) As String
+    GenerateDevProgressReport = GenerateScopedDevProgressReport( _
+                                    showCompletionMessage, _
+                                    REPORT_SCOPE_TEAM, _
+                                    "")
+End Function
+
+Private Function GenerateScopedDevProgressReport(ByVal showCompletionMessage As Boolean, _
+                                                 ByVal reportScope As String, _
+                                                 ByVal selectedValue As String) As String
     Dim ws As Worksheet
     Dim historyWs As Worksheet
     Dim previousStatusDict As Object
@@ -25,13 +61,17 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
     Dim taskKey As String
     Dim moduleText As String
     Dim ownerText As String
-    Dim useLegacyLayout As Boolean
+    Dim rawModuleText As String
+    Dim rawOwnerText As String
+    Dim hierarchyPath As Variant
+    Dim includeItem As Boolean
     Dim sortDate As Double
     Dim completedCount As Long
     Dim inProgressCount As Long
     Dim plannedCount As Long
     Dim reportText As String
     Dim reportPath As String
+    Dim reportTitle As String
     Dim snapshot As Variant
     Dim errNumber As Long
     Dim errDescription As String
@@ -41,11 +81,11 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
     Set ws = ActiveSheet
 
     If ws.Name = CONFIG_SHEET_NAME Or ws.Name = REPORT_HISTORY_SHEET_NAME Then
-        Err.Raise vbObjectError + 7401, "GenerateDevProgressReport", "업무 시트에서 실행하세요."
+        Err.Raise vbObjectError + 7401, "GenerateScopedDevProgressReport", "업무 시트에서 실행하세요."
     End If
 
     If Len(ThisWorkbook.Path) = 0 Then
-        Err.Raise vbObjectError + 7402, "GenerateDevProgressReport", "통합문서를 먼저 저장하세요."
+        Err.Raise vbObjectError + 7402, "GenerateScopedDevProgressReport", "통합문서를 먼저 저장하세요."
     End If
 
     EnsureConfigSheet
@@ -73,32 +113,49 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
                    StrComp(statusText, REPORT_STATUS_IN_PROGRESS, vbTextCompare) = 0 Or _
                    StrComp(statusText, REPORT_STATUS_COMPLETED, vbTextCompare) = 0 Then
                     taskText = CleanReportTaskText(CStr(ws.Cells(r, COL_TASK).Value2))
-                    moduleText = CleanReportTaskText(CStr(ws.Cells(r, COL_MODULE).Value2))
-                    ownerText = CleanReportTaskText(CStr(ws.Cells(r, COL_OWNER).Value2))
-                    useLegacyLayout = (Len(moduleText) = 0 Or Len(ownerText) = 0)
+                    rawModuleText = GetEffectiveReportField(ws, r, COL_MODULE)
+                    rawOwnerText = GetEffectiveReportField(ws, r, COL_OWNER)
+                    includeItem = ReportItemMatchesScope( _
+                                      reportScope, _
+                                      selectedValue, _
+                                      rawModuleText, _
+                                      rawOwnerText)
+
+                    moduleText = rawModuleText
+                    ownerText = rawOwnerText
+                    If Len(moduleText) = 0 Then moduleText = REPORT_UNASSIGNED_MODULE
+                    If Len(ownerText) = 0 Then ownerText = REPORT_UNASSIGNED_OWNER
+
+                    hierarchyPath = BuildReportHierarchyPath(ws, r)
                     taskKey = BuildReportTaskKey(ws, r, taskText)
 
                     If StrComp(statusText, REPORT_STATUS_COMPLETED, vbTextCompare) = 0 Then
                         statusText = REPORT_STATUS_COMPLETED
-                        If Not previousStatusDict.Exists(taskKey) Then
-                            sortDate = GetReportSortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value)
-                            AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, useLegacyLayout)
-                            completedCount = completedCount + 1
-                        ElseIf StrComp(CStr(previousStatusDict(taskKey)), REPORT_STATUS_COMPLETED, vbTextCompare) <> 0 Then
-                            sortDate = GetReportSortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value)
-                            AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, useLegacyLayout)
-                            completedCount = completedCount + 1
+                        If includeItem Then
+                            If Not previousStatusDict.Exists(taskKey) Then
+                                sortDate = GetReportSortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value)
+                                AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, False, r, hierarchyPath)
+                                completedCount = completedCount + 1
+                            ElseIf StrComp(CStr(previousStatusDict(taskKey)), REPORT_STATUS_COMPLETED, vbTextCompare) <> 0 Then
+                                sortDate = GetReportSortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value)
+                                AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, False, r, hierarchyPath)
+                                completedCount = completedCount + 1
+                            End If
                         End If
                     ElseIf StrComp(statusText, REPORT_STATUS_IN_PROGRESS, vbTextCompare) = 0 Then
                         statusText = REPORT_STATUS_IN_PROGRESS
-                        sortDate = GetReportSortDate(ws.Cells(r, COL_PLAN_END).Value, Empty)
-                        AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, useLegacyLayout)
-                        inProgressCount = inProgressCount + 1
+                        If includeItem Then
+                            sortDate = GetReportSortDate(ws.Cells(r, COL_PLAN_END).Value, Empty)
+                            AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, False, r, hierarchyPath)
+                            inProgressCount = inProgressCount + 1
+                        End If
                     Else
                         statusText = REPORT_STATUS_PLANNED
-                        sortDate = GetReportSortDate(ws.Cells(r, COL_PLAN_END).Value, Empty)
-                        AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, useLegacyLayout)
-                        plannedCount = plannedCount + 1
+                        If includeItem Then
+                            sortDate = GetReportSortDate(ws.Cells(r, COL_PLAN_END).Value, Empty)
+                            AddSortedDevReportItem reportItems, Array(moduleText, ownerText, taskText, statusText, sortDate, False, r, hierarchyPath)
+                            plannedCount = plannedCount + 1
+                        End If
                     End If
 
                     snapshots.Add Array( _
@@ -116,9 +173,9 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
         End If
     Next r
 
-    reportText = BuildDevProgressReportText(reportDate, previousReportDate, reportItems)
-    reportPath = ThisWorkbook.Path & Application.PathSeparator & _
-                 "개발진행보고_" & Format$(reportDate, "yyyy-mm-dd") & ".txt"
+    reportTitle = BuildReportScopeTitle(reportScope, selectedValue)
+    reportText = BuildDevProgressReportText(ws, reportDate, reportTitle, reportItems)
+    reportPath = BuildScopedReportPath(reportScope, selectedValue, reportDate)
 
     WriteUtf8TextFile reportPath, reportText
 
@@ -128,10 +185,10 @@ Public Function GenerateDevProgressReport(ByVal showCompletionMessage As Boolean
     Next snapshot
     FormatReportHistorySheet historyWs
 
-    GenerateDevProgressReport = reportPath
+    GenerateScopedDevProgressReport = reportPath
 
     If showCompletionMessage Then
-        MsgBox "개발 진행 보고 생성 완료" & vbCrLf & _
+        MsgBox reportTitle & " 개발 보고 생성 완료" & vbCrLf & _
                "보고 기준일: " & Format$(reportDate, "yyyy-mm-dd") & vbCrLf & _
                "완료 건: " & completedCount & "개" & vbCrLf & _
                "진행 중: " & inProgressCount & "개" & vbCrLf & _
@@ -146,11 +203,201 @@ EH:
 
     If showCompletionMessage Then
         MsgBox "개발 진행 보고를 생성할 수 없습니다: " & errDescription, vbExclamation
-        GenerateDevProgressReport = ""
+        GenerateScopedDevProgressReport = ""
     Else
-        Err.Raise errNumber, "GenerateDevProgressReport", errDescription
+        Err.Raise errNumber, "GenerateScopedDevProgressReport", errDescription
     End If
 End Function
+
+Private Function PromptReportFilterValue(ByVal ws As Worksheet, _
+                                         ByVal columnAddress As String, _
+                                         ByVal valueLabel As String) As String
+    Dim values As Collection
+    Dim valueSeen As Object
+    Dim promptText As String
+    Dim answer As Variant
+    Dim selectedIndex As Long
+    Dim i As Long
+    Dim useDirectInput As Boolean
+
+    If ws Is Nothing Then Exit Function
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = REPORT_HISTORY_SHEET_NAME Then
+        MsgBox "업무 시트에서 실행하세요.", vbExclamation
+        Exit Function
+    End If
+
+    Set values = CollectReportFilterValues(ws, columnAddress)
+    If values.Count = 0 Then
+        MsgBox "선택할 " & valueLabel & " 값이 없습니다.", vbExclamation
+        Exit Function
+    End If
+
+    promptText = valueLabel & "를 선택하세요." & vbCrLf & vbCrLf
+    For i = 1 To values.Count
+        If Len(promptText) + Len(CStr(values(i))) + 10 > 850 Then
+            useDirectInput = True
+            Exit For
+        End If
+        promptText = promptText & CStr(i) & ". " & CStr(values(i)) & vbCrLf
+    Next i
+
+    If useDirectInput Then
+        Set valueSeen = CreateObject("Scripting.Dictionary")
+        valueSeen.CompareMode = vbTextCompare
+        For i = 1 To values.Count
+            valueSeen(CStr(values(i))) = True
+        Next i
+
+        answer = Application.InputBox( _
+                    Prompt:=valueLabel & " 목록이 많습니다." & vbCrLf & _
+                            "정확한 " & valueLabel & " 이름을 입력하세요.", _
+                    Title:=valueLabel & " 선택", _
+                    Type:=2)
+        If VarType(answer) = vbBoolean Then Exit Function
+        If Not valueSeen.Exists(Trim$(CStr(answer))) Then
+            MsgBox "목록에 없는 " & valueLabel & "입니다.", vbExclamation
+            Exit Function
+        End If
+        PromptReportFilterValue = Trim$(CStr(answer))
+        Exit Function
+    End If
+
+    answer = Application.InputBox( _
+                Prompt:=promptText, _
+                Title:=valueLabel & " 선택", _
+                Type:=1)
+    If VarType(answer) = vbBoolean Then Exit Function
+    If Not IsNumeric(answer) Then Exit Function
+    If CDbl(answer) <> Fix(CDbl(answer)) Then
+        MsgBox "목록의 번호를 입력하세요.", vbExclamation
+        Exit Function
+    End If
+
+    selectedIndex = CLng(answer)
+    If selectedIndex < 1 Or selectedIndex > values.Count Then
+        MsgBox "목록의 번호를 입력하세요.", vbExclamation
+        Exit Function
+    End If
+
+    PromptReportFilterValue = CStr(values(selectedIndex))
+End Function
+
+Private Function CollectReportFilterValues(ByVal ws As Worksheet, _
+                                           ByVal columnAddress As String) As Collection
+    Dim result As Collection
+    Dim valueSeen As Object
+    Dim lastRow As Long
+    Dim r As Long
+    Dim fieldValue As String
+
+    Set result = New Collection
+    Set valueSeen = CreateObject("Scripting.Dictionary")
+    valueSeen.CompareMode = vbTextCompare
+    lastRow = GetLastDataRow(ws)
+
+    For r = DATA_START_ROW To lastRow
+        If HasTaskContent(ws, r) And Not HasChildTask(ws, r, lastRow) Then
+            fieldValue = GetEffectiveReportField(ws, r, columnAddress)
+            If Len(fieldValue) > 0 And Not valueSeen.Exists(fieldValue) Then
+                valueSeen.Add fieldValue, True
+                result.Add fieldValue
+            End If
+        End If
+    Next r
+
+    Set CollectReportFilterValues = result
+End Function
+
+Private Function GetEffectiveReportField(ByVal ws As Worksheet, _
+                                         ByVal rowNum As Long, _
+                                         ByVal columnAddress As String) As String
+    Dim fieldValue As String
+    Dim currentLevel As Long
+    Dim candidateLevel As Long
+    Dim r As Long
+
+    fieldValue = CleanReportTaskText(CStr(ws.Cells(rowNum, columnAddress).Value2))
+    If Len(fieldValue) > 0 Then
+        GetEffectiveReportField = fieldValue
+        Exit Function
+    End If
+
+    currentLevel = GetTaskLevel(ws, rowNum)
+    For r = rowNum - 1 To DATA_START_ROW Step -1
+        If HasTaskContent(ws, r) Then
+            candidateLevel = GetTaskLevel(ws, r)
+            If candidateLevel < currentLevel Then
+                fieldValue = CleanReportTaskText(CStr(ws.Cells(r, columnAddress).Value2))
+                If Len(fieldValue) > 0 Then
+                    GetEffectiveReportField = fieldValue
+                    Exit Function
+                End If
+                currentLevel = candidateLevel
+                If currentLevel = 1 Then Exit For
+            End If
+        End If
+    Next r
+End Function
+
+Private Function ReportItemMatchesScope(ByVal reportScope As String, _
+                                        ByVal selectedValue As String, _
+                                        ByVal moduleText As String, _
+                                        ByVal ownerText As String) As Boolean
+    Select Case UCase$(reportScope)
+        Case REPORT_SCOPE_PERSONAL
+            ReportItemMatchesScope = _
+                (StrComp(ownerText, selectedValue, vbTextCompare) = 0)
+        Case REPORT_SCOPE_MODULE
+            ReportItemMatchesScope = _
+                (StrComp(moduleText, selectedValue, vbTextCompare) = 0)
+        Case Else
+            ReportItemMatchesScope = True
+    End Select
+End Function
+
+Private Function BuildReportScopeTitle(ByVal reportScope As String, _
+                                       ByVal selectedValue As String) As String
+    Select Case UCase$(reportScope)
+        Case REPORT_SCOPE_PERSONAL
+            BuildReportScopeTitle = selectedValue & " 개인"
+        Case REPORT_SCOPE_MODULE
+            BuildReportScopeTitle = selectedValue & " 모듈"
+        Case Else
+            BuildReportScopeTitle = "팀"
+    End Select
+End Function
+
+Private Function BuildScopedReportPath(ByVal reportScope As String, _
+                                       ByVal selectedValue As String, _
+                                       ByVal reportDate As Date) As String
+    Dim filePrefix As String
+
+    Select Case UCase$(reportScope)
+        Case REPORT_SCOPE_PERSONAL
+            filePrefix = "개인개발보고_" & SanitizeReportFilePart(selectedValue)
+        Case REPORT_SCOPE_MODULE
+            filePrefix = "모듈개발보고_" & SanitizeReportFilePart(selectedValue)
+        Case Else
+            filePrefix = "팀개발보고"
+    End Select
+
+    BuildScopedReportPath = ThisWorkbook.Path & Application.PathSeparator & _
+                            filePrefix & "_" & Format$(reportDate, "yyyy-mm-dd") & ".txt"
+End Function
+
+Private Function SanitizeReportFilePart(ByVal filePart As String) As String
+    Dim invalidCharacter As Variant
+
+    For Each invalidCharacter In Array("\", "/", ":", "*", "?", Chr$(34), "<", ">", "|")
+        filePart = Replace$(filePart, CStr(invalidCharacter), "_")
+    Next invalidCharacter
+
+    filePart = Trim$(filePart)
+    If Len(filePart) > 60 Then filePart = Left$(filePart, 60)
+    If Len(filePart) = 0 Then filePart = "미지정"
+    SanitizeReportFilePart = filePart
+End Function
+
 Private Function EnsureReportHistorySheet() As Worksheet
     Dim ws As Worksheet
 
@@ -322,8 +569,47 @@ Private Function CleanReportTaskText(ByVal taskText As String) As String
     CleanReportTaskText = Trim$(taskText)
 End Function
 
-Private Function BuildDevProgressReportText(ByVal reportDate As Date, _
-                                            ByVal previousReportDate As Variant, _
+Private Function BuildReportHierarchyPath(ByVal ws As Worksheet, _
+                                          ByVal rowNum As Long) As Variant
+    Dim reversePath As Collection
+    Dim pathValues() As String
+    Dim currentLevel As Long
+    Dim candidateLevel As Long
+    Dim r As Long
+    Dim i As Long
+
+    Set reversePath = New Collection
+    reversePath.Add BuildHierarchyPathToken(ws, rowNum)
+    currentLevel = GetTaskLevel(ws, rowNum)
+
+    For r = rowNum - 1 To DATA_START_ROW Step -1
+        If HasTaskContent(ws, r) Then
+            candidateLevel = GetTaskLevel(ws, r)
+            If candidateLevel < currentLevel Then
+                reversePath.Add BuildHierarchyPathToken(ws, r)
+                currentLevel = candidateLevel
+                If currentLevel = 1 Then Exit For
+            End If
+        End If
+    Next r
+
+    ReDim pathValues(0 To reversePath.Count - 1)
+    For i = 1 To reversePath.Count
+        pathValues(i - 1) = CStr(reversePath(reversePath.Count - i + 1))
+    Next i
+
+    BuildReportHierarchyPath = pathValues
+End Function
+
+Private Function BuildHierarchyPathToken(ByVal ws As Worksheet, _
+                                         ByVal rowNum As Long) As String
+    BuildHierarchyPathToken = CStr(rowNum) & vbTab & _
+                              CleanReportTaskText(CStr(ws.Cells(rowNum, COL_TASK).Value2))
+End Function
+
+Private Function BuildDevProgressReportText(ByVal ws As Worksheet, _
+                                            ByVal reportDate As Date, _
+                                            ByVal reportTitle As String, _
                                             ByVal reportItems As Collection) As String
     Dim textValue As String
     Dim item As Variant
@@ -333,22 +619,9 @@ Private Function BuildDevProgressReportText(ByVal reportDate As Date, _
     Dim ownerSeen As Object
     Dim moduleName As Variant
     Dim moduleIndex As Long
-    Dim hasGroupedItems As Boolean
-    Dim hasLegacyItems As Boolean
 
-    For Each item In reportItems
-        If CBool(item(5)) Then
-            hasLegacyItems = True
-        Else
-            hasGroupedItems = True
-        End If
-    Next item
-
-    If hasGroupedItems Then
-        textValue = Format$(reportDate, "yyyy-mm-dd") & " 개발 진행 현황입니다." & vbCrLf & vbCrLf
-    Else
-        textValue = BuildLegacyReportHeader(reportDate, previousReportDate)
-    End If
+    textValue = Format$(reportDate, "yyyy-mm-dd") & " " & _
+                reportTitle & " 개발 진행 현황입니다." & vbCrLf & vbCrLf
 
     If reportItems.Count = 0 Then
         textValue = textValue & "보고 내역이 없습니다." & vbCrLf
@@ -358,7 +631,7 @@ Private Function BuildDevProgressReportText(ByVal reportDate As Date, _
         moduleSeen.CompareMode = vbTextCompare
 
         For Each item In reportItems
-            If Not CBool(item(5)) And Not moduleSeen.Exists(CStr(item(0))) Then
+            If Not moduleSeen.Exists(CStr(item(0))) Then
                 moduleSeen.Add CStr(item(0)), True
                 moduleNames.Add CStr(item(0))
             End If
@@ -372,8 +645,7 @@ Private Function BuildDevProgressReportText(ByVal reportDate As Date, _
             ownerSeen.CompareMode = vbTextCompare
 
             For Each item In reportItems
-                If Not CBool(item(5)) And _
-                   StrComp(CStr(item(0)), CStr(moduleName), vbTextCompare) = 0 Then
+                If StrComp(CStr(item(0)), CStr(moduleName), vbTextCompare) = 0 Then
                     If Not ownerSeen.Exists(CStr(item(1))) Then
                         ownerSeen.Add CStr(item(1)), True
                         ownerNames.Add CStr(item(1))
@@ -384,79 +656,96 @@ Private Function BuildDevProgressReportText(ByVal reportDate As Date, _
             textValue = textValue & GetCircledReportNumber(moduleIndex) & "     " & _
                         CStr(moduleName) & " (" & JoinReportText(ownerNames, ", ") & ")" & vbCrLf
 
-            For Each item In reportItems
-                If Not CBool(item(5)) And _
-                   StrComp(CStr(item(0)), CStr(moduleName), vbTextCompare) = 0 Then
-                    textValue = textValue & "     -     " & CStr(item(2)) & _
-                                " (" & CStr(item(1)) & "): " & _
-                                GetReportStatusLabel(CStr(item(3))) & _
-                                BuildPlannedDateSuffix(CStr(item(3)), CDbl(item(4))) & vbCrLf
-                End If
-            Next item
+            AppendGroupedHierarchyItems textValue, ws, reportItems, CStr(moduleName)
             textValue = textValue & vbCrLf
         Next moduleName
-
-        If hasLegacyItems Then AppendLegacyReportItems textValue, reportItems
     End If
 
     BuildDevProgressReportText = textValue
 End Function
 
-Private Function BuildLegacyReportHeader(ByVal reportDate As Date, _
-                                         ByVal previousReportDate As Variant) As String
-    Dim textValue As String
+Private Sub AppendGroupedHierarchyItems(ByRef textValue As String, _
+                                        ByVal ws As Worksheet, _
+                                        ByVal reportItems As Collection, _
+                                        ByVal moduleName As String)
+    Dim lastRow As Long
+    Dim r As Long
+    Dim item As Variant
+    Dim currentPath As Variant
+    Dim previousPath As Variant
+    Dim leafSuffix As String
 
-    textValue = "개발 진행 보고" & vbCrLf
-    textValue = textValue & "보고 기준일: " & Format$(reportDate, "yyyy-mm-dd") & _
-                " (" & GetKoreanWeekdayName(reportDate) & ")" & vbCrLf
+    lastRow = GetLastDataRow(ws)
 
-    If IsDate(previousReportDate) Then
-        textValue = textValue & "비교 기준: " & _
-                    Format$(CDate(previousReportDate), "yyyy-mm-dd") & " 이후" & vbCrLf
+    For r = DATA_START_ROW To lastRow
+        For Each item In reportItems
+            If CLng(item(6)) = r And _
+               StrComp(CStr(item(0)), moduleName, vbTextCompare) = 0 Then
+                currentPath = item(7)
+                leafSuffix = " (" & CStr(item(1)) & "): " & _
+                             GetReportStatusLabel(CStr(item(3))) & _
+                             BuildPlannedDateSuffix(CStr(item(3)), CDbl(item(4)))
+                AppendHierarchyPath textValue, currentPath, previousPath, leafSuffix, 5
+                previousPath = currentPath
+                Exit For
+            End If
+        Next item
+    Next r
+End Sub
+
+Private Sub AppendHierarchyPath(ByRef textValue As String, _
+                                ByVal currentPath As Variant, _
+                                ByVal previousPath As Variant, _
+                                ByVal leafSuffix As String, _
+                                ByVal baseIndent As Long)
+    Dim commonDepth As Long
+    Dim depth As Long
+    Dim marker As String
+    Dim suffix As String
+
+    commonDepth = GetCommonHierarchyDepth(previousPath, currentPath)
+
+    For depth = commonDepth To UBound(currentPath)
+        If depth = 0 Then
+            marker = ChrW(&H2022) & " "
+        Else
+            marker = "- "
+        End If
+
+        suffix = ""
+        If depth = UBound(currentPath) Then suffix = leafSuffix
+
+        textValue = textValue & Space$(baseIndent + (depth * 4)) & _
+                    marker & GetHierarchyPathText(CStr(currentPath(depth))) & suffix & vbCrLf
+    Next depth
+End Sub
+
+Private Function GetHierarchyPathText(ByVal pathToken As String) As String
+    Dim separatorPosition As Long
+
+    separatorPosition = InStr(1, pathToken, vbTab, vbBinaryCompare)
+    If separatorPosition > 0 Then
+        GetHierarchyPathText = Mid$(pathToken, separatorPosition + 1)
     Else
-        textValue = textValue & "비교 기준: 최초 보고" & vbCrLf
+        GetHierarchyPathText = pathToken
     End If
-
-    BuildLegacyReportHeader = textValue & vbCrLf
 End Function
 
-Private Sub AppendLegacyReportItems(ByRef textValue As String, _
-                                    ByVal reportItems As Collection)
-    AppendLegacyStatusSection textValue, reportItems, REPORT_STATUS_COMPLETED, "완료 건"
-    AppendLegacyStatusSection textValue, reportItems, REPORT_STATUS_IN_PROGRESS, "진행 중"
-    AppendLegacyStatusSection textValue, reportItems, REPORT_STATUS_PLANNED, "예정"
-End Sub
+Private Function GetCommonHierarchyDepth(ByVal previousPath As Variant, _
+                                         ByVal currentPath As Variant) As Long
+    Dim maxDepth As Long
+    Dim depth As Long
 
-Private Sub AppendLegacyStatusSection(ByRef textValue As String, _
-                                      ByVal reportItems As Collection, _
-                                      ByVal targetStatus As String, _
-                                      ByVal sectionTitle As String)
-    Dim item As Variant
-    Dim itemCount As Long
+    If Not IsArray(previousPath) Then Exit Function
+    If Not IsArray(currentPath) Then Exit Function
 
-    textValue = textValue & sectionTitle & vbCrLf & vbCrLf
-    For Each item In reportItems
-        If CBool(item(5)) And _
-           StrComp(CStr(item(3)), targetStatus, vbTextCompare) = 0 Then
-            textValue = textValue & ChrW(&H2022) & " " & CStr(item(2)) & vbCrLf
-            itemCount = itemCount + 1
-        End If
-    Next item
+    maxDepth = UBound(previousPath)
+    If UBound(currentPath) < maxDepth Then maxDepth = UBound(currentPath)
 
-    If itemCount = 0 Then textValue = textValue & ChrW(&H2022) & " 없음" & vbCrLf
-    textValue = textValue & vbCrLf
-End Sub
-
-Private Function GetKoreanWeekdayName(ByVal targetDate As Date) As String
-    Select Case Weekday(targetDate, vbSunday)
-        Case vbSunday: GetKoreanWeekdayName = "일요일"
-        Case vbMonday: GetKoreanWeekdayName = "월요일"
-        Case vbTuesday: GetKoreanWeekdayName = "화요일"
-        Case vbWednesday: GetKoreanWeekdayName = "수요일"
-        Case vbThursday: GetKoreanWeekdayName = "목요일"
-        Case vbFriday: GetKoreanWeekdayName = "금요일"
-        Case vbSaturday: GetKoreanWeekdayName = "토요일"
-    End Select
+    For depth = 0 To maxDepth
+        If StrComp(CStr(previousPath(depth)), CStr(currentPath(depth)), vbTextCompare) <> 0 Then Exit For
+        GetCommonHierarchyDepth = depth + 1
+    Next depth
 End Function
 
 Private Function GetCircledReportNumber(ByVal indexValue As Long) As String

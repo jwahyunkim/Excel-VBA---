@@ -40,7 +40,7 @@ Public Sub 주간보고PPT_버튼_생성()
     Set anchorCell = ws.Range("B2")
     Set btn = ws.Shapes.AddShape( _
         msoShapeRoundedRectangle, _
-        anchorCell.Left + (6 * 80), _
+        anchorCell.Left + (8 * 80), _
         anchorCell.Top + anchorCell.Height - 22, _
         72, _
         22)

@@ -1,0 +1,60 @@
+﻿개발 진행 보고
+보고 기준일: 2026-07-28 (화요일)
+비교 기준: 최초 보고
+
+완료 건
+
+• RFID Registration 조회 조건,표기 수정
+• Menu 진입 페이지 Icon 수정 기능 추가
+• RFID Move mng grid 스타일
+• Relief Skill mng Total row 추가
+• RFID Registration DEPT 쿼리 수정
+• dispatch machine master 스타일 정규화, ui5 CDN 방식 제거
+• action 권한 관리
+    - HTTP 메서드 기반 제어
+    - 권한 없는 button 랜더링 X
+• Vertical Menu bar 추가
+    - 리사이징 핸들 아이콘 모드 적용,
+• 베트남 언어파일 적용
+• 베트남어 적용 폰트 변경 -> unicode 계열
+• Tab 하드코딩 제거
+• DM REO 반응형 스타일 적용
+• Factory Permission 신규개발
+• 버티컬 bar에서 프로그램 이동시 새탭으로 열기 추가
+• RFID Registration 수정
+• GroupedVirtualPinnedTable
+• EquipmentAvailableLaborReport
+• 함수, 테이블 Naming Convention 적용
+• Relief Skill mng 조회 지연 확인
+• Relief Skill mng 버튼, 로딩 로직 수정
+• DM 확인 요청 건
+    - 저장 경고 확인 시 삭제 처리 함수로직 수정
+    - 로딩 화면이 계속 유지되는 에러 수정
+    - DM 미등록 URL 라우팅 처리 로직 추가
+    - 저장·삭제·확정 버튼 연속 클릭 로직 수정
+    - 다중 건 처리 로직 수정
+    - 401 오류 전체 로그인 세션 만료로 처리 오류 수정
+    - 저장 순서 관련 로직 수정
+    - DM 타임존 수정 (확인필요)
+    - 권한 조회 API 중복 호출 에러 수정
+    - 로그인 필수값 검증이 로직 추가
+    - 메뉴 API가 여러 컴포넌트에서 반복 호출 로직 수정
+• DM Web 내 언어설정 새탭에서 동일하게 적용
+• vertical Nav bar 상태 로컬스토리지 저장
+• DM UTC 타임 존 적용 코드 점검
+
+진행 중
+
+• DM, QM 통합 영향도 분석
+• DM 웹 Tally Sheet 인수인계
+• User level 관련 DB 수정
+    - FE,BE 적용
+
+예정
+
+• 신규 Roll 추가
+• User level 관련 DB 수정
+    - user roll code 테이블 신규 생성
+    - User Level get fn master 생성
+• User Roll 권한 관련 신규 개발 (논의 중)
+
