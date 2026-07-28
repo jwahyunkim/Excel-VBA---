@@ -613,6 +613,41 @@ Private Function BuildDevProgressReportText(ByVal ws As Worksheet, _
                                             ByVal reportTitle As String, _
                                             ByVal reportItems As Collection) As String
     Dim textValue As String
+
+    textValue = Format$(reportDate, "yyyy-mm-dd") & " " & _
+                reportTitle & " 개발 진행 현황입니다." & vbCrLf & vbCrLf
+
+    If reportItems.Count = 0 Then
+        textValue = textValue & "보고 내역이 없습니다." & vbCrLf
+    ElseIf GetDevReportSeparateStatusFlag() Then
+        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_COMPLETED
+        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_IN_PROGRESS
+        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_PLANNED
+    Else
+        AppendReportModules textValue, ws, reportItems, "", True
+    End If
+
+    BuildDevProgressReportText = textValue
+End Function
+
+Private Sub AppendStatusReportSection(ByRef textValue As String, _
+                                      ByVal ws As Worksheet, _
+                                      ByVal reportItems As Collection, _
+                                      ByVal statusFilter As String)
+    textValue = textValue & GetReportStatusLabel(statusFilter) & vbCrLf & vbCrLf
+
+    If CountReportItemsByStatus(reportItems, statusFilter) = 0 Then
+        textValue = textValue & Space$(5) & "내역 없음" & vbCrLf & vbCrLf
+    Else
+        AppendReportModules textValue, ws, reportItems, statusFilter, False
+    End If
+End Sub
+
+Private Sub AppendReportModules(ByRef textValue As String, _
+                                ByVal ws As Worksheet, _
+                                ByVal reportItems As Collection, _
+                                ByVal statusFilter As String, _
+                                ByVal includeStatusLabel As Boolean)
     Dim item As Variant
     Dim moduleNames As Collection
     Dim ownerNames As Collection
@@ -621,54 +656,69 @@ Private Function BuildDevProgressReportText(ByVal ws As Worksheet, _
     Dim moduleName As Variant
     Dim moduleIndex As Long
 
-    textValue = Format$(reportDate, "yyyy-mm-dd") & " " & _
-                reportTitle & " 개발 진행 현황입니다." & vbCrLf & vbCrLf
+    Set moduleNames = New Collection
+    Set moduleSeen = CreateObject("Scripting.Dictionary")
+    moduleSeen.CompareMode = vbTextCompare
 
-    If reportItems.Count = 0 Then
-        textValue = textValue & "보고 내역이 없습니다." & vbCrLf
-    Else
-        Set moduleNames = New Collection
-        Set moduleSeen = CreateObject("Scripting.Dictionary")
-        moduleSeen.CompareMode = vbTextCompare
-
-        For Each item In reportItems
+    For Each item In reportItems
+        If ReportItemMatchesStatus(item, statusFilter) Then
             If Not moduleSeen.Exists(CStr(item(0))) Then
                 moduleSeen.Add CStr(item(0)), True
                 moduleNames.Add CStr(item(0))
             End If
+        End If
+    Next item
+
+    moduleIndex = 0
+    For Each moduleName In moduleNames
+        moduleIndex = moduleIndex + 1
+        Set ownerNames = New Collection
+        Set ownerSeen = CreateObject("Scripting.Dictionary")
+        ownerSeen.CompareMode = vbTextCompare
+
+        For Each item In reportItems
+            If ReportItemMatchesStatus(item, statusFilter) And _
+               StrComp(CStr(item(0)), CStr(moduleName), vbTextCompare) = 0 Then
+                If Not ownerSeen.Exists(CStr(item(1))) Then
+                    ownerSeen.Add CStr(item(1)), True
+                    ownerNames.Add CStr(item(1))
+                End If
+            End If
         Next item
 
-        moduleIndex = 0
-        For Each moduleName In moduleNames
-            moduleIndex = moduleIndex + 1
-            Set ownerNames = New Collection
-            Set ownerSeen = CreateObject("Scripting.Dictionary")
-            ownerSeen.CompareMode = vbTextCompare
+        textValue = textValue & GetCircledReportNumber(moduleIndex) & "     " & _
+                    CStr(moduleName) & " (" & JoinReportText(ownerNames, ", ") & ")" & vbCrLf
 
-            For Each item In reportItems
-                If StrComp(CStr(item(0)), CStr(moduleName), vbTextCompare) = 0 Then
-                    If Not ownerSeen.Exists(CStr(item(1))) Then
-                        ownerSeen.Add CStr(item(1)), True
-                        ownerNames.Add CStr(item(1))
-                    End If
-                End If
-            Next item
+        AppendGroupedHierarchyItems textValue, ws, reportItems, CStr(moduleName), _
+                                    statusFilter, includeStatusLabel
+        textValue = textValue & vbCrLf
+    Next moduleName
+End Sub
 
-            textValue = textValue & GetCircledReportNumber(moduleIndex) & "     " & _
-                        CStr(moduleName) & " (" & JoinReportText(ownerNames, ", ") & ")" & vbCrLf
+Private Function CountReportItemsByStatus(ByVal reportItems As Collection, _
+                                          ByVal statusFilter As String) As Long
+    Dim item As Variant
 
-            AppendGroupedHierarchyItems textValue, ws, reportItems, CStr(moduleName)
-            textValue = textValue & vbCrLf
-        Next moduleName
-    End If
+    For Each item In reportItems
+        If ReportItemMatchesStatus(item, statusFilter) Then
+            CountReportItemsByStatus = CountReportItemsByStatus + 1
+        End If
+    Next item
+End Function
 
-    BuildDevProgressReportText = textValue
+Private Function ReportItemMatchesStatus(ByVal item As Variant, _
+                                         ByVal statusFilter As String) As Boolean
+    ReportItemMatchesStatus = _
+        (Len(statusFilter) = 0 Or _
+         StrComp(CStr(item(3)), statusFilter, vbTextCompare) = 0)
 End Function
 
 Private Sub AppendGroupedHierarchyItems(ByRef textValue As String, _
                                         ByVal ws As Worksheet, _
                                         ByVal reportItems As Collection, _
-                                        ByVal moduleName As String)
+                                        ByVal moduleName As String, _
+                                        ByVal statusFilter As String, _
+                                        ByVal includeStatusLabel As Boolean)
     Dim lastRow As Long
     Dim r As Long
     Dim item As Variant
@@ -681,10 +731,15 @@ Private Sub AppendGroupedHierarchyItems(ByRef textValue As String, _
     For r = DATA_START_ROW To lastRow
         For Each item In reportItems
             If CLng(item(6)) = r And _
-               StrComp(CStr(item(0)), moduleName, vbTextCompare) = 0 Then
+               StrComp(CStr(item(0)), moduleName, vbTextCompare) = 0 And _
+               ReportItemMatchesStatus(item, statusFilter) Then
                 currentPath = item(7)
-                leafSuffix = " (" & CStr(item(1)) & "): " & _
-                             GetReportStatusLabel(CStr(item(3))) & _
+                leafSuffix = " (" & CStr(item(1)) & ")"
+                If includeStatusLabel Then
+                    leafSuffix = leafSuffix & ": " & _
+                                 GetReportStatusLabel(CStr(item(3)))
+                End If
+                leafSuffix = leafSuffix & _
                              BuildPlannedDateSuffix(CStr(item(3)), CDbl(item(4)))
                 AppendHierarchyPath textValue, currentPath, previousPath, leafSuffix, 5
                 previousPath = currentPath
@@ -707,11 +762,7 @@ Private Sub AppendHierarchyPath(ByRef textValue As String, _
     commonDepth = GetCommonHierarchyDepth(previousPath, currentPath)
 
     For depth = commonDepth To UBound(currentPath)
-        If depth = 0 Then
-            marker = ChrW(&H2022) & " "
-        Else
-            marker = "- "
-        End If
+        marker = GetDevReportLevelBullet(depth + 1) & " "
 
         suffix = ""
         If depth = UBound(currentPath) Then suffix = leafSuffix

@@ -593,6 +593,20 @@ Private Sub FillWeeklyReportPlanArea(ByVal slide As Object, ByVal plannedItems A
     Dim planShape As Object
     Dim planTextRange As Object
     Dim i As Long
+    Dim itemText As String
+    Dim originalLeft As Single
+    Dim originalTop As Single
+    Dim originalWidth As Single
+    Dim originalHeight As Single
+    Dim originalLockAspectRatio As Long
+    Dim requiredHeight As Single
+    Dim templateFontName As String
+    Dim templateFontSize As Single
+    Dim templateFontBold As Long
+    Dim templateFontItalic As Long
+    Dim templateFontUnderline As Long
+    Dim templateFontColor As Long
+    Dim maintenanceParagraphIndex As Long
 
     Set planShape = FindTextShape(slide, "(개발 항목)")
     If planShape Is Nothing Then
@@ -601,22 +615,97 @@ Private Sub FillWeeklyReportPlanArea(ByVal slide As Object, ByVal plannedItems A
     End If
 
     Set planTextRange = planShape.TextFrame.TextRange
-    If planTextRange.Paragraphs.Count < 3 Then
+    If planTextRange.Paragraphs.Count < 2 Then
         Err.Raise vbObjectError + 7531, "FillWeeklyReportPlanArea", _
                   "원본 PPT 개발 항목 영역의 문단 구조가 예상과 다릅니다."
     End If
+
+    With planTextRange.Paragraphs(2).Font
+        templateFontName = .Name
+        templateFontSize = .Size
+        templateFontBold = .Bold
+        templateFontItalic = .Italic
+        templateFontUnderline = .Underline
+        templateFontColor = .Color.RGB
+    End With
+
+    originalLeft = planShape.Left
+    originalTop = planShape.Top
+    originalWidth = planShape.Width
+    originalHeight = planShape.Height
+    originalLockAspectRatio = planShape.LockAspectRatio
 
     SetPowerPointParagraphText planTextRange.Paragraphs(2), ""
     SetPowerPointParagraphText planTextRange.Paragraphs(3), ""
 
     For i = 1 To plannedItems.Count
-        If i > 2 Then
-            Err.Raise vbObjectError + 7532, "FillWeeklyReportPlanArea", _
-                      "원본 PPT 개발 항목 영역에는 최대 2개 업무를 표시할 수 있습니다."
+        itemText = ChrW(&H2022) & " " & CStr(plannedItems(i))
+
+        If i <= 2 Then
+            SetPowerPointParagraphText planTextRange.Paragraphs(i + 1), itemText
+        Else
+            maintenanceParagraphIndex = FindPowerPointParagraphIndex( _
+                                            planTextRange, "(유지보수 항목)")
+            If maintenanceParagraphIndex = 0 Then
+                Err.Raise vbObjectError + 7532, "FillWeeklyReportPlanArea", _
+                          "원본 PPT에서 '(유지보수 항목)' 영역을 찾을 수 없습니다."
+            End If
+            planTextRange.Paragraphs(maintenanceParagraphIndex).InsertBefore _
+                itemText & vbCr
         End If
-        SetPowerPointParagraphText planTextRange.Paragraphs(i + 1), _
-                                   ChrW(&H2022) & " " & CStr(plannedItems(i))
+
+        ApplyWeeklyPlanParagraphFont planTextRange.Paragraphs(i + 1), _
+                                     templateFontName, templateFontSize, _
+                                     templateFontBold, templateFontItalic, _
+                                     templateFontUnderline, templateFontColor
     Next i
+
+    ' Preserve the template format and position. Only extend the bottom edge.
+    planShape.TextFrame.AutoSize = 0
+    requiredHeight = planTextRange.BoundHeight + _
+                     planShape.TextFrame.MarginTop + _
+                     planShape.TextFrame.MarginBottom
+
+    planShape.LockAspectRatio = 0
+    planShape.Left = originalLeft
+    planShape.Top = originalTop
+    planShape.Width = originalWidth
+    If requiredHeight > originalHeight Then
+        planShape.Height = requiredHeight
+    Else
+        planShape.Height = originalHeight
+    End If
+    planShape.LockAspectRatio = originalLockAspectRatio
+End Sub
+
+Private Function FindPowerPointParagraphIndex(ByVal textRange As Object, _
+                                              ByVal searchText As String) As Long
+    Dim i As Long
+
+    For i = 1 To textRange.Paragraphs.Count
+        If InStr(1, CStr(textRange.Paragraphs(i).Text), _
+                   searchText, vbTextCompare) > 0 Then
+            FindPowerPointParagraphIndex = i
+            Exit Function
+        End If
+    Next i
+End Function
+
+Private Sub ApplyWeeklyPlanParagraphFont(ByVal paragraphRange As Object, _
+                                         ByVal fontName As String, _
+                                         ByVal fontSize As Single, _
+                                         ByVal fontBold As Long, _
+                                         ByVal fontItalic As Long, _
+                                         ByVal fontUnderline As Long, _
+                                         ByVal fontColor As Long)
+    With paragraphRange.Font
+        .Name = fontName
+        .Size = fontSize
+        .Bold = fontBold
+        .Italic = fontItalic
+        .Underline = fontUnderline
+        .Color.RGB = fontColor
+    End With
 End Sub
 
 Private Function JoinCollection(ByVal items As Collection, _

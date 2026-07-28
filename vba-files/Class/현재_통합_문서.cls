@@ -13,7 +13,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     If Not TypeOf Sh Is Worksheet Then Exit Sub
 
     If Sh.Name = CONFIG_SHEET_NAME Then
-        If Intersect(Target, Sh.Range(TASK_MAX_LENGTH_VALUE_CELL)) Is Nothing Then Exit Sub
+        If Intersect(Target, Sh.Range(TASK_MAX_LENGTH_VALUE_RANGE)) Is Nothing Then Exit Sub
         Application.EnableEvents = False
         RefreshTaskTextLengthValidation
         GoTo SafeExit

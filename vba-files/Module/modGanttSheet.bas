@@ -1319,13 +1319,12 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
 End Sub
 
 Public Sub ApplyTaskTextLengthValidation(ByVal ws As Worksheet)
-    Dim taskMaxLength As Long
     Dim lastValidationRow As Long
     Dim rngTask As Range
+    Dim validationFormula As String
 
     If ws Is Nothing Then Exit Sub
 
-    taskMaxLength = GetTaskMaxLength()
     lastValidationRow = GetLastDataRow(ws) + TASK_VALIDATION_EXTRA_ROWS
     If lastValidationRow < TASK_VALIDATION_MIN_LAST_ROW Then
         lastValidationRow = TASK_VALIDATION_MIN_LAST_ROW
@@ -1339,17 +1338,27 @@ Public Sub ApplyTaskTextLengthValidation(ByVal ws As Worksheet)
     rngTask.Validation.Delete
     On Error GoTo 0
 
-    rngTask.Validation.Add Type:=xlValidateTextLength, _
+    validationFormula = "=LEN(" & COL_TASK & DATA_START_ROW & ")<=" & _
+        "IF(" & COL_LEVEL & DATA_START_ROW & "=2," & _
+        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+        TASK_MAX_LENGTH_LEVEL2_VALUE_CELL & """)," & _
+        "IF(" & COL_LEVEL & DATA_START_ROW & "=3," & _
+        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+        TASK_MAX_LENGTH_LEVEL3_VALUE_CELL & """)," & _
+        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+        TASK_MAX_LENGTH_LEVEL1_VALUE_CELL & """)))"
+
+    rngTask.Validation.Add Type:=xlValidateCustom, _
                            AlertStyle:=xlValidAlertStop, _
-                           Operator:=xlLessEqual, _
-                           Formula1:=CStr(taskMaxLength)
+                           Formula1:=validationFormula
     rngTask.Validation.IgnoreBlank = True
     rngTask.Validation.InputTitle = "내용 입력"
     rngTask.Validation.InputMessage = _
-        "내용은 config 시트 설정에 따라 " & taskMaxLength & "자 이내로 입력하세요."
+        "내용은 config 시트의 Level별 최대 글자 수 이내로 입력하세요."
     rngTask.Validation.ErrorTitle = "내용 글자 수 초과"
     rngTask.Validation.ErrorMessage = _
-        "입력한 내용이 config 시트의 최대 글자 수(" & taskMaxLength & "자)를 초과했습니다."
+        "입력한 내용이 현재 Level에 설정된 최대 글자 수를 초과했습니다. " & _
+        "config 시트의 입력 제한 설정을 확인하세요."
 End Sub
 
 Private Sub ApplyManualStatusValidation(ws As Worksheet, ByVal lastSheetRow As Long)

@@ -248,9 +248,11 @@ Public Function GetTaskErrorReason(ws As Worksheet, ByVal rowNum As Long) As Str
         End If
     End If
 
-    maxTaskLength = GetTaskMaxLength()
+    taskLevel = GetTaskLevel(ws, rowNum)
+    maxTaskLength = GetTaskMaxLength(taskLevel)
     If Len(taskText) > maxTaskLength Then
-        GetTaskErrorReason = "내용이 config 시트의 최대 글자 수(" & _
+        GetTaskErrorReason = "Level " & taskLevel & _
+                             " 내용이 config 시트의 최대 글자 수(" & _
                              maxTaskLength & "자)를 초과했습니다. 현재 " & _
                              Len(taskText) & "자입니다."
         Exit Function
@@ -296,7 +298,6 @@ Public Function GetTaskErrorReason(ws As Worksheet, ByVal rowNum As Long) As Str
         End If
     End If
 
-    taskLevel = GetTaskLevel(ws, rowNum)
     If taskLevel > 1 Then
         parentRow = GetNearestParentTaskRow(ws, rowNum)
         If parentRow = 0 Then

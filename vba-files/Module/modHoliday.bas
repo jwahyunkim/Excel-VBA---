@@ -13,6 +13,9 @@ Public Sub EnsureConfigSheet()
     Dim rngDisplayGanttOnly As Range
     Dim rngDisplayReportOnly As Range
     Dim rngTaskMaxLength As Range
+    Dim rngReportLayout As Range
+    Dim rngReportBullets As Range
+    Dim legacyTaskMaxLength As Variant
 
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
@@ -50,16 +53,43 @@ Public Sub EnsureConfigSheet()
     ws.Range(DISPLAY_SETTING_GANTT_ONLY_LABEL_CELL).Value = "간트 only"
     ws.Range(DISPLAY_SETTING_REPORT_ONLY_LABEL_CELL).Value = "보고 only"
     ws.Range(INPUT_SETTING_TITLE_CELL).Value = "입력 제한 설정"
-    ws.Range(TASK_MAX_LENGTH_LABEL_CELL).Value = "내용 최대 글자 수"
+    legacyTaskMaxLength = ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value
+    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 내용 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 내용 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 내용 최대 글자 수"
+    ws.Range(DEV_REPORT_SETTING_TITLE_CELL).Value = "개발 보고 설정"
+    ws.Range(DEV_REPORT_LAYOUT_LABEL_CELL).Value = "출력 형식"
+    ws.Range(DEV_REPORT_BULLET_TITLE_CELL).Value = "레벨별 글머리 기호"
+    ws.Range(DEV_REPORT_BULLET_LEVEL1_LABEL_CELL).Value = "Level 1"
+    ws.Range(DEV_REPORT_BULLET_LEVEL2_LABEL_CELL).Value = "Level 2"
+    ws.Range(DEV_REPORT_BULLET_LEVEL3_LABEL_CELL).Value = "Level 3"
     ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "숨김 제외 No."
     ws.Range(HIDE_EXCLUDE_DATE_HEADER_CELL).Value = "숨김 제외 날짜"
 
     If Trim$(CStr(ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value)) = "" Then
         ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value = 3
     End If
-    If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_VALUE_CELL).Value)) = "" Then
-        ws.Range(TASK_MAX_LENGTH_VALUE_CELL).Value = DEFAULT_TASK_MAX_LENGTH
+    If Trim$(CStr(legacyTaskMaxLength)) = "" Then legacyTaskMaxLength = DEFAULT_TASK_MAX_LENGTH
+    If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value)) = "" Then
+        ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value = legacyTaskMaxLength
     End If
+    If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_LEVEL2_VALUE_CELL).Value)) = "" Then
+        ws.Range(TASK_MAX_LENGTH_LEVEL2_VALUE_CELL).Value = legacyTaskMaxLength
+    End If
+    If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value)) = "" Then
+        ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value = legacyTaskMaxLength
+    End If
+    If StrComp(Trim$(CStr(ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value)), _
+               "현재 형식", vbTextCompare) = 0 Then _
+        ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value = DEV_REPORT_LAYOUT_CURRENT
+    If Trim$(CStr(ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value)) = "" Then _
+        ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value = DEV_REPORT_LAYOUT_CURRENT
+    If Trim$(CStr(ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL).Value)) = "" Then _
+        ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL).Value = ChrW(&H2022)
+    If Trim$(CStr(ws.Range(DEV_REPORT_BULLET_LEVEL2_VALUE_CELL).Value)) = "" Then _
+        ws.Range(DEV_REPORT_BULLET_LEVEL2_VALUE_CELL).Value = "-"
+    If Trim$(CStr(ws.Range(DEV_REPORT_BULLET_LEVEL3_VALUE_CELL).Value)) = "" Then _
+        ws.Range(DEV_REPORT_BULLET_LEVEL3_VALUE_CELL).Value = ChrW(&HB7)
 
 
     ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
@@ -70,6 +100,8 @@ Public Sub EnsureConfigSheet()
     ws.Columns("G").ColumnWidth = 14
     ws.Columns("I").ColumnWidth = 26
     ws.Columns("J").ColumnWidth = 14
+    ws.Columns("L").ColumnWidth = 20
+    ws.Columns("M").ColumnWidth = 16
 
     ws.Range("A1:C1").Font.Bold = True
     ws.Range("A1:C1").Interior.Color = RGB(242, 242, 242)
@@ -86,7 +118,10 @@ Public Sub EnsureConfigSheet()
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Font.Bold = True
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(242, 242, 242)
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Borders.LineStyle = xlContinuous
-    ws.Range(TASK_MAX_LENGTH_LABEL_CELL & ":" & TASK_MAX_LENGTH_VALUE_CELL).Borders.LineStyle = xlContinuous
+    ws.Range("I8:J10").Borders.LineStyle = xlContinuous
+    ws.Range("L1:M1,L4:M4").Font.Bold = True
+    ws.Range("L1:M1,L4:M4").Interior.Color = RGB(242, 242, 242)
+    ws.Range("L1:M2,L4:M7").Borders.LineStyle = xlContinuous
 
     ws.Range("F2:G2").Borders.LineStyle = xlContinuous
     ws.Range("I2:J5").Borders.LineStyle = xlContinuous
@@ -101,7 +136,8 @@ Public Sub EnsureConfigSheet()
     ws.Range(DISPLAY_SETTING_END_VALUE_CELL).NumberFormat = "yyyy-mm-dd"
     ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).NumberFormat = "General"
-    ws.Range(TASK_MAX_LENGTH_VALUE_CELL).NumberFormat = "0"
+    ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).NumberFormat = "0"
+    ws.Range("M2:M7").NumberFormat = "General"
 
     lastSheetRow = ws.Rows.Count
     Set rngType = ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_DATA_START_ROW & ":" & HOLIDAY_COL_TYPE & lastSheetRow)
@@ -112,7 +148,9 @@ Public Sub EnsureConfigSheet()
     Set rngDisplayEnd = ws.Range(DISPLAY_SETTING_END_VALUE_CELL)
     Set rngDisplayGanttOnly = ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL)
     Set rngDisplayReportOnly = ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL)
-    Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_CELL)
+    Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_RANGE)
+    Set rngReportLayout = ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL)
+    Set rngReportBullets = ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & DEV_REPORT_BULLET_LEVEL3_VALUE_CELL)
 
     On Error Resume Next
     rngType.Validation.Delete
@@ -124,6 +162,8 @@ Public Sub EnsureConfigSheet()
     rngDisplayGanttOnly.Validation.Delete
     rngDisplayReportOnly.Validation.Delete
     rngTaskMaxLength.Validation.Delete
+    rngReportLayout.Validation.Delete
+    rngReportBullets.Validation.Delete
     On Error GoTo 0
 
     rngType.Validation.Add Type:=xlValidateList, _
@@ -206,8 +246,32 @@ Public Sub EnsureConfigSheet()
         MIN_TASK_MAX_LENGTH & "~" & MAX_TASK_MAX_LENGTH & " 사이 정수를 입력하세요."
     rngTaskMaxLength.Validation.ErrorTitle = "설정값 오류"
     rngTaskMaxLength.Validation.ErrorMessage = _
-        "내용 최대 글자 수는 " & MIN_TASK_MAX_LENGTH & "~" & _
+        "레벨별 내용 최대 글자 수는 " & MIN_TASK_MAX_LENGTH & "~" & _
         MAX_TASK_MAX_LENGTH & " 사이 정수여야 합니다."
+
+    rngReportLayout.Validation.Add Type:=xlValidateList, _
+                                   AlertStyle:=xlValidAlertStop, _
+                                   Operator:=xlBetween, _
+                                   Formula1:=DEV_REPORT_LAYOUT_CURRENT & "," & DEV_REPORT_LAYOUT_BY_STATUS
+    rngReportLayout.Validation.IgnoreBlank = False
+    rngReportLayout.Validation.InCellDropdown = True
+    rngReportLayout.Validation.InputTitle = "개발 보고 출력 형식"
+    rngReportLayout.Validation.InputMessage = _
+        "모듈별 통합 또는 상태별 구분을 선택하세요. 보고서는 항상 하나의 파일로 생성됩니다."
+    rngReportLayout.Validation.ErrorTitle = "설정값 오류"
+    rngReportLayout.Validation.ErrorMessage = _
+        "모듈별 통합 또는 상태별 구분만 선택할 수 있습니다."
+
+    rngReportBullets.Validation.Add Type:=xlValidateTextLength, _
+                                    AlertStyle:=xlValidAlertStop, _
+                                    Operator:=xlBetween, _
+                                    Formula1:="1", _
+                                    Formula2:="5"
+    rngReportBullets.Validation.IgnoreBlank = False
+    rngReportBullets.Validation.InputTitle = "레벨별 글머리 기호"
+    rngReportBullets.Validation.InputMessage = "각 Level에 사용할 글머리 기호를 1~5자로 입력하세요."
+    rngReportBullets.Validation.ErrorTitle = "설정값 오류"
+    rngReportBullets.Validation.ErrorMessage = "글머리 기호는 1~5자로 입력해야 합니다."
 End Sub
 
 Public Sub LoadHolidaySettings(ByRef holidayDict As Object, ByRef workdayDict As Object)
@@ -300,7 +364,7 @@ Public Function GetDisplayReportOnlyFlag() As String
     End If
 End Function
 
-Public Function GetTaskMaxLength() As Long
+Public Function GetTaskMaxLength(Optional ByVal taskLevel As Long = 1) As Long
     Dim ws As Worksheet
     Dim settingValue As Variant
 
@@ -313,7 +377,8 @@ Public Function GetTaskMaxLength() As Long
         Exit Function
     End If
 
-    settingValue = ws.Range(TASK_MAX_LENGTH_VALUE_CELL).Value
+    If taskLevel < 1 Or taskLevel > 3 Then taskLevel = 1
+    settingValue = ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Offset(taskLevel - 1, 0).Value
     If IsNumeric(settingValue) Then
         GetTaskMaxLength = CLng(settingValue)
     Else
@@ -324,6 +389,44 @@ Public Function GetTaskMaxLength() As Long
        GetTaskMaxLength > MAX_TASK_MAX_LENGTH Then
         GetTaskMaxLength = DEFAULT_TASK_MAX_LENGTH
     End If
+End Function
+
+Public Function GetDevReportSeparateStatusFlag() As Boolean
+    Dim ws As Worksheet
+    Dim settingValue As String
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    settingValue = Trim$(CStr(ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value2))
+    GetDevReportSeparateStatusFlag = _
+        (StrComp(settingValue, DEV_REPORT_LAYOUT_BY_STATUS, vbTextCompare) = 0)
+End Function
+
+Public Function GetDevReportLevelBullet(ByVal taskLevel As Long) As String
+    Dim ws As Worksheet
+    Dim bulletText As String
+
+    If taskLevel < 1 Or taskLevel > 3 Then taskLevel = 1
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If Not ws Is Nothing Then
+        bulletText = Trim$(CStr(ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL).Offset(taskLevel - 1, 0).Value2))
+    End If
+
+    If Len(bulletText) = 0 Then
+        Select Case taskLevel
+            Case 1: bulletText = ChrW(&H2022)
+            Case 2: bulletText = "-"
+            Case Else: bulletText = ChrW(&HB7)
+        End Select
+    End If
+
+    GetDevReportLevelBullet = bulletText
 End Function
 
 Public Sub RefreshTaskTextLengthValidation()
