@@ -346,6 +346,8 @@ Public Sub EnsureConfigSheet()
         "같은 페이지에 넣을 모듈에는 같은 페이지 번호를 입력하세요."
     rngWeeklyCustomPageNumbers.Validation.ErrorTitle = "설정값 오류"
     rngWeeklyCustomPageNumbers.Validation.ErrorMessage = "페이지 번호는 1~1000 사이 정수여야 합니다."
+
+    RefreshWeeklyReportModuleDropdown
 End Sub
 
 Public Sub LoadHolidaySettings(ByRef holidayDict As Object, ByRef workdayDict As Object)
@@ -589,6 +591,112 @@ Public Sub LoadWeeklyReportCustomPageAssignments(ByRef modulePageDict As Object)
         End If
     Next r
 End Sub
+
+Public Sub RefreshWeeklyReportModuleDropdown()
+    Dim configWs As Worksheet
+    Dim taskWs As Worksheet
+    Dim moduleSeen As Object
+    Dim selectedModuleSeen As Object
+    Dim moduleNames As Collection
+    Dim moduleName As String
+    Dim moduleNameItem As Variant
+    Dim lastRow As Long
+    Dim r As Long
+    Dim outputRow As Long
+    Dim listLastRow As Long
+    Dim rngCustomModules As Range
+
+    On Error Resume Next
+    Set configWs = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If configWs Is Nothing Then Exit Sub
+
+    Set moduleSeen = CreateObject("Scripting.Dictionary")
+    moduleSeen.CompareMode = vbTextCompare
+    Set selectedModuleSeen = CreateObject("Scripting.Dictionary")
+    selectedModuleSeen.CompareMode = vbTextCompare
+    Set moduleNames = New Collection
+
+    For r = WEEKLY_REPORT_CUSTOM_START_ROW To WEEKLY_REPORT_CUSTOM_END_ROW
+        moduleName = Trim$(CStr(configWs.Cells(r, WEEKLY_REPORT_CUSTOM_MODULE_COLUMN).Value2))
+        If Len(moduleName) > 0 And Not selectedModuleSeen.Exists(moduleName) Then
+            selectedModuleSeen.Add moduleName, True
+        End If
+    Next r
+
+    For Each taskWs In ThisWorkbook.Worksheets
+        If taskWs.Name <> CONFIG_SHEET_NAME And _
+           taskWs.Name <> REPORT_HISTORY_SHEET_NAME And _
+           taskWs.Name <> "WeeklyPptTemplate" Then
+            lastRow = GetLastDataRow(taskWs)
+            For r = DATA_START_ROW To lastRow
+                moduleName = Trim$(CStr(taskWs.Cells(r, COL_MODULE).Value2))
+                If Len(moduleName) > 0 And _
+                   Not selectedModuleSeen.Exists(moduleName) And _
+                   Not moduleSeen.Exists(moduleName) Then
+                    moduleSeen.Add moduleName, True
+                    moduleNames.Add moduleName
+                End If
+            Next r
+        End If
+    Next taskWs
+
+    configWs.Columns(WEEKLY_REPORT_MODULE_LIST_COLUMN).ClearContents
+    configWs.Cells(1, WEEKLY_REPORT_MODULE_LIST_COLUMN).Value = "주간보고 미선택 모듈 목록"
+    outputRow = WEEKLY_REPORT_MODULE_LIST_START_ROW
+    For Each moduleNameItem In moduleNames
+        configWs.Cells(outputRow, WEEKLY_REPORT_MODULE_LIST_COLUMN).Value = CStr(moduleNameItem)
+        outputRow = outputRow + 1
+    Next moduleNameItem
+
+    listLastRow = outputRow - 1
+    If listLastRow < WEEKLY_REPORT_MODULE_LIST_START_ROW Then
+        listLastRow = WEEKLY_REPORT_MODULE_LIST_START_ROW
+        configWs.Cells(listLastRow, WEEKLY_REPORT_MODULE_LIST_COLUMN).Value = ""
+    End If
+    configWs.Columns(WEEKLY_REPORT_MODULE_LIST_COLUMN).Hidden = True
+
+    Set rngCustomModules = configWs.Range( _
+        WEEKLY_REPORT_CUSTOM_MODULE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
+        WEEKLY_REPORT_CUSTOM_MODULE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW))
+
+    On Error Resume Next
+    rngCustomModules.Validation.Delete
+    On Error GoTo 0
+    rngCustomModules.Validation.Add Type:=xlValidateList, _
+                                    AlertStyle:=xlValidAlertStop, _
+                                    Operator:=xlBetween, _
+                                    Formula1:="=$" & WEEKLY_REPORT_MODULE_LIST_COLUMN & "$" & _
+                                              CStr(WEEKLY_REPORT_MODULE_LIST_START_ROW) & ":$" & _
+                                              WEEKLY_REPORT_MODULE_LIST_COLUMN & "$" & CStr(listLastRow)
+    rngCustomModules.Validation.IgnoreBlank = True
+    rngCustomModules.Validation.InCellDropdown = True
+    rngCustomModules.Validation.ShowError = True
+    rngCustomModules.Validation.InputTitle = "커스텀 모듈 선택"
+    rngCustomModules.Validation.InputMessage = "아직 선택하지 않은 모듈만 표시됩니다."
+    rngCustomModules.Validation.ErrorTitle = "모듈 선택 오류"
+    rngCustomModules.Validation.ErrorMessage = "드롭다운에 있는 미선택 모듈만 선택할 수 있습니다."
+End Sub
+
+Public Function GetDuplicateWeeklyReportCustomModule(ByVal configWs As Worksheet) As String
+    Dim moduleSeen As Object
+    Dim moduleName As String
+    Dim r As Long
+
+    Set moduleSeen = CreateObject("Scripting.Dictionary")
+    moduleSeen.CompareMode = vbTextCompare
+
+    For r = WEEKLY_REPORT_CUSTOM_START_ROW To WEEKLY_REPORT_CUSTOM_END_ROW
+        moduleName = Trim$(CStr(configWs.Cells(r, WEEKLY_REPORT_CUSTOM_MODULE_COLUMN).Value2))
+        If Len(moduleName) > 0 Then
+            If moduleSeen.Exists(moduleName) Then
+                GetDuplicateWeeklyReportCustomModule = moduleName
+                Exit Function
+            End If
+            moduleSeen.Add moduleName, True
+        End If
+    Next r
+End Function
 
 Public Sub RefreshTaskTextLengthValidation()
     Dim ws As Worksheet
