@@ -172,6 +172,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
 
     lastRow = GetLastDataRow(ws)
     EnsureConfigSheet
+    SynchronizeTaskHierarchyModules ws, lastRow, False
     showOwnerNames = GetWeeklyReportShowOwnerFlag()
     pageMode = GetWeeklyReportPageMode()
     overflowMode = GetWeeklyReportOverflowMode()
@@ -874,14 +875,10 @@ End Function
 
 Private Function GetWeeklyModuleOwnerText(ByVal rows As Collection, _
                                           ByVal moduleName As String) As String
-    Dim ownerNames As Collection
     Dim ownerSeen As Object
     Dim rowItem As Variant
     Dim ownerText As String
-    Dim ownerName As Variant
-    Dim result As String
 
-    Set ownerNames = New Collection
     Set ownerSeen = CreateObject("Scripting.Dictionary")
     ownerSeen.CompareMode = vbTextCompare
 
@@ -889,19 +886,11 @@ Private Function GetWeeklyModuleOwnerText(ByVal rows As Collection, _
         If Not CBool(rowItem(5)) And _
            StrComp(CStr(rowItem(0)), moduleName, vbTextCompare) = 0 Then
             ownerText = Trim$(CStr(rowItem(7)))
-            If Len(ownerText) > 0 And Not ownerSeen.Exists(ownerText) Then
-                ownerSeen.Add ownerText, True
-                ownerNames.Add ownerText
-            End If
+            AddDistinctOwnerNames ownerSeen, ownerText
         End If
     Next rowItem
 
-    For Each ownerName In ownerNames
-        If Len(result) > 0 Then result = result & ", "
-        result = result & CStr(ownerName)
-    Next ownerName
-
-    GetWeeklyModuleOwnerText = result
+    GetWeeklyModuleOwnerText = JoinOwnerNameSet(ownerSeen, ", ")
 End Function
 
 Private Function GetWeeklyReportFriday(ByVal targetDate As Date) As Date

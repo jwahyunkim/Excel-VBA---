@@ -990,7 +990,9 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
 
     Set watchedRange = Union( _
         ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
-        ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & ws.Rows.Count))
+        ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & ws.Rows.Count), _
+        ws.Range(COL_TASK & DATA_START_ROW & ":" & COL_TASK & ws.Rows.Count), _
+        ws.Range(COL_OWNER & DATA_START_ROW & ":" & COL_OWNER & ws.Rows.Count))
     Set changedRange = Intersect(Target, watchedRange)
     If changedRange Is Nothing Then Exit Sub
 
@@ -1011,6 +1013,8 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
             PropagateTaskModuleToDescendants ws, r, lastRow
         End If
     Next r
+
+    SynchronizeTaskHierarchyOwners ws, lastRow
 
     If Len(issueMessages) > 0 Then
         MsgBox "모듈 계층 정합성을 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
@@ -1037,6 +1041,8 @@ Public Sub SynchronizeTaskHierarchyModules(ByVal ws As Worksheet, _
         End If
     Next r
 
+    SynchronizeTaskHierarchyOwners ws, lastRow
+
     If showIssueMessage And Len(issueMessages) > 0 Then
         MsgBox "기존 모듈 계층 오류를 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
                issueMessages, _
@@ -1044,6 +1050,85 @@ Public Sub SynchronizeTaskHierarchyModules(ByVal ws As Worksheet, _
                "모듈 정합성 오류"
     End If
 End Sub
+
+Public Sub SynchronizeTaskHierarchyOwners(ByVal ws As Worksheet, _
+                                          ByVal lastRow As Long)
+    Dim r As Long
+    Dim ownerText As String
+
+    If ws Is Nothing Then Exit Sub
+    If lastRow < DATA_START_ROW Then Exit Sub
+
+    For r = lastRow To DATA_START_ROW Step -1
+        If HasTaskContent(ws, r) And HasChildTask(ws, r, lastRow) Then
+            ownerText = GetDescendantLeafOwnerText(ws, r, lastRow)
+            If Len(ownerText) = 0 Then
+                ws.Cells(r, COL_OWNER).ClearContents
+            Else
+                ws.Cells(r, COL_OWNER).Value = ownerText
+            End If
+        End If
+    Next r
+End Sub
+
+Private Function GetDescendantLeafOwnerText(ByVal ws As Worksheet, _
+                                            ByVal parentRow As Long, _
+                                            ByVal lastRow As Long) As String
+    Dim ownerSet As Object
+    Dim parentLevel As Long
+    Dim r As Long
+
+    Set ownerSet = CreateObject("Scripting.Dictionary")
+    ownerSet.CompareMode = vbTextCompare
+    parentLevel = GetTaskLevel(ws, parentRow)
+
+    For r = parentRow + 1 To lastRow
+        If HasTaskContent(ws, r) Then
+            If GetTaskLevel(ws, r) <= parentLevel Then Exit For
+            If Not HasChildTask(ws, r, lastRow) Then
+                AddDistinctOwnerNames ownerSet, CStr(ws.Cells(r, COL_OWNER).Value2)
+            End If
+        End If
+    Next r
+
+    GetDescendantLeafOwnerText = JoinOwnerNameSet(ownerSet, ", ")
+End Function
+
+Public Sub AddDistinctOwnerNames(ByVal ownerSet As Object, _
+                                 ByVal rawOwnerText As String)
+    Dim ownerNames As Variant
+    Dim ownerName As Variant
+    Dim normalizedText As String
+
+    normalizedText = Trim$(rawOwnerText)
+    If Len(normalizedText) = 0 Then Exit Sub
+
+    If Left$(normalizedText, 1) = "(" And Right$(normalizedText, 1) = ")" Then
+        normalizedText = Trim$(Mid$(normalizedText, 2, Len(normalizedText) - 2))
+    End If
+    normalizedText = Replace$(normalizedText, "，", ",")
+    ownerNames = Split(normalizedText, ",")
+
+    For Each ownerName In ownerNames
+        normalizedText = Trim$(CStr(ownerName))
+        If Len(normalizedText) > 0 Then
+            If Not ownerSet.Exists(normalizedText) Then ownerSet.Add normalizedText, True
+        End If
+    Next ownerName
+End Sub
+
+Public Function JoinOwnerNameSet(ByVal ownerSet As Object, _
+                                 ByVal delimiter As String) As String
+    Dim ownerName As Variant
+    Dim result As String
+
+    For Each ownerName In ownerSet.Keys
+        If Len(result) > 0 Then result = result & delimiter
+        result = result & CStr(ownerName)
+    Next ownerName
+
+    JoinOwnerNameSet = result
+End Function
 
 Public Sub ShowTaskInputErrorReasons(ByVal ws As Worksheet, ByVal lastRow As Long)
     Const MAX_DISPLAY_ERROR_COUNT As Long = 20

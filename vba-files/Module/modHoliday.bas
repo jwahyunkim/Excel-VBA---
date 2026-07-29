@@ -14,6 +14,7 @@ Public Sub EnsureConfigSheet()
     Dim rngDisplayReportOnly As Range
     Dim rngTaskMaxLength As Range
     Dim rngReportLayout As Range
+    Dim rngDevReportOwner As Range
     Dim rngReportBullets As Range
     Dim rngWeeklyReportOwner As Range
     Dim rngWeeklyReportPageMode As Range
@@ -63,6 +64,7 @@ Public Sub EnsureConfigSheet()
     ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 내용 최대 글자 수"
     ws.Range(DEV_REPORT_SETTING_TITLE_CELL).Value = "개발보고 설정"
     ws.Range(DEV_REPORT_LAYOUT_LABEL_CELL).Value = "출력 형식"
+    ws.Range(DEV_REPORT_OWNER_LABEL_CELL).Value = "담당자 이름 출력"
     ws.Range(DEV_REPORT_BULLET_TITLE_CELL).Value = "레벨별 글머리 기호"
     ws.Range(DEV_REPORT_BULLET_LEVEL1_LABEL_CELL).Value = "Level 1"
     ws.Range(DEV_REPORT_BULLET_LEVEL2_LABEL_CELL).Value = "Level 2"
@@ -94,6 +96,8 @@ Public Sub EnsureConfigSheet()
         ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value = DEV_REPORT_LAYOUT_CURRENT
     If Trim$(CStr(ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value)) = "" Then _
         ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL).Value = DEV_REPORT_LAYOUT_CURRENT
+    If Trim$(CStr(ws.Range(DEV_REPORT_OWNER_VALUE_CELL).Value)) = "" Then _
+        ws.Range(DEV_REPORT_OWNER_VALUE_CELL).Value = "Y"
     If Trim$(CStr(ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL).Value)) = "" Then _
         ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL).Value = ChrW(&H2022)
     If Trim$(CStr(ws.Range(DEV_REPORT_BULLET_LEVEL2_VALUE_CELL).Value)) = "" Then _
@@ -143,7 +147,7 @@ Public Sub EnsureConfigSheet()
     ws.Range("I8:J10").Borders.LineStyle = xlContinuous
     ws.Range("L1:M1,L4:M4").Font.Bold = True
     ws.Range("L1:M1,L4:M4").Interior.Color = RGB(226, 239, 218)
-    ws.Range("L1:M2,L4:M7").Borders.LineStyle = xlContinuous
+    ws.Range("L1:M7").Borders.LineStyle = xlContinuous
     ws.Range("O1:P1").Font.Bold = True
     ws.Range("O1:P1").Interior.Color = RGB(252, 228, 214)
     ws.Range("O1:P4").Borders.LineStyle = xlContinuous
@@ -183,6 +187,7 @@ Public Sub EnsureConfigSheet()
     Set rngDisplayReportOnly = ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL)
     Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_RANGE)
     Set rngReportLayout = ws.Range(DEV_REPORT_LAYOUT_VALUE_CELL)
+    Set rngDevReportOwner = ws.Range(DEV_REPORT_OWNER_VALUE_CELL)
     Set rngReportBullets = ws.Range(DEV_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & DEV_REPORT_BULLET_LEVEL3_VALUE_CELL)
     Set rngWeeklyReportOwner = ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL)
     Set rngWeeklyReportPageMode = ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL)
@@ -202,6 +207,7 @@ Public Sub EnsureConfigSheet()
     rngDisplayReportOnly.Validation.Delete
     rngTaskMaxLength.Validation.Delete
     rngReportLayout.Validation.Delete
+    rngDevReportOwner.Validation.Delete
     rngReportBullets.Validation.Delete
     rngWeeklyReportOwner.Validation.Delete
     rngWeeklyReportPageMode.Validation.Delete
@@ -304,6 +310,18 @@ Public Sub EnsureConfigSheet()
     rngReportLayout.Validation.ErrorTitle = "설정값 오류"
     rngReportLayout.Validation.ErrorMessage = _
         "모듈별 통합 또는 상태별 구분만 선택할 수 있습니다."
+
+    rngDevReportOwner.Validation.Add Type:=xlValidateList, _
+                                     AlertStyle:=xlValidAlertStop, _
+                                     Operator:=xlBetween, _
+                                     Formula1:="Y,N"
+    rngDevReportOwner.Validation.IgnoreBlank = False
+    rngDevReportOwner.Validation.InCellDropdown = True
+    rngDevReportOwner.Validation.InputTitle = "개발보고 담당자 표시"
+    rngDevReportOwner.Validation.InputMessage = _
+        "모듈명과 각 단계 업무명 뒤에 담당자를 표시하려면 Y, 숨기려면 N을 선택하세요."
+    rngDevReportOwner.Validation.ErrorTitle = "설정값 오류"
+    rngDevReportOwner.Validation.ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
 
     rngReportBullets.Validation.Add Type:=xlValidateTextLength, _
                                     AlertStyle:=xlValidAlertStop, _
@@ -523,6 +541,21 @@ Public Function GetDevReportLevelBullet(ByVal taskLevel As Long) As String
     End If
 
     GetDevReportLevelBullet = bulletText
+End Function
+
+Public Function GetDevReportShowOwnerFlag() As Boolean
+    Dim ws As Worksheet
+    Dim settingValue As String
+
+    GetDevReportShowOwnerFlag = True
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    settingValue = UCase$(Trim$(CStr(ws.Range(DEV_REPORT_OWNER_VALUE_CELL).Value2)))
+    If settingValue = "N" Then GetDevReportShowOwnerFlag = False
 End Function
 
 Public Function GetWeeklyReportShowOwnerFlag() As Boolean
