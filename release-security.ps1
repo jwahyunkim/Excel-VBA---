@@ -103,7 +103,7 @@ function Resolve-TargetDate {
 function Resolve-PositiveDayValue {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$RequestedValue,
+        [AllowEmptyString()][string]$RequestedValue = "",
         [Parameter(Mandatory = $true)][int]$DefaultValue
     )
 

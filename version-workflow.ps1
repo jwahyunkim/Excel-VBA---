@@ -185,6 +185,16 @@ function Get-VersionFromDevelopmentBranch {
     throw "릴리즈할 브랜치는 'develop/vA.B.C' 형식이어야 합니다: $Name"
 }
 
+function Get-VersionFromReleaseBranch {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    if ($Name -match '^release/v(\d+\.\d+\.\d+)$') {
+        return $Matches[1]
+    }
+
+    throw "복구할 릴리즈 브랜치는 'release/vA.B.C' 형식이어야 합니다: $Name"
+}
+
 function Get-ConfiguredParentBranch {
     param([Parameter(Mandatory = $true)][string]$Name)
 
@@ -1230,6 +1240,10 @@ function Commit-DevelopmentChanges {
 
 function Complete-VersionDevelopmentAndRelease {
     $developmentBranch = Get-CurrentBranch
+    if ($developmentBranch -match '^release/v\d+\.\d+\.\d+$') {
+        Resume-VersionRelease
+        return
+    }
     $null = Get-VersionFromDevelopmentBranch -Name $developmentBranch
     if (-not [string]::IsNullOrWhiteSpace($SourceBranch) -and
         $SourceBranch.Trim() -ne $developmentBranch) {
@@ -1412,6 +1426,67 @@ function Release-Version {
     Write-Host ""
     Write-Host "$tagName 릴리즈가 완료되었습니다." -ForegroundColor Green
     Write-Host "$developmentBranch -> $releaseBranch -> $releaseBaseBranch 이력이 보존되었습니다." -ForegroundColor Green
+    Invoke-Git -Arguments @("log", "--first-parent", "--oneline", "--decorate", "-5", $releaseBaseBranch)
+}
+
+function Resume-VersionRelease {
+    $releaseBranch = Get-CurrentBranch
+    $releaseVersion = Get-VersionFromReleaseBranch -Name $releaseBranch
+    $tagName = "v$releaseVersion"
+    $releaseTitle = "release: $tagName"
+
+    $configuredParentBranch = Get-ConfiguredParentBranch -Name $releaseBranch
+    $releaseBaseBranch = if (-not [string]::IsNullOrWhiteSpace($TargetBranch)) {
+        $TargetBranch.Trim()
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($configuredParentBranch)) {
+        $configuredParentBranch
+    }
+    else {
+        $DefaultVersionBaseBranch
+    }
+
+    Assert-ValidBranchName -Name $releaseBranch
+    Assert-ValidBranchName -Name $releaseBaseBranch
+
+    Write-Host "중단된 $releaseBranch 릴리즈를 현재 단계부터 다시 시작합니다." -ForegroundColor Yellow
+    Commit-CurrentBranchChanges `
+        -ExpectedBranch $releaseBranch `
+        -CommitMessage "release: $tagName 중단 복구"
+    Invoke-Git -Arguments @("push", "origin", $releaseBranch)
+
+    Invoke-Git -Arguments @("fetch", "origin", "--tags", "--prune")
+    $previousVersion = Get-LatestSemanticVersion
+    $validNextVersions = @(
+        Get-NextSemanticVersion -CurrentVersion $previousVersion -Part "patch"
+        Get-NextSemanticVersion -CurrentVersion $previousVersion -Part "minor"
+        Get-NextSemanticVersion -CurrentVersion $previousVersion -Part "major"
+    )
+    if ($releaseVersion -notin $validNextVersions) {
+        throw "복구할 릴리즈 v$releaseVersion 은 최신 태그 $($previousVersion.Tag)의 올바른 다음 major/minor/patch 버전이 아닙니다."
+    }
+
+    & git show-ref --verify --quiet "refs/tags/$tagName"
+    if ($LASTEXITCODE -eq 0) {
+        throw "태그가 이미 존재합니다: $tagName"
+    }
+
+    Prepare-ReleaseCommit `
+        -PreviousVersion $previousVersion.Version `
+        -ReleaseVersion $releaseVersion
+
+    Merge-WorkBranch `
+        -HeadBranch $releaseBranch `
+        -BaseBranchName $releaseBaseBranch `
+        -Title $releaseTitle `
+        -Body "$tagName 중단 지점부터 릴리즈 재개"
+
+    Invoke-Git -Arguments @("tag", "-a", $tagName, "-m", "$tagName release")
+    Invoke-Git -Arguments @("push", "origin", $tagName)
+
+    Write-Host ""
+    Write-Host "$tagName 릴리즈 복구가 완료되었습니다." -ForegroundColor Green
+    Write-Host "$releaseBranch -> $releaseBaseBranch 이력이 보존되었습니다." -ForegroundColor Green
     Invoke-Git -Arguments @("log", "--first-parent", "--oneline", "--decorate", "-5", $releaseBaseBranch)
 }
 
