@@ -1,0 +1,21 @@
+{
+    "app_name": "XVBA",
+    "description": "",
+    "author": "",
+    "email": "",
+    "create_ate": "",
+    "excel_file": "workbooks/dev/업무 간트 v4.2.0.xlsm",
+    "vba_folder": "vba-files",
+    "ribbon_file": "customUI14",
+    "ribbon_folder": "ribbons",
+    "logs": "on",
+    "release_security": {
+        "usage_days": 90,
+        "renewal_days": 30,
+        "vba_project_password": "CHANGE-ME",
+        "renewal_secret": "CHANGE-ME-ASCII-ONLY",
+        "distribution_folder": "dist"
+    },
+    "xvba_packages": {},
+    "xvba_dev_packages": {}
+}
