@@ -3,6 +3,7 @@ Option Explicit
 
 Private Const SECURITY_SHEET_NAME As String = "__RELEASE_SECURITY"
 Private Const GUIDE_SHEET_NAME As String = "사용안내"
+Private Const INFO_SHEET_NAME As String = "배포정보"
 Private Const SECURITY_MARKER As String = "RELEASE_SECURITY_V1"
 Private Const SECURITY_ENABLED As String = "Y"
 Private Const SHEET_NAME_SEPARATOR As String = vbLf
@@ -17,10 +18,12 @@ Public Function ConfigureReleaseSecurity(ByVal releaseVersion As String, _
                                          ByVal expiryDateValue As Double, _
                                          ByVal renewalDays As Long, _
                                          ByVal renewalSecret As String, _
-                                         ByVal releaseUser As String) As String
+                                         ByVal releaseUser As String, _
+                                         ByVal adminPassword As String) As String
     Dim previousEnableEvents As Boolean
     Dim securitySheet As Worksheet
     Dim guideSheet As Worksheet
+    Dim infoSheet As Worksheet
     Dim visibleBusinessSheets As String
 
     previousEnableEvents = Application.EnableEvents
@@ -33,6 +36,7 @@ Public Function ConfigureReleaseSecurity(ByVal releaseVersion As String, _
     If renewalDays < 1 Then Err.Raise 5, , "연장 일수는 1일 이상이어야 합니다."
     If Len(renewalSecret) = 0 Then Err.Raise 5, , "기간 연장 비밀키가 비어 있습니다."
     If Len(Trim$(releaseUser)) = 0 Then Err.Raise 5, , "배포 대상 사용자가 비어 있습니다."
+    If Len(adminPassword) = 0 Then Err.Raise 5, , "배포정보 확인 암호가 비어 있습니다."
 
     visibleBusinessSheets = CollectVisibleBusinessSheetNames()
     If Len(visibleBusinessSheets) = 0 Then _
@@ -40,6 +44,7 @@ Public Function ConfigureReleaseSecurity(ByVal releaseVersion As String, _
 
     Set guideSheet = GetOrCreateWorksheet(GUIDE_SHEET_NAME)
     Set securitySheet = GetOrCreateWorksheet(SECURITY_SHEET_NAME)
+    Set infoSheet = GetOrCreateWorksheet(INFO_SHEET_NAME)
 
     With securitySheet
         .Range("A1").Value2 = SECURITY_MARKER
@@ -58,10 +63,13 @@ Public Function ConfigureReleaseSecurity(ByVal releaseVersion As String, _
         .Range("B7").Value2 = visibleBusinessSheets
         .Range("A8").Value2 = "release_user"
         .Range("B8").Value2 = releaseUser
+        .Range("A9").Value2 = "admin_password"
+        .Range("B9").Value2 = adminPassword
         .Range("B3:B4").NumberFormat = "yyyy-mm-dd"
     End With
 
     WriteGuideSheet guideSheet, securitySheet
+    WriteReleaseInfoSheet infoSheet, securitySheet, adminPassword
     HideBusinessSheets
 
     mReleaseAuthenticated = False
@@ -193,6 +201,76 @@ EH:
            "원인: " & errorDescription, vbExclamation, "저장 취소"
 End Sub
 
+Public Sub 배포정보확인()
+    Dim previousEnableEvents As Boolean
+    Dim wasSaved As Boolean
+    Dim infoSheet As Worksheet
+    Dim errorDescription As String
+
+    If Not IsReleaseSecurityEnabled() Then
+        MsgBox "개발 원본에는 배포정보가 없습니다.", vbInformation, "배포정보 확인"
+        Exit Sub
+    End If
+
+    previousEnableEvents = Application.EnableEvents
+    wasSaved = ThisWorkbook.Saved
+    On Error GoTo EH
+    Application.EnableEvents = False
+
+    Set infoSheet = ThisWorkbook.Worksheets(INFO_SHEET_NAME)
+    On Error Resume Next
+    infoSheet.Unprotect
+    On Error GoTo EH
+    If infoSheet.ProtectContents Then GoTo SafeExit
+
+    infoSheet.Protect Password:=GetReleaseAdminPassword(), DrawingObjects:=True, _
+                      Contents:=True, Scenarios:=True, UserInterfaceOnly:=True
+    infoSheet.Visible = xlSheetVisible
+    infoSheet.Activate
+    If wasSaved Then ThisWorkbook.Saved = True
+
+SafeExit:
+    Application.EnableEvents = previousEnableEvents
+    Exit Sub
+
+EH:
+    errorDescription = Err.Description
+    On Error Resume Next
+    If Not infoSheet Is Nothing Then
+        If Not infoSheet.ProtectContents Then
+            infoSheet.Protect Password:=GetReleaseAdminPassword(), _
+                              DrawingObjects:=True, Contents:=True, _
+                              Scenarios:=True, UserInterfaceOnly:=True
+        End If
+    End If
+    If wasSaved Then ThisWorkbook.Saved = True
+    Application.EnableEvents = previousEnableEvents
+    MsgBox "배포정보를 표시하지 못했습니다." & vbCrLf & _
+           "원인: " & errorDescription, vbExclamation, "배포정보 확인"
+End Sub
+
+Public Sub HideReleaseInfoSheet()
+    Dim previousEnableEvents As Boolean
+    Dim wasSaved As Boolean
+    Dim infoSheet As Worksheet
+
+    If Not IsReleaseSecurityEnabled() Then Exit Sub
+
+    Set infoSheet = ThisWorkbook.Worksheets(INFO_SHEET_NAME)
+    If infoSheet.Visible <> xlSheetVisible Then Exit Sub
+
+    previousEnableEvents = Application.EnableEvents
+    wasSaved = ThisWorkbook.Saved
+    On Error GoTo SafeExit
+    Application.EnableEvents = False
+
+    infoSheet.Visible = xlSheetVeryHidden
+    If wasSaved Then ThisWorkbook.Saved = True
+
+SafeExit:
+    Application.EnableEvents = previousEnableEvents
+End Sub
+
 Private Function BuildReleaseRenewalCode(ByVal targetDateValue As Double, _
                                          ByVal renewalSecret As String) As String
     Dim targetDate As Date
@@ -249,6 +327,7 @@ Private Function CollectVisibleBusinessSheetNames() As String
     For Each worksheetItem In ThisWorkbook.Worksheets
         If worksheetItem.Name <> SECURITY_SHEET_NAME And _
            worksheetItem.Name <> GUIDE_SHEET_NAME And _
+           worksheetItem.Name <> INFO_SHEET_NAME And _
            worksheetItem.Visible = xlSheetVisible Then
             If Len(result) > 0 Then result = result & SHEET_NAME_SEPARATOR
             result = result & worksheetItem.Name
@@ -319,6 +398,7 @@ Private Sub ShowBusinessSheets()
     Next sheetName
 
     securitySheet.Visible = xlSheetVeryHidden
+    ThisWorkbook.Worksheets(INFO_SHEET_NAME).Visible = xlSheetVeryHidden
     If visibleCount > 0 Then
         ThisWorkbook.Worksheets(firstVisibleSheetName).Activate
         guideSheet.Visible = xlSheetVeryHidden
@@ -335,8 +415,7 @@ Private Sub WriteGuideSheet(ByVal guideSheet As Worksheet, _
         .Range("B4").Value2 = securitySheet.Range("B3").Value2
         .Range("A5").Value2 = "사용 만료일"
         .Range("B5").Value2 = securitySheet.Range("B4").Value2
-        .Range("A6").Value2 = "배포 대상 사용자"
-        .Range("B6").Value2 = CStr(securitySheet.Range("B8").Value2)
+        .Range("A6:B6").ClearContents
         .Range("B4:B5").NumberFormat = "yyyy-mm-dd"
         .Range("A7").Value2 = "사용 기간이 끝나면 관리자에게 오늘 날짜용 연장 코드를 요청하세요."
         .Range("A8").Value2 = "이 시트만 보이는 경우 파일을 닫지 말고 연장 코드를 입력하세요."
@@ -348,6 +427,37 @@ Private Sub WriteGuideSheet(ByVal guideSheet As Worksheet, _
         .Range("A7:A8").WrapText = True
     End With
 End Sub
+
+Private Sub WriteReleaseInfoSheet(ByVal infoSheet As Worksheet, _
+                                  ByVal securitySheet As Worksheet, _
+                                  ByVal adminPassword As String)
+    With infoSheet
+        .Cells.Clear
+        .Range("A1").Value2 = "배포정보"
+        .Range("A3").Value2 = "배포 대상 사용자"
+        .Range("B3").Value2 = CStr(securitySheet.Range("B8").Value2)
+        .Range("A4").Value2 = "배포 버전"
+        .Range("B4").Value2 = CStr(securitySheet.Range("B2").Value2)
+        .Range("A5").Value2 = "배포일"
+        .Range("B5").Value2 = securitySheet.Range("B3").Value2
+        .Range("A6").Value2 = "사용 만료일"
+        .Range("B6").Value2 = securitySheet.Range("B4").Value2
+        .Range("B5:B6").NumberFormat = "yyyy-mm-dd"
+        .Range("A1").Font.Bold = True
+        .Range("A1").Font.Size = 18
+        .Range("A3:A6").Font.Bold = True
+        .Columns("A").ColumnWidth = 24
+        .Columns("B").ColumnWidth = 22
+        .Protect Password:=adminPassword, DrawingObjects:=True, _
+                 Contents:=True, Scenarios:=True, UserInterfaceOnly:=True
+        .Visible = xlSheetVeryHidden
+    End With
+End Sub
+
+Private Function GetReleaseAdminPassword() As String
+    GetReleaseAdminPassword = CStr( _
+        ThisWorkbook.Worksheets(SECURITY_SHEET_NAME).Range("B9").Value2)
+End Function
 
 Private Function RotateSecret(ByVal value As String) As String
     If Len(value) <= 1 Then
