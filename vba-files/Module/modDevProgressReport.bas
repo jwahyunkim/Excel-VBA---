@@ -613,6 +613,9 @@ Private Function BuildDevProgressReportText(ByVal ws As Worksheet, _
                                             ByVal reportTitle As String, _
                                             ByVal reportItems As Collection) As String
     Dim textValue As String
+    Dim showOwnerNames As Boolean
+
+    showOwnerNames = GetDevReportShowOwnerFlag()
 
     textValue = Format$(reportDate, "yyyy-mm-dd") & " " & _
                 reportTitle & " 개발 진행 현황입니다." & vbCrLf & vbCrLf
@@ -620,11 +623,11 @@ Private Function BuildDevProgressReportText(ByVal ws As Worksheet, _
     If reportItems.Count = 0 Then
         textValue = textValue & "보고 내역이 없습니다." & vbCrLf
     ElseIf GetDevReportSeparateStatusFlag() Then
-        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_COMPLETED
-        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_IN_PROGRESS
-        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_PLANNED
+        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_COMPLETED, showOwnerNames
+        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_IN_PROGRESS, showOwnerNames
+        AppendStatusReportSection textValue, ws, reportItems, REPORT_STATUS_PLANNED, showOwnerNames
     Else
-        AppendReportModules textValue, ws, reportItems, "", True
+        AppendReportModules textValue, ws, reportItems, "", True, showOwnerNames
     End If
 
     BuildDevProgressReportText = textValue
@@ -633,13 +636,14 @@ End Function
 Private Sub AppendStatusReportSection(ByRef textValue As String, _
                                       ByVal ws As Worksheet, _
                                       ByVal reportItems As Collection, _
-                                      ByVal statusFilter As String)
+                                      ByVal statusFilter As String, _
+                                      ByVal showOwnerNames As Boolean)
     textValue = textValue & GetReportStatusLabel(statusFilter) & vbCrLf & vbCrLf
 
     If CountReportItemsByStatus(reportItems, statusFilter) = 0 Then
         textValue = textValue & Space$(5) & "내역 없음" & vbCrLf & vbCrLf
     Else
-        AppendReportModules textValue, ws, reportItems, statusFilter, False
+        AppendReportModules textValue, ws, reportItems, statusFilter, False, showOwnerNames
     End If
 End Sub
 
@@ -647,10 +651,10 @@ Private Sub AppendReportModules(ByRef textValue As String, _
                                 ByVal ws As Worksheet, _
                                 ByVal reportItems As Collection, _
                                 ByVal statusFilter As String, _
-                                ByVal includeStatusLabel As Boolean)
+                                ByVal includeStatusLabel As Boolean, _
+                                ByVal showOwnerNames As Boolean)
     Dim item As Variant
     Dim moduleNames As Collection
-    Dim ownerNames As Collection
     Dim moduleSeen As Object
     Dim ownerSeen As Object
     Dim moduleName As Variant
@@ -672,25 +676,24 @@ Private Sub AppendReportModules(ByRef textValue As String, _
     moduleIndex = 0
     For Each moduleName In moduleNames
         moduleIndex = moduleIndex + 1
-        Set ownerNames = New Collection
         Set ownerSeen = CreateObject("Scripting.Dictionary")
         ownerSeen.CompareMode = vbTextCompare
 
         For Each item In reportItems
             If ReportItemMatchesStatus(item, statusFilter) And _
                StrComp(CStr(item(0)), CStr(moduleName), vbTextCompare) = 0 Then
-                If Not ownerSeen.Exists(CStr(item(1))) Then
-                    ownerSeen.Add CStr(item(1)), True
-                    ownerNames.Add CStr(item(1))
-                End If
+                AddDistinctOwnerNames ownerSeen, CStr(item(1))
             End If
         Next item
 
-        textValue = textValue & GetCircledReportNumber(moduleIndex) & "     " & _
-                    CStr(moduleName) & " (" & JoinReportText(ownerNames, ", ") & ")" & vbCrLf
+        textValue = textValue & GetCircledReportNumber(moduleIndex) & "     " & CStr(moduleName)
+        If showOwnerNames Then
+            textValue = textValue & " (" & JoinOwnerNameSet(ownerSeen, ", ") & ")"
+        End If
+        textValue = textValue & vbCrLf
 
         AppendGroupedHierarchyItems textValue, ws, reportItems, CStr(moduleName), _
-                                    statusFilter, includeStatusLabel
+                                    statusFilter, includeStatusLabel, showOwnerNames
         textValue = textValue & vbCrLf
     Next moduleName
 End Sub
@@ -718,15 +721,18 @@ Private Sub AppendGroupedHierarchyItems(ByRef textValue As String, _
                                         ByVal reportItems As Collection, _
                                         ByVal moduleName As String, _
                                         ByVal statusFilter As String, _
-                                        ByVal includeStatusLabel As Boolean)
+                                        ByVal includeStatusLabel As Boolean, _
+                                        ByVal showOwnerNames As Boolean)
     Dim lastRow As Long
     Dim r As Long
     Dim item As Variant
     Dim currentPath As Variant
     Dim previousPath As Variant
     Dim leafSuffix As String
+    Dim hierarchyOwners As Object
 
     lastRow = GetLastDataRow(ws)
+    Set hierarchyOwners = BuildHierarchyOwnerMap(reportItems, moduleName, statusFilter)
 
     For r = DATA_START_ROW To lastRow
         For Each item In reportItems
@@ -734,14 +740,15 @@ Private Sub AppendGroupedHierarchyItems(ByRef textValue As String, _
                StrComp(CStr(item(0)), moduleName, vbTextCompare) = 0 And _
                ReportItemMatchesStatus(item, statusFilter) Then
                 currentPath = item(7)
-                leafSuffix = " (" & CStr(item(1)) & ")"
+                leafSuffix = ""
                 If includeStatusLabel Then
-                    leafSuffix = leafSuffix & ": " & _
+                    leafSuffix = ": " & _
                                  GetReportStatusLabel(CStr(item(3)))
                 End If
                 leafSuffix = leafSuffix & _
                              BuildPlannedDateSuffix(CStr(item(3)), CDbl(item(4)))
-                AppendHierarchyPath textValue, currentPath, previousPath, leafSuffix, 5
+                AppendHierarchyPath textValue, currentPath, previousPath, leafSuffix, 5, _
+                                    hierarchyOwners, showOwnerNames
                 previousPath = currentPath
                 Exit For
             End If
@@ -749,15 +756,57 @@ Private Sub AppendGroupedHierarchyItems(ByRef textValue As String, _
     Next r
 End Sub
 
+Private Function BuildHierarchyOwnerMap(ByVal reportItems As Collection, _
+                                        ByVal moduleName As String, _
+                                        ByVal statusFilter As String) As Object
+    Dim hierarchyOwners As Object
+    Dim ownerSet As Object
+    Dim item As Variant
+    Dim itemPath As Variant
+    Dim pathToken As String
+    Dim ownerText As String
+    Dim depth As Long
+
+    Set hierarchyOwners = CreateObject("Scripting.Dictionary")
+    hierarchyOwners.CompareMode = vbTextCompare
+
+    For Each item In reportItems
+        If StrComp(CStr(item(0)), moduleName, vbTextCompare) = 0 And _
+           ReportItemMatchesStatus(item, statusFilter) Then
+            itemPath = item(7)
+            ownerText = CStr(item(1))
+
+            For depth = LBound(itemPath) To UBound(itemPath)
+                pathToken = CStr(itemPath(depth))
+                If hierarchyOwners.Exists(pathToken) Then
+                    Set ownerSet = hierarchyOwners(pathToken)
+                Else
+                    Set ownerSet = CreateObject("Scripting.Dictionary")
+                    ownerSet.CompareMode = vbTextCompare
+                    hierarchyOwners.Add pathToken, ownerSet
+                End If
+
+                AddDistinctOwnerNames ownerSet, ownerText
+            Next depth
+        End If
+    Next item
+
+    Set BuildHierarchyOwnerMap = hierarchyOwners
+End Function
+
 Private Sub AppendHierarchyPath(ByRef textValue As String, _
                                 ByVal currentPath As Variant, _
                                 ByVal previousPath As Variant, _
                                 ByVal leafSuffix As String, _
-                                ByVal baseIndent As Long)
+                                ByVal baseIndent As Long, _
+                                ByVal hierarchyOwners As Object, _
+                                ByVal showOwnerNames As Boolean)
     Dim commonDepth As Long
     Dim depth As Long
     Dim marker As String
     Dim suffix As String
+    Dim pathToken As String
+    Dim displayText As String
 
     commonDepth = GetCommonHierarchyDepth(previousPath, currentPath)
 
@@ -767,8 +816,15 @@ Private Sub AppendHierarchyPath(ByRef textValue As String, _
         suffix = ""
         If depth = UBound(currentPath) Then suffix = leafSuffix
 
+        pathToken = CStr(currentPath(depth))
+        displayText = GetHierarchyPathText(pathToken)
+        If showOwnerNames And hierarchyOwners.Exists(pathToken) Then
+            displayText = displayText & " (" & _
+                          JoinOwnerNameSet(hierarchyOwners(pathToken), ", ") & ")"
+        End If
+
         textValue = textValue & Space$(baseIndent + (depth * 4)) & _
-                    marker & GetHierarchyPathText(CStr(currentPath(depth))) & suffix & vbCrLf
+                    marker & displayText & suffix & vbCrLf
     Next depth
 End Sub
 
@@ -806,19 +862,6 @@ Private Function GetCircledReportNumber(ByVal indexValue As Long) As String
     Else
         GetCircledReportNumber = CStr(indexValue) & "."
     End If
-End Function
-
-Private Function JoinReportText(ByVal items As Collection, _
-                                ByVal delimiter As String) As String
-    Dim item As Variant
-    Dim result As String
-
-    For Each item In items
-        If Len(result) > 0 Then result = result & delimiter
-        result = result & CStr(item)
-    Next item
-
-    JoinReportText = result
 End Function
 
 Private Function GetReportStatusLabel(ByVal statusText As String) As String
