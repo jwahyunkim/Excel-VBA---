@@ -1,6 +1,9 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet("Menu", "Start", "StartVersion", "CreateBranch", "MergeBranch", "Release", "Status", "Security")]
+    [ValidateSet(
+        "Menu", "Start", "StartVersion", "CreateBranch", "MergeBranch", "Release", "Status",
+        "Security", "SecurityConfig", "SecurityStatus", "SecuritySync", "SecurityBuild",
+        "SecurityValidate", "SecurityAll", "SecurityCode")]
     [string]$Action = "Menu",
 
     [string]$Value = "",
@@ -38,7 +41,13 @@ $DefaultChildMergeBody = ""
 
 $ErrorActionPreference = "Stop"
 $ScriptRelativePath = Split-Path -Leaf $PSCommandPath
-$WorkflowSupportFiles = @($ScriptRelativePath, "package.json", "WORKFLOW_GUIDE.md")
+$WorkflowSupportFiles = @(
+    $ScriptRelativePath,
+    $ReleaseSecurityScript,
+    "package.json",
+    "WORKFLOW_GUIDE.md",
+    "RELEASE_SECURITY_GUIDE.md"
+)
 
 function Invoke-CheckedCommand {
     param(
@@ -264,7 +273,11 @@ function Switch-ToUpdatedBranch {
 }
 
 function Get-WorkingTreeStatus {
-    return Get-GitOutput -Arguments @("status", "--porcelain=v1")
+    $result = & git status --porcelain=v1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Git 작업 트리 상태를 조회하지 못했습니다."
+    }
+    return ($result -join "`n")
 }
 
 function Assert-CleanWorkingTree {
@@ -349,6 +362,159 @@ function Set-ConfigFieldValue {
     }
 }
 
+function Get-DevelopmentVersionForBranch {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $candidate = $Name
+    $visited = @{}
+    for ($depth = 0; $depth -lt 10; $depth++) {
+        if ($candidate -match '^(?:develop|version)/v(\d+\.\d+\.\d+)$') {
+            return $Matches[1]
+        }
+        if ($visited.ContainsKey($candidate)) {
+            throw "브랜치 부모 설정이 순환합니다: $candidate"
+        }
+        $visited[$candidate] = $true
+
+        $parent = Get-ConfiguredParentBranch -Name $candidate
+        if ([string]::IsNullOrWhiteSpace($parent)) { return "" }
+        $candidate = $parent
+    }
+
+    throw "브랜치 부모 설정이 너무 깊습니다: $Name"
+}
+
+function Set-DevelopmentWorkbookVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetVersion,
+        [string]$ExpectedCurrentVersion = ""
+    )
+
+    $oldExcelFile = Get-ConfigFieldValue
+    $versionPattern = 'v\d+\.\d+\.\d+(?=\.xlsm$)'
+    $versionMatches = [regex]::Matches(
+        $oldExcelFile,
+        $versionPattern,
+        [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($versionMatches.Count -ne 1) {
+        throw "$ConfigFile 의 '$ConfigField' 파일명에서 vA.B.C 버전을 정확히 하나 찾지 못했습니다: $oldExcelFile"
+    }
+
+    $currentVersion = $versionMatches[0].Value.TrimStart('v', 'V')
+    if ($currentVersion -eq $TargetVersion) {
+        if (-not (Test-Path -LiteralPath $oldExcelFile)) {
+            throw "config의 개발 원본을 찾을 수 없습니다: $oldExcelFile"
+        }
+        return
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedCurrentVersion) -and
+        $currentVersion -ne $ExpectedCurrentVersion) {
+        throw "개발 원본 버전(v$currentVersion)이 예상 버전(v$ExpectedCurrentVersion)과 다릅니다."
+    }
+    if (-not (Test-Path -LiteralPath $oldExcelFile)) {
+        throw "버전을 변경할 개발 원본을 찾을 수 없습니다: $oldExcelFile"
+    }
+
+    $newExcelFile = [regex]::Replace(
+        $oldExcelFile,
+        $versionPattern,
+        "v$TargetVersion",
+        [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (Test-Path -LiteralPath $newExcelFile) {
+        throw "변경할 버전의 개발 원본이 이미 존재합니다: $newExcelFile"
+    }
+
+    Move-Item -LiteralPath $oldExcelFile -Destination $newExcelFile
+    Set-ConfigFieldValue -Value $newExcelFile
+    Write-Host "개발 원본/config 버전 정렬: v$currentVersion -> v$TargetVersion" -ForegroundColor Green
+}
+
+function Assert-MainMatchesRemote {
+    param([Parameter(Mandatory = $true)][string]$BranchName)
+
+    if (-not (Test-RemoteTrackingBranch -Name $BranchName)) { return }
+
+    $counts = Get-GitOutput -Arguments @(
+        "rev-list", "--left-right", "--count", "$BranchName...origin/$BranchName")
+    $parts = @($counts -split '\s+' | Where-Object { $_ -ne "" })
+    if ($parts.Count -ne 2) {
+        throw "main/origin 동기화 상태를 해석하지 못했습니다: $counts"
+    }
+
+    $localOnly = [int]$parts[0]
+    $remoteOnly = [int]$parts[1]
+    if ($localOnly -ne 0 -or $remoteOnly -ne 0) {
+        throw "$BranchName 브랜치가 origin과 다릅니다(local +$localOnly, remote +$remoteOnly). 먼저 동기화하세요."
+    }
+}
+
+function Start-AutomaticPatchDevelopment {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $currentBranch = Get-CurrentBranch
+    if ($currentBranch -ne $DefaultVersionBaseBranch) {
+        throw "자동 patch 개발 시작은 $DefaultVersionBaseBranch 브랜치에서만 가능합니다: $currentBranch"
+    }
+
+    $unmerged = Get-GitOutput -Arguments @("diff", "--name-only", "--diff-filter=U")
+    if (-not [string]::IsNullOrWhiteSpace($unmerged)) {
+        Write-Host $unmerged
+        throw "충돌이 해결되지 않은 파일이 있어 개발 브랜치를 만들 수 없습니다."
+    }
+
+    Invoke-Git -Arguments @("fetch", "origin", "--tags", "--prune")
+    Assert-MainMatchesRemote -BranchName $DefaultVersionBaseBranch
+
+    $currentVersion = Get-LatestSemanticVersion
+    $nextVersion = Get-NextSemanticVersion -CurrentVersion $currentVersion -Part "patch"
+    $developmentBranch = "develop/v$nextVersion"
+
+    if ((Test-LocalBranch -Name $developmentBranch) -or
+        (Test-RemoteTrackingBranch -Name $developmentBranch)) {
+        throw "다음 patch 개발 브랜치가 이미 존재합니다: $developmentBranch`n해당 브랜치로 전환한 뒤 다시 실행하세요."
+    }
+
+    $status = Get-WorkingTreeStatus
+    if (-not [string]::IsNullOrWhiteSpace($status)) {
+        Write-Host "현재 변경 사항을 새 개발 브랜치로 함께 이동합니다:" -ForegroundColor Yellow
+        Write-Host $status
+    }
+
+    Invoke-Git -Arguments @("switch", "-c", $developmentBranch)
+    Set-ConfiguredParentBranch -Name $developmentBranch -Parent $DefaultVersionBaseBranch
+    Set-DevelopmentWorkbookVersion `
+        -TargetVersion $nextVersion `
+        -ExpectedCurrentVersion $currentVersion.Version
+    Invoke-Git -Arguments @("push", "-u", "origin", $developmentBranch)
+
+    Write-Host ""
+    Write-Host "$Reason 작업을 위해 $developmentBranch patch 개발을 시작했습니다." -ForegroundColor Green
+    Write-Host "변경 사항은 스테이징하지 않았습니다." -ForegroundColor Yellow
+    return $nextVersion
+}
+
+function Ensure-SecurityMutationDevelopmentContext {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    $currentBranch = Get-CurrentBranch
+    $developmentVersion = Get-DevelopmentVersionForBranch -Name $currentBranch
+    if (-not [string]::IsNullOrWhiteSpace($developmentVersion)) {
+        Set-DevelopmentWorkbookVersion -TargetVersion $developmentVersion
+        Write-Host "$Reason 적용 대상: $currentBranch (v$developmentVersion)" -ForegroundColor DarkGray
+        return $developmentVersion
+    }
+
+    if ($currentBranch -eq $DefaultVersionBaseBranch) {
+        return Start-AutomaticPatchDevelopment -Reason $Reason
+    }
+    if ($currentBranch -match '^release/v') {
+        throw "릴리즈 브랜치에서는 새 보안 변경을 시작할 수 없습니다: $currentBranch"
+    }
+
+    throw ("현재 브랜치의 개발 버전을 확인할 수 없습니다: $currentBranch`n" +
+           "main에서 다시 실행하거나 workflowParent가 설정된 개발/기능 브랜치를 사용하세요.")
+}
+
 function Show-WorkflowStatus {
     $latestVersion = Get-LatestSemanticVersion
     $nextPatch = Get-NextSemanticVersion -CurrentVersion $latestVersion -Part "patch"
@@ -360,8 +526,19 @@ function Show-WorkflowStatus {
     Write-Host "Config          : $ConfigFile -> $ConfigField"
     Write-Host "현재 Excel      : $(Get-ConfigFieldValue)"
     Write-Host "현재 브랜치     : $currentBranch"
-    if ($currentBranch -match '^(?:develop|release|version)/v(\d+\.\d+\.\d+)$') {
-        Write-Host "작업 버전       : v$($Matches[1])"
+    $developmentVersion = Get-DevelopmentVersionForBranch -Name $currentBranch
+    if (-not [string]::IsNullOrWhiteSpace($developmentVersion)) {
+        Write-Host "작업 버전       : v$developmentVersion"
+        Write-Host "변경 작업       : 현재 개발 버전에 적용"
+    }
+    elseif ($currentBranch -eq $DefaultVersionBaseBranch) {
+        Write-Host "변경 작업       : develop/v$nextPatch 자동 시작"
+    }
+    elseif ($currentBranch -match '^release/v') {
+        Write-Host "변경 작업       : 릴리즈 브랜치에서는 시작 불가"
+    }
+    else {
+        Write-Host "변경 작업       : 개발 부모 브랜치 설정 필요"
     }
     Write-Host ""
     Invoke-Git -Arguments @("status", "--short", "--branch")
@@ -416,19 +593,19 @@ function Edit-ReleaseSecurityConfig {
     Write-Host ""
     Write-Host "빈 값으로 입력하면 현재 설정을 유지합니다." -ForegroundColor DarkGray
 
-    $excelFile = (Read-Host "개발 원본 경로 [$($config.excel_file)]").Trim()
-    if (-not [string]::IsNullOrWhiteSpace($excelFile)) { $config.excel_file = $excelFile }
-
-    $config.release_security.usage_days = Read-PositiveIntegerSetting `
+    $requestedUsageDays = Read-PositiveIntegerSetting `
         -Prompt "기본 사용 기간(일)" `
         -CurrentValue ([int]$config.release_security.usage_days)
-    $config.release_security.renewal_days = Read-PositiveIntegerSetting `
+    $requestedRenewalDays = Read-PositiveIntegerSetting `
         -Prompt "1회 연장 기간(일)" `
         -CurrentValue ([int]$config.release_security.renewal_days)
 
     $projectPassword = (Read-Host "VBA 프로젝트 암호 [Enter=현재 암호 유지]").Trim()
-    if (-not [string]::IsNullOrWhiteSpace($projectPassword)) {
-        $config.release_security.vba_project_password = $projectPassword
+    $requestedProjectPassword = if ([string]::IsNullOrWhiteSpace($projectPassword)) {
+        [string]$config.release_security.vba_project_password
+    }
+    else {
+        $projectPassword
     }
 
     $renewalSecret = (Read-Host "연장코드 비밀키 [Enter=현재 비밀키 유지]").Trim()
@@ -436,13 +613,40 @@ function Edit-ReleaseSecurityConfig {
         if ($renewalSecret -match '[^\x20-\x7E]') {
             throw "연장코드 비밀키는 영문, 숫자, ASCII 특수문자만 사용할 수 있습니다."
         }
-        $config.release_security.renewal_secret = $renewalSecret
+    }
+    $requestedRenewalSecret = if ([string]::IsNullOrWhiteSpace($renewalSecret)) {
+        [string]$config.release_security.renewal_secret
+    }
+    else {
+        $renewalSecret
     }
 
     $distributionFolder = (Read-Host "배포 폴더 [$($config.release_security.distribution_folder)]").Trim()
-    if (-not [string]::IsNullOrWhiteSpace($distributionFolder)) {
-        $config.release_security.distribution_folder = $distributionFolder
+    $requestedDistributionFolder = if ([string]::IsNullOrWhiteSpace($distributionFolder)) {
+        [string]$config.release_security.distribution_folder
     }
+    else {
+        $distributionFolder
+    }
+
+    $hasChanges = (
+        $requestedUsageDays -ne [int]$config.release_security.usage_days -or
+        $requestedRenewalDays -ne [int]$config.release_security.renewal_days -or
+        $requestedProjectPassword -ne [string]$config.release_security.vba_project_password -or
+        $requestedRenewalSecret -ne [string]$config.release_security.renewal_secret -or
+        $requestedDistributionFolder -ne [string]$config.release_security.distribution_folder)
+    if (-not $hasChanges) {
+        Write-Host "변경된 보안 설정이 없습니다. 버전과 파일을 변경하지 않습니다." -ForegroundColor Yellow
+        return
+    }
+
+    $null = Ensure-SecurityMutationDevelopmentContext -Reason "보안 설정 수정"
+    $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
+    $config.release_security.usage_days = $requestedUsageDays
+    $config.release_security.renewal_days = $requestedRenewalDays
+    $config.release_security.vba_project_password = $requestedProjectPassword
+    $config.release_security.renewal_secret = $requestedRenewalSecret
+    $config.release_security.distribution_folder = $requestedDistributionFolder
 
     $json = $config | ConvertTo-Json -Depth 10
     $utf8WithoutBom = New-Object Text.UTF8Encoding($false)
@@ -450,6 +654,27 @@ function Edit-ReleaseSecurityConfig {
 
     Write-Host "config.json 보안 설정을 저장했습니다." -ForegroundColor Green
     Invoke-ReleaseSecurityCommand -ReleaseAction Status
+}
+
+function Invoke-SecuritySyncWorkflow {
+    $null = Ensure-SecurityMutationDevelopmentContext -Reason "개발본 보안 VBA 동기화"
+    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
+}
+
+function Invoke-SecurityBuildWorkflow {
+    param([string]$TargetDate = "")
+
+    $null = Ensure-SecurityMutationDevelopmentContext -Reason "배포본 생성"
+    Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
+}
+
+function Invoke-SecurityAllWorkflow {
+    param([string]$TargetDate = "")
+
+    $null = Ensure-SecurityMutationDevelopmentContext -Reason "보안 동기화/배포"
+    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
+    Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
+    Invoke-ReleaseSecurityCommand -ReleaseAction Validate
 }
 
 function Show-ReleaseSecurityMenu {
@@ -469,17 +694,15 @@ function Show-ReleaseSecurityMenu {
         switch ($selection) {
             "1" { Invoke-ReleaseSecurityCommand -ReleaseAction Status }
             "2" { Edit-ReleaseSecurityConfig }
-            "3" { Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev }
+            "3" { Invoke-SecuritySyncWorkflow }
             "4" {
                 $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
-                Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $targetDate
+                Invoke-SecurityBuildWorkflow -TargetDate $targetDate
             }
             "5" { Invoke-ReleaseSecurityCommand -ReleaseAction Validate }
             "6" {
                 $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
-                Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
-                Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $targetDate
-                Invoke-ReleaseSecurityCommand -ReleaseAction Validate
+                Invoke-SecurityAllWorkflow -TargetDate $targetDate
             }
             "7" {
                 $targetDate = Read-Host "코드 날짜(yyyy-MM-dd, Enter=오늘)"
@@ -579,6 +802,10 @@ function Start-VersionDevelopment {
         -RequestedBaseBranch $resolvedBaseBranch `
         -RequestedBranchName $developmentBranch `
         -AllowScriptOnlyChanges
+
+    Set-DevelopmentWorkbookVersion `
+        -TargetVersion $nextVersion `
+        -ExpectedCurrentVersion $currentVersion.Version
 
     Write-Host ""
     Write-Host "$($currentVersion.Tag) -> v$nextVersion ($versionPart)" -ForegroundColor Green
@@ -942,6 +1169,13 @@ try {
         "Release" { Release-Version }
         "Status" { Show-WorkflowStatus }
         "Security" { Show-ReleaseSecurityMenu }
+        "SecurityConfig" { Edit-ReleaseSecurityConfig }
+        "SecurityStatus" { Invoke-ReleaseSecurityCommand -ReleaseAction Status }
+        "SecuritySync" { Invoke-SecuritySyncWorkflow }
+        "SecurityBuild" { Invoke-SecurityBuildWorkflow -TargetDate $Value }
+        "SecurityValidate" { Invoke-ReleaseSecurityCommand -ReleaseAction Validate }
+        "SecurityAll" { Invoke-SecurityAllWorkflow -TargetDate $Value }
+        "SecurityCode" { Invoke-ReleaseSecurityCommand -ReleaseAction Code -TargetDate $Value }
     }
 }
 catch {

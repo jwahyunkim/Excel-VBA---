@@ -537,7 +537,7 @@ function Test-ReleaseSaveCycle {
 
 function Test-ReleaseWorkbook {
     $config = Get-LocalConfig
-    $releasePath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+    $sourceReleasePath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
         Resolve-WorkspacePath -Path $OutputPath
     }
     else {
@@ -548,38 +548,57 @@ function Test-ReleaseWorkbook {
         $latest.FullName
     }
 
-    if (-not (Test-Path -LiteralPath $releasePath)) { throw "배포본을 찾을 수 없습니다: $releasePath" }
-
-    Write-Host "[1/4] 매크로 차단 상태에서 디스크 잠금을 확인합니다."
-    $lockedBefore = Read-ReleaseWorkbookState -WorkbookPath $releasePath -MacrosEnabled $false
-    if ($lockedBefore.Marker -ne "RELEASE_SECURITY_V1") { throw "배포 보안 표시자가 없습니다." }
-    if ($lockedBefore.VisibleSheets.Count -ne 1 -or $lockedBefore.VisibleSheets[0] -ne "사용안내") {
-        throw "디스크 잠금 상태가 아닙니다: $($lockedBefore.VisibleSheets -join ', ')"
-    }
-    if ($lockedBefore.ExpiryDate -lt [DateTime]::Today) {
-        throw "이 자동 검증은 만료 전 배포본만 실행할 수 있습니다. 만료일: $($lockedBefore.ExpiryDate.ToString('yyyy-MM-dd'))"
+    if (-not (Test-Path -LiteralPath $sourceReleasePath)) {
+        throw "배포본을 찾을 수 없습니다: $sourceReleasePath"
     }
 
-    Write-Host "[2/4] 매크로 허용 상태에서 정상 잠금 해제를 확인합니다."
-    $unlocked = Read-ReleaseWorkbookState -WorkbookPath $releasePath -MacrosEnabled $true
-    $businessSheets = @($unlocked.VisibleSheets | Where-Object { $_ -notin @("사용안내", "__RELEASE_SECURITY") })
-    if ($businessSheets.Count -lt 1) { throw "정상 업무 시트가 표시되지 않았습니다." }
-    if ($unlocked.VisibleSheets -contains "사용안내" -or $unlocked.VisibleSheets -contains "__RELEASE_SECURITY") {
-        throw "잠금 해제 후 보안용 시트가 표시되었습니다: $($unlocked.VisibleSheets -join ', ')"
+    $systemTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    $validationRoot = Join-Path $systemTempRoot ("excel-release-validation-" + [Guid]::NewGuid().ToString("N"))
+    $validationPath = Join-Path $validationRoot ([IO.Path]::GetFileName($sourceReleasePath))
+    try {
+        $null = New-Item -ItemType Directory -Path $validationRoot
+        Copy-Item -LiteralPath $sourceReleasePath -Destination $validationPath
+
+        Write-Host "[1/4] 매크로 차단 상태에서 디스크 잠금을 확인합니다."
+        $lockedBefore = Read-ReleaseWorkbookState -WorkbookPath $validationPath -MacrosEnabled $false
+        if ($lockedBefore.Marker -ne "RELEASE_SECURITY_V1") { throw "배포 보안 표시자가 없습니다." }
+        if ($lockedBefore.VisibleSheets.Count -ne 1 -or $lockedBefore.VisibleSheets[0] -ne "사용안내") {
+            throw "디스크 잠금 상태가 아닙니다: $($lockedBefore.VisibleSheets -join ', ')"
+        }
+        if ($lockedBefore.ExpiryDate -lt [DateTime]::Today) {
+            throw "이 자동 검증은 만료 전 배포본만 실행할 수 있습니다. 만료일: $($lockedBefore.ExpiryDate.ToString('yyyy-MM-dd'))"
+        }
+
+        Write-Host "[2/4] 매크로 허용 상태에서 정상 잠금 해제를 확인합니다."
+        $unlocked = Read-ReleaseWorkbookState -WorkbookPath $validationPath -MacrosEnabled $true
+        $businessSheets = @($unlocked.VisibleSheets | Where-Object { $_ -notin @("사용안내", "__RELEASE_SECURITY") })
+        if ($businessSheets.Count -lt 1) { throw "정상 업무 시트가 표시되지 않았습니다." }
+        if ($unlocked.VisibleSheets -contains "사용안내" -or $unlocked.VisibleSheets -contains "__RELEASE_SECURITY") {
+            throw "잠금 해제 후 보안용 시트가 표시되었습니다: $($unlocked.VisibleSheets -join ', ')"
+        }
+        if (-not $unlocked.Saved) { throw "정상 개봉 직후 통합문서가 불필요한 변경 상태입니다." }
+
+        Write-Host "[3/4] 정상 저장 후 화면 복원을 확인합니다."
+        Test-ReleaseSaveCycle -WorkbookPath $validationPath
+
+        Write-Host "[4/4] 파일을 다시 열어 디스크 잠금이 그대로인지 확인합니다."
+        $lockedAfter = Read-ReleaseWorkbookState -WorkbookPath $validationPath -MacrosEnabled $false
+        if ($lockedAfter.VisibleSheets.Count -ne 1 -or $lockedAfter.VisibleSheets[0] -ne "사용안내") {
+            throw "검증 후 디스크 잠금이 유지되지 않았습니다: $($lockedAfter.VisibleSheets -join ', ')"
+        }
+
+        Write-Host "배포본 자동 검증 통과: $sourceReleasePath" -ForegroundColor Green
+        Write-Host "표시 업무 시트 수: $($businessSheets.Count), 만료일: $($lockedAfter.ExpiryDate.ToString('yyyy-MM-dd'))"
+        Write-Host "검증은 임시 복사본에서 수행되어 원본 배포본은 변경되지 않았습니다." -ForegroundColor DarkGray
     }
-    if (-not $unlocked.Saved) { throw "정상 개봉 직후 통합문서가 불필요한 변경 상태입니다." }
-
-    Write-Host "[3/4] 정상 저장 후 화면 복원을 확인합니다."
-    Test-ReleaseSaveCycle -WorkbookPath $releasePath
-
-    Write-Host "[4/4] 파일을 다시 열어 디스크 잠금이 그대로인지 확인합니다."
-    $lockedAfter = Read-ReleaseWorkbookState -WorkbookPath $releasePath -MacrosEnabled $false
-    if ($lockedAfter.VisibleSheets.Count -ne 1 -or $lockedAfter.VisibleSheets[0] -ne "사용안내") {
-        throw "검증 후 디스크 잠금이 유지되지 않았습니다: $($lockedAfter.VisibleSheets -join ', ')"
+    finally {
+        $resolvedValidationRoot = [IO.Path]::GetFullPath($validationRoot)
+        if ((Test-Path -LiteralPath $resolvedValidationRoot) -and
+            $resolvedValidationRoot.StartsWith($systemTempRoot, [StringComparison]::OrdinalIgnoreCase) -and
+            [IO.Path]::GetFileName($resolvedValidationRoot).StartsWith("excel-release-validation-")) {
+            Remove-Item -LiteralPath $resolvedValidationRoot -Recurse -Force
+        }
     }
-
-    Write-Host "배포본 자동 검증 통과: $releasePath" -ForegroundColor Green
-    Write-Host "표시 업무 시트 수: $($businessSheets.Count), 만료일: $($lockedAfter.ExpiryDate.ToString('yyyy-MM-dd'))"
 }
 
 Push-Location $ScriptRoot

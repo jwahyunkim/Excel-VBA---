@@ -35,7 +35,7 @@ main
 
 - `main`: 배포 완료 버전과 `vA.B.C` 태그가 남는 기준 브랜치
 - `develop/vA.B.C`: 해당 버전의 여러 작업을 통합하는 개발 브랜치
-- `release/vA.B.C`: Excel 파일명과 config를 변경하고 최종 배포를 준비하는 브랜치
+- `release/vA.B.C`: 보안 배포본 생성·검증과 최종 배포를 준비하는 브랜치
 - `feature/*`, `fix/*`: 실제 기능 개발과 오류 수정을 진행하는 자식 브랜치
 
 `release` 브랜치는 개발 시작 시 미리 만들지 않습니다. `npm run version:release`를 실행할 때 자동 생성한 뒤 `develop → release → main` 순서로 일반 merge합니다.
@@ -96,6 +96,8 @@ npm run version:start
 ```text
 develop/v3.3.0
 ```
+
+브랜치를 만든 직후 개발 원본 Excel 파일명과 `config.json`의 `excel_file`도 `v3.3.0`으로 함께 변경됩니다. 이 변경은 자동 스테이징하지 않으므로 개발 작업과 함께 원하는 롤백 단위로 커밋합니다.
 
 처음 워크플로 파일을 추가한 상태라면 이 브랜치에서 함께 커밋합니다.
 
@@ -169,12 +171,11 @@ npm run version:release
 
 1. `main`에서 `release/vA.B.C` 생성
 2. `develop/vA.B.C → release/vA.B.C` PR 생성 및 일반 merge
-3. `config.json`에 등록된 Excel 파일명을 새 버전으로 변경
-4. `config.json`의 `excel_file` 값 변경
-5. 릴리즈 준비 커밋 생성
-6. `release/vA.B.C → main` PR 생성 및 일반 merge
-7. 임시 develop/release 브랜치 삭제
-8. `main`에 `vA.B.C` 태그 생성 및 푸시
+3. 보안 배포본 생성 및 임시 복사본 자동 검증
+4. 개발 원본, config, 배포본을 릴리즈 준비 커밋으로 반영
+5. `release/vA.B.C → main` PR 생성 및 일반 merge
+6. 임시 develop/release 브랜치 삭제
+7. `main`에 `vA.B.C` 태그 생성 및 푸시
 
 예를 들어 기존 파일명이 다음과 같다면:
 
@@ -182,7 +183,7 @@ npm run version:release
 업무 간트 v4.0.0.xlsm
 ```
 
-`v4.0.1` 릴리즈 시 자동으로 다음처럼 변경됩니다.
+`v4.0.1` 개발을 시작하면 자동으로 다음처럼 변경됩니다.
 
 ```text
 업무 간트 v4.0.1.xlsm
