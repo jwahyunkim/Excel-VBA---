@@ -591,7 +591,10 @@ function Invoke-ReleaseSecurityCommand {
         [Parameter(Mandatory = $true)]
         [ValidateSet("Build", "Code", "Status", "SyncDev", "Validate")]
         [string]$ReleaseAction,
-        [string]$TargetDate = ""
+        [string]$TargetDate = "",
+        [string]$ReleaseUser = "",
+        [int]$UsageDays = 0,
+        [int]$RenewalDays = 0
     )
 
     $arguments = @(
@@ -601,6 +604,15 @@ function Invoke-ReleaseSecurityCommand {
     )
     if (-not [string]::IsNullOrWhiteSpace($TargetDate)) {
         $arguments += @("-Date", $TargetDate.Trim())
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseUser)) {
+        $arguments += @("-ReleaseUser", $ReleaseUser.Trim())
+    }
+    if ($UsageDays -gt 0) {
+        $arguments += @("-UsageDays", [string]$UsageDays)
+    }
+    if ($RenewalDays -gt 0) {
+        $arguments += @("-RenewalDays", [string]$RenewalDays)
     }
 
     & powershell @arguments
@@ -623,6 +635,19 @@ function Read-PositiveIntegerSetting {
         throw "$Prompt 값은 1 이상의 정수여야 합니다."
     }
     return $parsed
+}
+
+function Get-ReleaseSecurityPeriodDefaults {
+    $configPath = Join-Path (Get-Location) $ConfigFile
+    $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
+    if ($null -eq $config.release_security) {
+        throw "$ConfigFile 파일에 release_security 설정이 없습니다."
+    }
+
+    return [PSCustomObject]@{
+        UsageDays = [int]$config.release_security.usage_days
+        RenewalDays = [int]$config.release_security.renewal_days
+    }
 }
 
 function Edit-ReleaseSecurityConfig {
@@ -711,9 +736,19 @@ function Invoke-SecuritySyncWorkflow {
 }
 
 function Invoke-SecurityBuildWorkflow {
-    param([string]$TargetDate = "")
+    param(
+        [string]$TargetDate = "",
+        [string]$ReleaseUser = "",
+        [int]$UsageDays = 0,
+        [int]$RenewalDays = 0
+    )
 
-    Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
+    Invoke-ReleaseSecurityCommand `
+        -ReleaseAction Build `
+        -TargetDate $TargetDate `
+        -ReleaseUser $ReleaseUser `
+        -UsageDays $UsageDays `
+        -RenewalDays $RenewalDays
 }
 
 function Invoke-SecurityAllWorkflow {
@@ -739,8 +774,23 @@ function Show-ReleaseSecurityMenu {
             "1" { Invoke-ReleaseSecurityCommand -ReleaseAction Status }
             "2" { Edit-ReleaseSecurityConfig; return }
             "3" {
+                $defaults = Get-ReleaseSecurityPeriodDefaults
+                $releaseUser = (Read-Host "배포 대상 사용자(필수)").Trim()
+                if ([string]::IsNullOrWhiteSpace($releaseUser)) {
+                    throw "배포 대상 사용자를 입력하세요."
+                }
+                $usageDays = Read-PositiveIntegerSetting `
+                    -Prompt "사용 기간(일, Enter=기본값)" `
+                    -CurrentValue $defaults.UsageDays
+                $renewalDays = Read-PositiveIntegerSetting `
+                    -Prompt "1회 연장 기간(일, Enter=기본값)" `
+                    -CurrentValue $defaults.RenewalDays
                 $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
-                Invoke-SecurityBuildWorkflow -TargetDate $targetDate
+                Invoke-SecurityBuildWorkflow `
+                    -TargetDate $targetDate `
+                    -ReleaseUser $releaseUser `
+                    -UsageDays $usageDays `
+                    -RenewalDays $renewalDays
             }
             "0" { return }
             default { Write-Host "0~3 중 하나를 선택하세요." -ForegroundColor Yellow }

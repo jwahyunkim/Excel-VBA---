@@ -4,7 +4,10 @@ param(
     [string]$Action = "Status",
 
     [string]$Date = "",
-    [string]$OutputPath = ""
+    [string]$OutputPath = "",
+    [string]$ReleaseUser = "",
+    [string]$UsageDays = "",
+    [string]$RenewalDays = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -95,6 +98,37 @@ function Resolve-TargetDate {
     }
 
     return $parsedDate.Date
+}
+
+function Resolve-PositiveDayValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$RequestedValue,
+        [Parameter(Mandatory = $true)][int]$DefaultValue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RequestedValue)) { return $DefaultValue }
+
+    $parsed = 0
+    if (-not [int]::TryParse($RequestedValue.Trim(), [ref]$parsed) -or $parsed -lt 1) {
+        throw "$Name 값은 1 이상의 정수여야 합니다: $RequestedValue"
+    }
+    return $parsed
+}
+
+function Get-SafeFileNamePart {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    $safeValue = $Value.Trim()
+    foreach ($invalidCharacter in [IO.Path]::GetInvalidFileNameChars()) {
+        $safeValue = $safeValue.Replace([string]$invalidCharacter, "_")
+    }
+    $safeValue = $safeValue.Trim().TrimEnd('.')
+    if ([string]::IsNullOrWhiteSpace($safeValue)) {
+        throw "배포 대상 사용자 이름을 파일명으로 변환할 수 없습니다: $Value"
+    }
+    if ($safeValue.Length -gt 60) { $safeValue = $safeValue.Substring(0, 60).TrimEnd() }
+    return $safeValue
 }
 
 function ConvertTo-Base36 {
@@ -246,7 +280,8 @@ function Invoke-WorkbookUpdate {
         [DateTime]$ExpiryDate,
         [string]$ReleaseVersion,
         [int]$RenewalDays,
-        [string]$RenewalSecret
+        [string]$RenewalSecret,
+        [string]$ReleaseUser
     )
 
     $excel = $null
@@ -280,7 +315,8 @@ function Invoke-WorkbookUpdate {
                 [double]$ReleaseDate.ToOADate(),
                 [double]$ExpiryDate.ToOADate(),
                 [int]$RenewalDays,
-                $RenewalSecret)
+                $RenewalSecret,
+                $ReleaseUser)
             $expectedCode = New-RenewalCode -TargetDate $ReleaseDate -Secret $RenewalSecret
             if ($vbaCode -ne $expectedCode) {
                 throw "PowerShell/VBA 연장코드 계산 불일치: PowerShell=$expectedCode, VBA=$vbaCode"
@@ -364,6 +400,23 @@ function Sync-DevelopmentWorkbook {
 function Build-ReleaseWorkbook {
     $config = Get-LocalConfig
     $releaseDate = Resolve-TargetDate
+    $resolvedUsageDays = Resolve-PositiveDayValue `
+        -Name "사용 기간" `
+        -RequestedValue $UsageDays `
+        -DefaultValue $config.UsageDays
+    $resolvedRenewalDays = Resolve-PositiveDayValue `
+        -Name "1회 연장 기간" `
+        -RequestedValue $RenewalDays `
+        -DefaultValue $config.RenewalDays
+    $resolvedReleaseUser = if ([string]::IsNullOrWhiteSpace($ReleaseUser)) {
+        "미지정"
+    }
+    else {
+        $ReleaseUser.Trim()
+    }
+    if ($resolvedReleaseUser.Length -gt 100 -or $resolvedReleaseUser -match '[\x00-\x1F]') {
+        throw "배포 대상 사용자는 제어문자 없이 100자 이내로 입력하세요."
+    }
     if (-not (Test-Path -LiteralPath $config.WorkbookPath)) {
         throw "개발 원본을 찾을 수 없습니다: $($config.WorkbookPath)"
     }
@@ -371,10 +424,16 @@ function Build-ReleaseWorkbook {
     if (-not (Test-Path -LiteralPath $WorkbookClassPath)) { throw "통합문서 클래스 소스가 없습니다: $WorkbookClassPath" }
 
     $releaseVersion = Get-ReleaseVersion -WorkbookPath $config.WorkbookPath
-    $expiryDate = $releaseDate.AddDays($config.UsageDays)
+    $expiryDate = $releaseDate.AddDays($resolvedUsageDays)
     $distributionPath = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
         $baseName = [IO.Path]::GetFileNameWithoutExtension($config.WorkbookPath)
-        Join-Path $config.DistributionFolder "${baseName}_배포_$($releaseDate.ToString('yyyyMMdd')).xlsm"
+        $userFilePart = if ([string]::IsNullOrWhiteSpace($ReleaseUser)) {
+            ""
+        }
+        else {
+            "_$(Get-SafeFileNamePart -Value $resolvedReleaseUser)"
+        }
+        Join-Path $config.DistributionFolder "${baseName}${userFilePart}_배포_$($releaseDate.ToString('yyyyMMdd')).xlsm"
     }
     else {
         Resolve-WorkspacePath -Path $OutputPath
@@ -398,14 +457,17 @@ function Build-ReleaseWorkbook {
         -ReleaseDate $releaseDate `
         -ExpiryDate $expiryDate `
         -ReleaseVersion $releaseVersion `
-        -RenewalDays $config.RenewalDays `
-        -RenewalSecret $config.RenewalSecret
+        -RenewalDays $resolvedRenewalDays `
+        -RenewalSecret $config.RenewalSecret `
+        -ReleaseUser $resolvedReleaseUser
     Write-Host "[4/6] 보안 VBA/만료정보 적용 및 계산 교차검증 완료"
     Write-Host "[5/6] 잠금 상태 검증 완료(디스크에는 사용안내 시트만 표시)"
     Write-Host "[6/6] 배포본 생성 완료" -ForegroundColor Green
     Write-Host ""
     Write-Host "배포본: $distributionPath" -ForegroundColor Green
+    Write-Host "배포 대상: $resolvedReleaseUser"
     Write-Host "사용 기간: $($releaseDate.ToString('yyyy-MM-dd')) ~ $($expiryDate.ToString('yyyy-MM-dd'))"
+    Write-Host "1회 연장 기간: $($resolvedRenewalDays)일"
     Write-Host "오늘 연장 코드: $(New-RenewalCode -TargetDate $releaseDate -Secret $config.RenewalSecret)"
     Write-Host ""
     Write-Host "마지막 수동 단계(VBA 소스 열람 방지):" -ForegroundColor Yellow
@@ -439,6 +501,8 @@ function Read-ReleaseWorkbookState {
         $securityVisibility = $null
         $marker = ""
         $expiryDate = [DateTime]::MinValue
+        $releaseUser = ""
+        $renewalDays = 0
 
         for ($index = 1; $index -le $workbook.Worksheets.Count; $index++) {
             $sheet = $null
@@ -451,6 +515,8 @@ function Read-ReleaseWorkbookState {
                     $securityVisibility = [int]$sheet.Visible
                     $marker = [string]$sheet.Range("A1").Value2
                     $expiryDate = [DateTime]::FromOADate([double]$sheet.Range("B4").Value2).Date
+                    $renewalDays = [int]$sheet.Range("B5").Value2
+                    $releaseUser = [string]$sheet.Range("B8").Value2
                 }
             }
             finally {
@@ -464,6 +530,8 @@ function Read-ReleaseWorkbookState {
             SecurityVisibility = $securityVisibility
             Marker = $marker
             ExpiryDate = $expiryDate
+            RenewalDays = $renewalDays
+            ReleaseUser = $releaseUser
             Saved = [bool]$workbook.Saved
         }
     }
@@ -562,6 +630,8 @@ function Test-ReleaseWorkbook {
         Write-Host "[1/4] 매크로 차단 상태에서 디스크 잠금을 확인합니다."
         $lockedBefore = Read-ReleaseWorkbookState -WorkbookPath $validationPath -MacrosEnabled $false
         if ($lockedBefore.Marker -ne "RELEASE_SECURITY_V1") { throw "배포 보안 표시자가 없습니다." }
+        if ([string]::IsNullOrWhiteSpace($lockedBefore.ReleaseUser)) { throw "배포 대상 사용자 정보가 없습니다." }
+        if ($lockedBefore.RenewalDays -lt 1) { throw "1회 연장 기간 정보가 올바르지 않습니다." }
         if ($lockedBefore.VisibleSheets.Count -ne 1 -or $lockedBefore.VisibleSheets[0] -ne "사용안내") {
             throw "디스크 잠금 상태가 아닙니다: $($lockedBefore.VisibleSheets -join ', ')"
         }
@@ -588,6 +658,7 @@ function Test-ReleaseWorkbook {
         }
 
         Write-Host "배포본 자동 검증 통과: $sourceReleasePath" -ForegroundColor Green
+        Write-Host "배포 대상: $($lockedAfter.ReleaseUser), 1회 연장: $($lockedAfter.RenewalDays)일"
         Write-Host "표시 업무 시트 수: $($businessSheets.Count), 만료일: $($lockedAfter.ExpiryDate.ToString('yyyy-MM-dd'))"
         Write-Host "검증은 임시 복사본에서 수행되어 원본 배포본은 변경되지 않았습니다." -ForegroundColor DarkGray
     }
