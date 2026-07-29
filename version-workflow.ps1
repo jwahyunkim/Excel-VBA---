@@ -185,6 +185,16 @@ function Get-VersionFromDevelopmentBranch {
     throw "릴리즈할 브랜치는 'develop/vA.B.C' 형식이어야 합니다: $Name"
 }
 
+function Get-VersionFromReleaseBranch {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    if ($Name -match '^release/v(\d+\.\d+\.\d+)$') {
+        return $Matches[1]
+    }
+
+    throw "복구할 릴리즈 브랜치는 'release/vA.B.C' 형식이어야 합니다: $Name"
+}
+
 function Get-ConfiguredParentBranch {
     param([Parameter(Mandatory = $true)][string]$Name)
 
@@ -486,6 +496,7 @@ function Start-AutomaticPatchDevelopment {
     Set-DevelopmentWorkbookVersion `
         -TargetVersion $nextVersion `
         -ExpectedCurrentVersion $currentVersion.Version
+    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
     Invoke-Git -Arguments @("push", "-u", "origin", $developmentBranch)
 
     Write-Host ""
@@ -590,7 +601,10 @@ function Invoke-ReleaseSecurityCommand {
         [Parameter(Mandatory = $true)]
         [ValidateSet("Build", "Code", "Status", "SyncDev", "Validate")]
         [string]$ReleaseAction,
-        [string]$TargetDate = ""
+        [string]$TargetDate = "",
+        [string]$ReleaseUser = "",
+        [int]$UsageDays = 0,
+        [int]$RenewalDays = 0
     )
 
     $arguments = @(
@@ -600,6 +614,15 @@ function Invoke-ReleaseSecurityCommand {
     )
     if (-not [string]::IsNullOrWhiteSpace($TargetDate)) {
         $arguments += @("-Date", $TargetDate.Trim())
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseUser)) {
+        $arguments += @("-ReleaseUser", $ReleaseUser.Trim())
+    }
+    if ($UsageDays -gt 0) {
+        $arguments += @("-UsageDays", [string]$UsageDays)
+    }
+    if ($RenewalDays -gt 0) {
+        $arguments += @("-RenewalDays", [string]$RenewalDays)
     }
 
     & powershell @arguments
@@ -622,6 +645,19 @@ function Read-PositiveIntegerSetting {
         throw "$Prompt 값은 1 이상의 정수여야 합니다."
     }
     return $parsed
+}
+
+function Get-ReleaseSecurityPeriodDefaults {
+    $configPath = Join-Path (Get-Location) $ConfigFile
+    $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
+    if ($null -eq $config.release_security) {
+        throw "$ConfigFile 파일에 release_security 설정이 없습니다."
+    }
+
+    return [PSCustomObject]@{
+        UsageDays = [int]$config.release_security.usage_days
+        RenewalDays = [int]$config.release_security.renewal_days
+    }
 }
 
 function Edit-ReleaseSecurityConfig {
@@ -699,65 +735,75 @@ function Edit-ReleaseSecurityConfig {
 }
 
 function Invoke-SecuritySyncWorkflow {
-    $null = Ensure-SecurityMutationDevelopmentContext -Reason "개발본 보안 VBA 동기화"
+    $currentBranch = Get-CurrentBranch
+    $developmentVersion = Get-DevelopmentVersionForBranch -Name $currentBranch
+    if ([string]::IsNullOrWhiteSpace($developmentVersion)) {
+        throw ("개발본 VBA 동기화는 새 버전 개발 브랜치에서 실행하세요: $currentBranch`n" +
+               "main에서는 먼저 '새 버전 개발 시작'을 선택하세요.")
+    }
+    Set-DevelopmentWorkbookVersion -TargetVersion $developmentVersion
     Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
-    Complete-SecurityMutationAndRelease -Reason "개발본 보안 VBA 동기화"
 }
 
 function Invoke-SecurityBuildWorkflow {
-    param([string]$TargetDate = "")
+    param(
+        [string]$TargetDate = "",
+        [string]$ReleaseUser = "",
+        [int]$UsageDays = 0,
+        [int]$RenewalDays = 0
+    )
 
-    $null = Ensure-SecurityMutationDevelopmentContext -Reason "배포본 생성"
-    Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
-    Complete-SecurityMutationAndRelease -Reason "배포본 생성"
+    Invoke-ReleaseSecurityCommand `
+        -ReleaseAction Build `
+        -TargetDate $TargetDate `
+        -ReleaseUser $ReleaseUser `
+        -UsageDays $UsageDays `
+        -RenewalDays $RenewalDays
 }
 
 function Invoke-SecurityAllWorkflow {
     param([string]$TargetDate = "")
 
-    $null = Ensure-SecurityMutationDevelopmentContext -Reason "보안 동기화/배포"
-    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
+    Invoke-SecuritySyncWorkflow
     Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
     Invoke-ReleaseSecurityCommand -ReleaseAction Validate
-    Complete-SecurityMutationAndRelease -Reason "보안 동기화/배포"
 }
 
 function Show-ReleaseSecurityMenu {
     while ($true) {
         Write-Host ""
         Write-Host "=== 배포 보안 관리 ===" -ForegroundColor Cyan
-        Write-Host "변경 작업은 성공 후 자동 커밋·정식 릴리즈됩니다." -ForegroundColor Yellow
+        Write-Host "보안 설정을 실제로 수정한 경우에만 자동 정식 릴리즈됩니다." -ForegroundColor Yellow
         Write-Host "[1] 보안 설정 확인"
         Write-Host "[2] 보안 설정 수정 + 자동 릴리즈"
-        Write-Host "[3] 개발본 보안 VBA 동기화 + 자동 릴리즈"
-        Write-Host "[4] 배포본 생성 + 자동 릴리즈"
-        Write-Host "[5] 배포본 자동 검증"
-        Write-Host "[6] 동기화 + 생성 + 자동 검증 + 자동 릴리즈"
-        Write-Host "[7] 날짜별 기간 연장코드 생성"
+        Write-Host "[3] 배포본 생성"
         Write-Host "[0] 종료"
         $selection = (Read-Host "선택").Trim()
 
         switch ($selection) {
             "1" { Invoke-ReleaseSecurityCommand -ReleaseAction Status }
             "2" { Edit-ReleaseSecurityConfig; return }
-            "3" { Invoke-SecuritySyncWorkflow; return }
-            "4" {
+            "3" {
+                $defaults = Get-ReleaseSecurityPeriodDefaults
+                $releaseUser = (Read-Host "배포 대상 사용자(필수)").Trim()
+                if ([string]::IsNullOrWhiteSpace($releaseUser)) {
+                    throw "배포 대상 사용자를 입력하세요."
+                }
+                $usageDays = Read-PositiveIntegerSetting `
+                    -Prompt "사용 기간(일, Enter=기본값)" `
+                    -CurrentValue $defaults.UsageDays
+                $renewalDays = Read-PositiveIntegerSetting `
+                    -Prompt "1회 연장 기간(일, Enter=기본값)" `
+                    -CurrentValue $defaults.RenewalDays
                 $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
-                Invoke-SecurityBuildWorkflow -TargetDate $targetDate
-                return
-            }
-            "5" { Invoke-ReleaseSecurityCommand -ReleaseAction Validate }
-            "6" {
-                $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
-                Invoke-SecurityAllWorkflow -TargetDate $targetDate
-                return
-            }
-            "7" {
-                $targetDate = Read-Host "코드 날짜(yyyy-MM-dd, Enter=오늘)"
-                Invoke-ReleaseSecurityCommand -ReleaseAction Code -TargetDate $targetDate
+                Invoke-SecurityBuildWorkflow `
+                    -TargetDate $targetDate `
+                    -ReleaseUser $releaseUser `
+                    -UsageDays $usageDays `
+                    -RenewalDays $renewalDays
             }
             "0" { return }
-            default { Write-Host "0~7 중 하나를 선택하세요." -ForegroundColor Yellow }
+            default { Write-Host "0~3 중 하나를 선택하세요." -ForegroundColor Yellow }
         }
     }
 }
@@ -854,6 +900,7 @@ function Start-VersionDevelopment {
     Set-DevelopmentWorkbookVersion `
         -TargetVersion $nextVersion `
         -ExpectedCurrentVersion $currentVersion.Version
+    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
 
     Write-Host ""
     Write-Host "$($currentVersion.Tag) -> v$nextVersion ($versionPart)" -ForegroundColor Green
@@ -1193,6 +1240,10 @@ function Commit-DevelopmentChanges {
 
 function Complete-VersionDevelopmentAndRelease {
     $developmentBranch = Get-CurrentBranch
+    if ($developmentBranch -match '^release/v\d+\.\d+\.\d+$') {
+        Resume-VersionRelease
+        return
+    }
     $null = Get-VersionFromDevelopmentBranch -Name $developmentBranch
     if (-not [string]::IsNullOrWhiteSpace($SourceBranch) -and
         $SourceBranch.Trim() -ne $developmentBranch) {
@@ -1375,6 +1426,67 @@ function Release-Version {
     Write-Host ""
     Write-Host "$tagName 릴리즈가 완료되었습니다." -ForegroundColor Green
     Write-Host "$developmentBranch -> $releaseBranch -> $releaseBaseBranch 이력이 보존되었습니다." -ForegroundColor Green
+    Invoke-Git -Arguments @("log", "--first-parent", "--oneline", "--decorate", "-5", $releaseBaseBranch)
+}
+
+function Resume-VersionRelease {
+    $releaseBranch = Get-CurrentBranch
+    $releaseVersion = Get-VersionFromReleaseBranch -Name $releaseBranch
+    $tagName = "v$releaseVersion"
+    $releaseTitle = "release: $tagName"
+
+    $configuredParentBranch = Get-ConfiguredParentBranch -Name $releaseBranch
+    $releaseBaseBranch = if (-not [string]::IsNullOrWhiteSpace($TargetBranch)) {
+        $TargetBranch.Trim()
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($configuredParentBranch)) {
+        $configuredParentBranch
+    }
+    else {
+        $DefaultVersionBaseBranch
+    }
+
+    Assert-ValidBranchName -Name $releaseBranch
+    Assert-ValidBranchName -Name $releaseBaseBranch
+
+    Write-Host "중단된 $releaseBranch 릴리즈를 현재 단계부터 다시 시작합니다." -ForegroundColor Yellow
+    Commit-CurrentBranchChanges `
+        -ExpectedBranch $releaseBranch `
+        -CommitMessage "release: $tagName 중단 복구"
+    Invoke-Git -Arguments @("push", "origin", $releaseBranch)
+
+    Invoke-Git -Arguments @("fetch", "origin", "--tags", "--prune")
+    $previousVersion = Get-LatestSemanticVersion
+    $validNextVersions = @(
+        Get-NextSemanticVersion -CurrentVersion $previousVersion -Part "patch"
+        Get-NextSemanticVersion -CurrentVersion $previousVersion -Part "minor"
+        Get-NextSemanticVersion -CurrentVersion $previousVersion -Part "major"
+    )
+    if ($releaseVersion -notin $validNextVersions) {
+        throw "복구할 릴리즈 v$releaseVersion 은 최신 태그 $($previousVersion.Tag)의 올바른 다음 major/minor/patch 버전이 아닙니다."
+    }
+
+    & git show-ref --verify --quiet "refs/tags/$tagName"
+    if ($LASTEXITCODE -eq 0) {
+        throw "태그가 이미 존재합니다: $tagName"
+    }
+
+    Prepare-ReleaseCommit `
+        -PreviousVersion $previousVersion.Version `
+        -ReleaseVersion $releaseVersion
+
+    Merge-WorkBranch `
+        -HeadBranch $releaseBranch `
+        -BaseBranchName $releaseBaseBranch `
+        -Title $releaseTitle `
+        -Body "$tagName 중단 지점부터 릴리즈 재개"
+
+    Invoke-Git -Arguments @("tag", "-a", $tagName, "-m", "$tagName release")
+    Invoke-Git -Arguments @("push", "origin", $tagName)
+
+    Write-Host ""
+    Write-Host "$tagName 릴리즈 복구가 완료되었습니다." -ForegroundColor Green
+    Write-Host "$releaseBranch -> $releaseBaseBranch 이력이 보존되었습니다." -ForegroundColor Green
     Invoke-Git -Arguments @("log", "--first-parent", "--oneline", "--decorate", "-5", $releaseBaseBranch)
 }
 

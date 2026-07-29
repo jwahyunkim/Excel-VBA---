@@ -16,7 +16,8 @@ Public Function ConfigureReleaseSecurity(ByVal releaseVersion As String, _
                                          ByVal releaseDateValue As Double, _
                                          ByVal expiryDateValue As Double, _
                                          ByVal renewalDays As Long, _
-                                         ByVal renewalSecret As String) As String
+                                         ByVal renewalSecret As String, _
+                                         ByVal releaseUser As String) As String
     Dim previousEnableEvents As Boolean
     Dim securitySheet As Worksheet
     Dim guideSheet As Worksheet
@@ -31,6 +32,7 @@ Public Function ConfigureReleaseSecurity(ByVal releaseVersion As String, _
     If Len(Trim$(releaseVersion)) = 0 Then Err.Raise 5, , "배포 버전이 비어 있습니다."
     If renewalDays < 1 Then Err.Raise 5, , "연장 일수는 1일 이상이어야 합니다."
     If Len(renewalSecret) = 0 Then Err.Raise 5, , "기간 연장 비밀키가 비어 있습니다."
+    If Len(Trim$(releaseUser)) = 0 Then Err.Raise 5, , "배포 대상 사용자가 비어 있습니다."
 
     visibleBusinessSheets = CollectVisibleBusinessSheetNames()
     If Len(visibleBusinessSheets) = 0 Then _
@@ -54,6 +56,8 @@ Public Function ConfigureReleaseSecurity(ByVal releaseVersion As String, _
         .Range("B6").Value2 = renewalSecret
         .Range("A7").Value2 = "visible_sheets"
         .Range("B7").Value2 = visibleBusinessSheets
+        .Range("A8").Value2 = "release_user"
+        .Range("B8").Value2 = releaseUser
         .Range("B3:B4").NumberFormat = "yyyy-mm-dd"
     End With
 
@@ -331,12 +335,14 @@ Private Sub WriteGuideSheet(ByVal guideSheet As Worksheet, _
         .Range("B4").Value2 = securitySheet.Range("B3").Value2
         .Range("A5").Value2 = "사용 만료일"
         .Range("B5").Value2 = securitySheet.Range("B4").Value2
+        .Range("A6").Value2 = "배포 대상 사용자"
+        .Range("B6").Value2 = CStr(securitySheet.Range("B8").Value2)
         .Range("B4:B5").NumberFormat = "yyyy-mm-dd"
         .Range("A7").Value2 = "사용 기간이 끝나면 관리자에게 오늘 날짜용 연장 코드를 요청하세요."
         .Range("A8").Value2 = "이 시트만 보이는 경우 파일을 닫지 말고 연장 코드를 입력하세요."
         .Range("A1").Font.Bold = True
         .Range("A1").Font.Size = 18
-        .Range("A3:A5").Font.Bold = True
+        .Range("A3:A6").Font.Bold = True
         .Columns("A").ColumnWidth = 24
         .Columns("B").ColumnWidth = 22
         .Range("A7:A8").WrapText = True
