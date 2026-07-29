@@ -486,6 +486,7 @@ function Start-AutomaticPatchDevelopment {
     Set-DevelopmentWorkbookVersion `
         -TargetVersion $nextVersion `
         -ExpectedCurrentVersion $currentVersion.Version
+    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
     Invoke-Git -Arguments @("push", "-u", "origin", $developmentBranch)
 
     Write-Host ""
@@ -590,7 +591,10 @@ function Invoke-ReleaseSecurityCommand {
         [Parameter(Mandatory = $true)]
         [ValidateSet("Build", "Code", "Status", "SyncDev", "Validate")]
         [string]$ReleaseAction,
-        [string]$TargetDate = ""
+        [string]$TargetDate = "",
+        [string]$ReleaseUser = "",
+        [int]$UsageDays = 0,
+        [int]$RenewalDays = 0
     )
 
     $arguments = @(
@@ -600,6 +604,15 @@ function Invoke-ReleaseSecurityCommand {
     )
     if (-not [string]::IsNullOrWhiteSpace($TargetDate)) {
         $arguments += @("-Date", $TargetDate.Trim())
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseUser)) {
+        $arguments += @("-ReleaseUser", $ReleaseUser.Trim())
+    }
+    if ($UsageDays -gt 0) {
+        $arguments += @("-UsageDays", [string]$UsageDays)
+    }
+    if ($RenewalDays -gt 0) {
+        $arguments += @("-RenewalDays", [string]$RenewalDays)
     }
 
     & powershell @arguments
@@ -622,6 +635,19 @@ function Read-PositiveIntegerSetting {
         throw "$Prompt 값은 1 이상의 정수여야 합니다."
     }
     return $parsed
+}
+
+function Get-ReleaseSecurityPeriodDefaults {
+    $configPath = Join-Path (Get-Location) $ConfigFile
+    $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
+    if ($null -eq $config.release_security) {
+        throw "$ConfigFile 파일에 release_security 설정이 없습니다."
+    }
+
+    return [PSCustomObject]@{
+        UsageDays = [int]$config.release_security.usage_days
+        RenewalDays = [int]$config.release_security.renewal_days
+    }
 }
 
 function Edit-ReleaseSecurityConfig {
@@ -699,65 +725,75 @@ function Edit-ReleaseSecurityConfig {
 }
 
 function Invoke-SecuritySyncWorkflow {
-    $null = Ensure-SecurityMutationDevelopmentContext -Reason "개발본 보안 VBA 동기화"
+    $currentBranch = Get-CurrentBranch
+    $developmentVersion = Get-DevelopmentVersionForBranch -Name $currentBranch
+    if ([string]::IsNullOrWhiteSpace($developmentVersion)) {
+        throw ("개발본 VBA 동기화는 새 버전 개발 브랜치에서 실행하세요: $currentBranch`n" +
+               "main에서는 먼저 '새 버전 개발 시작'을 선택하세요.")
+    }
+    Set-DevelopmentWorkbookVersion -TargetVersion $developmentVersion
     Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
-    Complete-SecurityMutationAndRelease -Reason "개발본 보안 VBA 동기화"
 }
 
 function Invoke-SecurityBuildWorkflow {
-    param([string]$TargetDate = "")
+    param(
+        [string]$TargetDate = "",
+        [string]$ReleaseUser = "",
+        [int]$UsageDays = 0,
+        [int]$RenewalDays = 0
+    )
 
-    $null = Ensure-SecurityMutationDevelopmentContext -Reason "배포본 생성"
-    Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
-    Complete-SecurityMutationAndRelease -Reason "배포본 생성"
+    Invoke-ReleaseSecurityCommand `
+        -ReleaseAction Build `
+        -TargetDate $TargetDate `
+        -ReleaseUser $ReleaseUser `
+        -UsageDays $UsageDays `
+        -RenewalDays $RenewalDays
 }
 
 function Invoke-SecurityAllWorkflow {
     param([string]$TargetDate = "")
 
-    $null = Ensure-SecurityMutationDevelopmentContext -Reason "보안 동기화/배포"
-    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
+    Invoke-SecuritySyncWorkflow
     Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
     Invoke-ReleaseSecurityCommand -ReleaseAction Validate
-    Complete-SecurityMutationAndRelease -Reason "보안 동기화/배포"
 }
 
 function Show-ReleaseSecurityMenu {
     while ($true) {
         Write-Host ""
         Write-Host "=== 배포 보안 관리 ===" -ForegroundColor Cyan
-        Write-Host "변경 작업은 성공 후 자동 커밋·정식 릴리즈됩니다." -ForegroundColor Yellow
+        Write-Host "보안 설정을 실제로 수정한 경우에만 자동 정식 릴리즈됩니다." -ForegroundColor Yellow
         Write-Host "[1] 보안 설정 확인"
         Write-Host "[2] 보안 설정 수정 + 자동 릴리즈"
-        Write-Host "[3] 개발본 보안 VBA 동기화 + 자동 릴리즈"
-        Write-Host "[4] 배포본 생성 + 자동 릴리즈"
-        Write-Host "[5] 배포본 자동 검증"
-        Write-Host "[6] 동기화 + 생성 + 자동 검증 + 자동 릴리즈"
-        Write-Host "[7] 날짜별 기간 연장코드 생성"
+        Write-Host "[3] 배포본 생성"
         Write-Host "[0] 종료"
         $selection = (Read-Host "선택").Trim()
 
         switch ($selection) {
             "1" { Invoke-ReleaseSecurityCommand -ReleaseAction Status }
             "2" { Edit-ReleaseSecurityConfig; return }
-            "3" { Invoke-SecuritySyncWorkflow; return }
-            "4" {
+            "3" {
+                $defaults = Get-ReleaseSecurityPeriodDefaults
+                $releaseUser = (Read-Host "배포 대상 사용자(필수)").Trim()
+                if ([string]::IsNullOrWhiteSpace($releaseUser)) {
+                    throw "배포 대상 사용자를 입력하세요."
+                }
+                $usageDays = Read-PositiveIntegerSetting `
+                    -Prompt "사용 기간(일, Enter=기본값)" `
+                    -CurrentValue $defaults.UsageDays
+                $renewalDays = Read-PositiveIntegerSetting `
+                    -Prompt "1회 연장 기간(일, Enter=기본값)" `
+                    -CurrentValue $defaults.RenewalDays
                 $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
-                Invoke-SecurityBuildWorkflow -TargetDate $targetDate
-                return
-            }
-            "5" { Invoke-ReleaseSecurityCommand -ReleaseAction Validate }
-            "6" {
-                $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
-                Invoke-SecurityAllWorkflow -TargetDate $targetDate
-                return
-            }
-            "7" {
-                $targetDate = Read-Host "코드 날짜(yyyy-MM-dd, Enter=오늘)"
-                Invoke-ReleaseSecurityCommand -ReleaseAction Code -TargetDate $targetDate
+                Invoke-SecurityBuildWorkflow `
+                    -TargetDate $targetDate `
+                    -ReleaseUser $releaseUser `
+                    -UsageDays $usageDays `
+                    -RenewalDays $renewalDays
             }
             "0" { return }
-            default { Write-Host "0~7 중 하나를 선택하세요." -ForegroundColor Yellow }
+            default { Write-Host "0~3 중 하나를 선택하세요." -ForegroundColor Yellow }
         }
     }
 }
@@ -854,6 +890,7 @@ function Start-VersionDevelopment {
     Set-DevelopmentWorkbookVersion `
         -TargetVersion $nextVersion `
         -ExpectedCurrentVersion $currentVersion.Version
+    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
 
     Write-Host ""
     Write-Host "$($currentVersion.Tag) -> v$nextVersion ($versionPart)" -ForegroundColor Green
