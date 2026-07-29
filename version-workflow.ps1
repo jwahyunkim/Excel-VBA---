@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet("Menu", "Start", "StartVersion", "CreateBranch", "MergeBranch", "Release", "Status")]
+    [ValidateSet("Menu", "Start", "StartVersion", "CreateBranch", "MergeBranch", "Release", "Status", "Security")]
     [string]$Action = "Menu",
 
     [string]$Value = "",
@@ -26,6 +26,7 @@ param(
 # ============================================================================
 $ConfigFile = "config.json"
 $ConfigField = "excel_file"
+$ReleaseSecurityScript = "release-security.ps1"
 $DefaultVersionBaseBranch = "main"
 
 # 자식 브랜치 기본값입니다. 비워두면 실행할 때 입력할 수 있습니다.
@@ -366,6 +367,130 @@ function Show-WorkflowStatus {
     Invoke-Git -Arguments @("status", "--short", "--branch")
 }
 
+function Invoke-ReleaseSecurityCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("Build", "Code", "Status", "SyncDev", "Validate")]
+        [string]$ReleaseAction,
+        [string]$TargetDate = ""
+    )
+
+    $arguments = @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", $ReleaseSecurityScript,
+        "-Action", $ReleaseAction
+    )
+    if (-not [string]::IsNullOrWhiteSpace($TargetDate)) {
+        $arguments += @("-Date", $TargetDate.Trim())
+    }
+
+    & powershell @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "배포 보안 작업에 실패했습니다: $ReleaseAction"
+    }
+}
+
+function Read-PositiveIntegerSetting {
+    param(
+        [Parameter(Mandatory = $true)][string]$Prompt,
+        [Parameter(Mandatory = $true)][int]$CurrentValue
+    )
+
+    $answer = (Read-Host "$Prompt [$CurrentValue]").Trim()
+    if ([string]::IsNullOrWhiteSpace($answer)) { return $CurrentValue }
+
+    $parsed = 0
+    if (-not [int]::TryParse($answer, [ref]$parsed) -or $parsed -lt 1) {
+        throw "$Prompt 값은 1 이상의 정수여야 합니다."
+    }
+    return $parsed
+}
+
+function Edit-ReleaseSecurityConfig {
+    $configPath = Join-Path (Get-Location) $ConfigFile
+    $config = [IO.File]::ReadAllText($configPath) | ConvertFrom-Json
+    if ($null -eq $config.release_security) {
+        throw "$ConfigFile 파일에 release_security 설정이 없습니다."
+    }
+
+    Write-Host ""
+    Write-Host "빈 값으로 입력하면 현재 설정을 유지합니다." -ForegroundColor DarkGray
+
+    $excelFile = (Read-Host "개발 원본 경로 [$($config.excel_file)]").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($excelFile)) { $config.excel_file = $excelFile }
+
+    $config.release_security.usage_days = Read-PositiveIntegerSetting `
+        -Prompt "기본 사용 기간(일)" `
+        -CurrentValue ([int]$config.release_security.usage_days)
+    $config.release_security.renewal_days = Read-PositiveIntegerSetting `
+        -Prompt "1회 연장 기간(일)" `
+        -CurrentValue ([int]$config.release_security.renewal_days)
+
+    $projectPassword = (Read-Host "VBA 프로젝트 암호 [Enter=현재 암호 유지]").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($projectPassword)) {
+        $config.release_security.vba_project_password = $projectPassword
+    }
+
+    $renewalSecret = (Read-Host "연장코드 비밀키 [Enter=현재 비밀키 유지]").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($renewalSecret)) {
+        if ($renewalSecret -match '[^\x20-\x7E]') {
+            throw "연장코드 비밀키는 영문, 숫자, ASCII 특수문자만 사용할 수 있습니다."
+        }
+        $config.release_security.renewal_secret = $renewalSecret
+    }
+
+    $distributionFolder = (Read-Host "배포 폴더 [$($config.release_security.distribution_folder)]").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($distributionFolder)) {
+        $config.release_security.distribution_folder = $distributionFolder
+    }
+
+    $json = $config | ConvertTo-Json -Depth 10
+    $utf8WithoutBom = New-Object Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($configPath, $json + [Environment]::NewLine, $utf8WithoutBom)
+
+    Write-Host "config.json 보안 설정을 저장했습니다." -ForegroundColor Green
+    Invoke-ReleaseSecurityCommand -ReleaseAction Status
+}
+
+function Show-ReleaseSecurityMenu {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=== 배포 보안 관리 ===" -ForegroundColor Cyan
+        Write-Host "[1] 보안 설정 확인"
+        Write-Host "[2] 보안 설정 수정"
+        Write-Host "[3] 개발본 보안 VBA 동기화"
+        Write-Host "[4] 배포본 생성"
+        Write-Host "[5] 배포본 자동 검증"
+        Write-Host "[6] 동기화 + 생성 + 자동 검증"
+        Write-Host "[7] 날짜별 기간 연장코드 생성"
+        Write-Host "[0] 종료"
+        $selection = (Read-Host "선택").Trim()
+
+        switch ($selection) {
+            "1" { Invoke-ReleaseSecurityCommand -ReleaseAction Status }
+            "2" { Edit-ReleaseSecurityConfig }
+            "3" { Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev }
+            "4" {
+                $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
+                Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $targetDate
+            }
+            "5" { Invoke-ReleaseSecurityCommand -ReleaseAction Validate }
+            "6" {
+                $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
+                Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
+                Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $targetDate
+                Invoke-ReleaseSecurityCommand -ReleaseAction Validate
+            }
+            "7" {
+                $targetDate = Read-Host "코드 날짜(yyyy-MM-dd, Enter=오늘)"
+                Invoke-ReleaseSecurityCommand -ReleaseAction Code -TargetDate $targetDate
+            }
+            "0" { return }
+            default { Write-Host "0~7 중 하나를 선택하세요." -ForegroundColor Yellow }
+        }
+    }
+}
+
 function Create-WorkBranch {
     param(
         [Parameter(Mandatory = $true)][string]$RequestedBaseBranch,
@@ -504,7 +629,18 @@ function Prepare-ReleaseCommit {
             throw "Config에는 새 버전이 반영됐지만 Excel 파일을 찾을 수 없습니다: $oldExcelFile"
         }
 
-        Write-Host "버전 파일명과 config 설정이 이미 준비되어 있어 기존 커밋을 사용합니다." -ForegroundColor Yellow
+        Write-Host "버전 파일명과 로컬 config 설정이 이미 준비되어 있습니다." -ForegroundColor Yellow
+        Invoke-ReleaseSecurityCommand -ReleaseAction Build
+        Invoke-ReleaseSecurityCommand -ReleaseAction Validate
+        Invoke-Git -Arguments @("add", "-A", "--", $ConfigFile, "workbooks/dev", "dist")
+        Invoke-Git -Arguments @("diff", "--check", "--cached")
+        & git diff --cached --quiet
+        if ($LASTEXITCODE -eq 1) {
+            Invoke-Git -Arguments @("commit", "-m", "v$ReleaseVersion 배포 준비")
+        }
+        elseif ($LASTEXITCODE -ne 0) {
+            throw "배포 파일 변경 여부를 확인하지 못했습니다."
+        }
         return
     }
 
@@ -523,11 +659,14 @@ function Prepare-ReleaseCommit {
     $newExists = Test-Path -LiteralPath $newExcelFile
 
     if ($oldExists -and -not $newExists) {
-        Invoke-Git -Arguments @("mv", "--", $oldExcelFile, $newExcelFile)
+        Move-Item -LiteralPath $oldExcelFile -Destination $newExcelFile
         Set-ConfigFieldValue -Value $newExcelFile
-        Invoke-Git -Arguments @("add", "--", $ConfigFile, $newExcelFile)
+        Invoke-ReleaseSecurityCommand -ReleaseAction Build
+        Invoke-ReleaseSecurityCommand -ReleaseAction Validate
+        Invoke-Git -Arguments @("add", "-A", "--", $ConfigFile, "workbooks/dev", "dist")
         Invoke-Git -Arguments @("diff", "--check", "--cached")
         Invoke-Git -Arguments @("commit", "-m", "v$ReleaseVersion 배포 준비")
+        Write-Host "개발 원본을 v$ReleaseVersion으로 변경하고 배포본을 함께 커밋했습니다." -ForegroundColor Green
         return
     }
 
@@ -537,7 +676,18 @@ function Prepare-ReleaseCommit {
             throw "신규 Excel 파일은 있지만 $ConfigFile 값이 일치하지 않습니다: $configValue"
         }
 
-        Write-Host "버전 파일명과 config 설정이 이미 준비되어 있어 기존 커밋을 사용합니다." -ForegroundColor Yellow
+        Invoke-ReleaseSecurityCommand -ReleaseAction Build
+        Invoke-ReleaseSecurityCommand -ReleaseAction Validate
+        Invoke-Git -Arguments @("add", "-A", "--", $ConfigFile, "workbooks/dev", "dist")
+        Invoke-Git -Arguments @("diff", "--check", "--cached")
+        & git diff --cached --quiet
+        if ($LASTEXITCODE -eq 1) {
+            Invoke-Git -Arguments @("commit", "-m", "v$ReleaseVersion 배포 준비")
+        }
+        elseif ($LASTEXITCODE -ne 0) {
+            throw "배포 파일 변경 여부를 확인하지 못했습니다."
+        }
+        Write-Host "버전 파일명과 config 설정이 이미 준비되어 배포본을 반영했습니다." -ForegroundColor Yellow
         return
     }
 
@@ -763,6 +913,7 @@ function Select-MenuAction {
     Write-Host "[3] 설정 및 Git 상태 확인"
     Write-Host "[4] 현재/지정 브랜치에서 자식 브랜치 생성"
     Write-Host "[5] 자식 브랜치를 부모 브랜치로 병합"
+    Write-Host "[6] 배포 보안 관리"
     $selection = Read-Host "선택"
 
     switch ($selection) {
@@ -771,7 +922,8 @@ function Select-MenuAction {
         "3" { return "Status" }
         "4" { return "CreateBranch" }
         "5" { return "MergeBranch" }
-        default { throw "올바른 메뉴 번호를 선택하세요." }
+        "6" { return "Security" }
+        default { throw "1~6 중 올바른 메뉴 번호를 선택하세요." }
     }
 }
 
@@ -789,6 +941,7 @@ try {
         "MergeBranch" { Merge-ChildBranch }
         "Release" { Release-Version }
         "Status" { Show-WorkflowStatus }
+        "Security" { Show-ReleaseSecurityMenu }
     }
 }
 catch {
