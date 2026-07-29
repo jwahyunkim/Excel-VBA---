@@ -17,6 +17,13 @@ Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
     PrepareReleaseForSave SaveAsUI, Cancel
 End Sub
 
+Private Sub Workbook_SheetDeactivate(ByVal Sh As Object)
+    On Error Resume Next
+    If TypeOf Sh Is Worksheet Then
+        If Sh.Name = "배포정보" Then HideReleaseInfoSheet
+    End If
+End Sub
+
 Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     Dim duplicateModule As String
 

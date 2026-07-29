@@ -281,7 +281,8 @@ function Invoke-WorkbookUpdate {
         [string]$ReleaseVersion,
         [int]$RenewalDays,
         [string]$RenewalSecret,
-        [string]$ReleaseUser
+        [string]$ReleaseUser,
+        [string]$AdminPassword
     )
 
     $excel = $null
@@ -316,17 +317,24 @@ function Invoke-WorkbookUpdate {
                 [double]$ExpiryDate.ToOADate(),
                 [int]$RenewalDays,
                 $RenewalSecret,
-                $ReleaseUser)
+                $ReleaseUser,
+                $AdminPassword)
             $expectedCode = New-RenewalCode -TargetDate $ReleaseDate -Secret $RenewalSecret
             if ($vbaCode -ne $expectedCode) {
                 throw "PowerShell/VBA 연장코드 계산 불일치: PowerShell=$expectedCode, VBA=$vbaCode"
             }
 
             $visibleSheets = @()
+            $infoVisibility = $null
+            $infoProtected = $false
             for ($index = 1; $index -le $workbook.Worksheets.Count; $index++) {
                 $sheet = $null
                 try {
                     $sheet = $workbook.Worksheets.Item($index)
+                    if ([string]$sheet.Name -eq "배포정보") {
+                        $infoVisibility = [int]$sheet.Visible
+                        $infoProtected = [bool]$sheet.ProtectContents
+                    }
                     if ([int]$sheet.Visible -eq -1) { $visibleSheets += [string]$sheet.Name }
                 }
                 finally {
@@ -335,6 +343,9 @@ function Invoke-WorkbookUpdate {
             }
             if ($visibleSheets.Count -ne 1 -or $visibleSheets[0] -ne "사용안내") {
                 throw "배포본 잠금 상태가 올바르지 않습니다. 표시 시트: $($visibleSheets -join ', ')"
+            }
+            if ($infoVisibility -ne 2 -or -not $infoProtected) {
+                throw "배포정보 시트가 숨김·암호 보호 상태가 아닙니다."
             }
         }
 
@@ -459,7 +470,8 @@ function Build-ReleaseWorkbook {
         -ReleaseVersion $releaseVersion `
         -RenewalDays $resolvedRenewalDays `
         -RenewalSecret $config.RenewalSecret `
-        -ReleaseUser $resolvedReleaseUser
+        -ReleaseUser $resolvedReleaseUser `
+        -AdminPassword $config.ProjectPassword
     Write-Host "[4/6] 보안 VBA/만료정보 적용 및 계산 교차검증 완료"
     Write-Host "[5/6] 잠금 상태 검증 완료(디스크에는 사용안내 시트만 표시)"
     Write-Host "[6/6] 배포본 생성 완료" -ForegroundColor Green
@@ -499,6 +511,8 @@ function Read-ReleaseWorkbookState {
         $visibleSheets = @()
         $guideVisibility = $null
         $securityVisibility = $null
+        $infoVisibility = $null
+        $infoProtected = $false
         $marker = ""
         $expiryDate = [DateTime]::MinValue
         $releaseUser = ""
@@ -511,6 +525,10 @@ function Read-ReleaseWorkbookState {
                 $sheetName = [string]$sheet.Name
                 if ([int]$sheet.Visible -eq -1) { $visibleSheets += $sheetName }
                 if ($sheetName -eq "사용안내") { $guideVisibility = [int]$sheet.Visible }
+                if ($sheetName -eq "배포정보") {
+                    $infoVisibility = [int]$sheet.Visible
+                    $infoProtected = [bool]$sheet.ProtectContents
+                }
                 if ($sheetName -eq "__RELEASE_SECURITY") {
                     $securityVisibility = [int]$sheet.Visible
                     $marker = [string]$sheet.Range("A1").Value2
@@ -528,6 +546,8 @@ function Read-ReleaseWorkbookState {
             VisibleSheets = $visibleSheets
             GuideVisibility = $guideVisibility
             SecurityVisibility = $securityVisibility
+            InfoVisibility = $infoVisibility
+            InfoProtected = $infoProtected
             Marker = $marker
             ExpiryDate = $expiryDate
             RenewalDays = $renewalDays
@@ -631,6 +651,9 @@ function Test-ReleaseWorkbook {
         $lockedBefore = Read-ReleaseWorkbookState -WorkbookPath $validationPath -MacrosEnabled $false
         if ($lockedBefore.Marker -ne "RELEASE_SECURITY_V1") { throw "배포 보안 표시자가 없습니다." }
         if ([string]::IsNullOrWhiteSpace($lockedBefore.ReleaseUser)) { throw "배포 대상 사용자 정보가 없습니다." }
+        if ($lockedBefore.InfoVisibility -ne 2 -or -not $lockedBefore.InfoProtected) {
+            throw "배포정보 시트 숨김·암호 보호가 올바르지 않습니다."
+        }
         if ($lockedBefore.RenewalDays -lt 1) { throw "1회 연장 기간 정보가 올바르지 않습니다." }
         if ($lockedBefore.VisibleSheets.Count -ne 1 -or $lockedBefore.VisibleSheets[0] -ne "사용안내") {
             throw "디스크 잠금 상태가 아닙니다: $($lockedBefore.VisibleSheets -join ', ')"
@@ -646,6 +669,9 @@ function Test-ReleaseWorkbook {
         if ($unlocked.VisibleSheets -contains "사용안내" -or $unlocked.VisibleSheets -contains "__RELEASE_SECURITY") {
             throw "잠금 해제 후 보안용 시트가 표시되었습니다: $($unlocked.VisibleSheets -join ', ')"
         }
+        if ($unlocked.InfoVisibility -ne 2 -or -not $unlocked.InfoProtected) {
+            throw "정상 개봉 후 배포정보 보호가 유지되지 않았습니다."
+        }
         if (-not $unlocked.Saved) { throw "정상 개봉 직후 통합문서가 불필요한 변경 상태입니다." }
 
         Write-Host "[3/4] 정상 저장 후 화면 복원을 확인합니다."
@@ -655,6 +681,9 @@ function Test-ReleaseWorkbook {
         $lockedAfter = Read-ReleaseWorkbookState -WorkbookPath $validationPath -MacrosEnabled $false
         if ($lockedAfter.VisibleSheets.Count -ne 1 -or $lockedAfter.VisibleSheets[0] -ne "사용안내") {
             throw "검증 후 디스크 잠금이 유지되지 않았습니다: $($lockedAfter.VisibleSheets -join ', ')"
+        }
+        if ($lockedAfter.InfoVisibility -ne 2 -or -not $lockedAfter.InfoProtected) {
+            throw "검증 후 배포정보 보호가 유지되지 않았습니다."
         }
 
         Write-Host "배포본 자동 검증 통과: $sourceReleasePath" -ForegroundColor Green
