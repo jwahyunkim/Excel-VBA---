@@ -516,6 +516,46 @@ function Ensure-SecurityMutationDevelopmentContext {
            "main에서 다시 실행하거나 workflowParent가 설정된 개발/기능 브랜치를 사용하세요.")
 }
 
+function Complete-SecurityMutationAndRelease {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    Write-Host ""
+    Write-Host "$Reason 변경을 자동 커밋하고 정식 릴리즈를 시작합니다." -ForegroundColor Yellow
+
+    $currentBranch = Get-CurrentBranch
+    $visited = @{}
+    for ($depth = 0; $depth -lt 10; $depth++) {
+        if ($currentBranch -match '^(?:develop|version)/v\d+\.\d+\.\d+$') {
+            Complete-VersionDevelopmentAndRelease
+            return
+        }
+        if ($visited.ContainsKey($currentBranch)) {
+            throw "자동 릴리즈 중 브랜치 부모 설정이 순환합니다: $currentBranch"
+        }
+        $visited[$currentBranch] = $true
+
+        $parentBranch = Get-ConfiguredParentBranch -Name $currentBranch
+        if ([string]::IsNullOrWhiteSpace($parentBranch)) {
+            throw ("자동 릴리즈를 위한 부모 브랜치를 찾을 수 없습니다: $currentBranch`n" +
+                   "workflowParent가 설정된 개발/기능 브랜치에서 실행하세요.")
+        }
+
+        Commit-CurrentBranchChanges `
+            -ExpectedBranch $currentBranch `
+            -CommitMessage "work: $currentBranch $Reason 반영"
+        Invoke-Git -Arguments @("push", "origin", $currentBranch)
+        Merge-WorkBranch `
+            -HeadBranch $currentBranch `
+            -BaseBranchName $parentBranch `
+            -Title "merge: $currentBranch -> $parentBranch" `
+            -Body "$Reason 변경 자동 반영"
+
+        $currentBranch = Get-CurrentBranch
+    }
+
+    throw "자동 릴리즈의 브랜치 부모 단계가 너무 깊습니다."
+}
+
 function Show-WorkflowStatus {
     $latestVersion = Get-LatestSemanticVersion
     $nextPatch = Get-NextSemanticVersion -CurrentVersion $latestVersion -Part "patch"
@@ -655,11 +695,13 @@ function Edit-ReleaseSecurityConfig {
 
     Write-Host "config.json 보안 설정을 저장했습니다." -ForegroundColor Green
     Invoke-ReleaseSecurityCommand -ReleaseAction Status
+    Complete-SecurityMutationAndRelease -Reason "보안 설정 수정"
 }
 
 function Invoke-SecuritySyncWorkflow {
     $null = Ensure-SecurityMutationDevelopmentContext -Reason "개발본 보안 VBA 동기화"
     Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
+    Complete-SecurityMutationAndRelease -Reason "개발본 보안 VBA 동기화"
 }
 
 function Invoke-SecurityBuildWorkflow {
@@ -667,6 +709,7 @@ function Invoke-SecurityBuildWorkflow {
 
     $null = Ensure-SecurityMutationDevelopmentContext -Reason "배포본 생성"
     Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
+    Complete-SecurityMutationAndRelease -Reason "배포본 생성"
 }
 
 function Invoke-SecurityAllWorkflow {
@@ -676,34 +719,38 @@ function Invoke-SecurityAllWorkflow {
     Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
     Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
     Invoke-ReleaseSecurityCommand -ReleaseAction Validate
+    Complete-SecurityMutationAndRelease -Reason "보안 동기화/배포"
 }
 
 function Show-ReleaseSecurityMenu {
     while ($true) {
         Write-Host ""
         Write-Host "=== 배포 보안 관리 ===" -ForegroundColor Cyan
+        Write-Host "변경 작업은 성공 후 자동 커밋·정식 릴리즈됩니다." -ForegroundColor Yellow
         Write-Host "[1] 보안 설정 확인"
-        Write-Host "[2] 보안 설정 수정"
-        Write-Host "[3] 개발본 보안 VBA 동기화"
-        Write-Host "[4] 배포본 생성"
+        Write-Host "[2] 보안 설정 수정 + 자동 릴리즈"
+        Write-Host "[3] 개발본 보안 VBA 동기화 + 자동 릴리즈"
+        Write-Host "[4] 배포본 생성 + 자동 릴리즈"
         Write-Host "[5] 배포본 자동 검증"
-        Write-Host "[6] 동기화 + 생성 + 자동 검증"
+        Write-Host "[6] 동기화 + 생성 + 자동 검증 + 자동 릴리즈"
         Write-Host "[7] 날짜별 기간 연장코드 생성"
         Write-Host "[0] 종료"
         $selection = (Read-Host "선택").Trim()
 
         switch ($selection) {
             "1" { Invoke-ReleaseSecurityCommand -ReleaseAction Status }
-            "2" { Edit-ReleaseSecurityConfig }
-            "3" { Invoke-SecuritySyncWorkflow }
+            "2" { Edit-ReleaseSecurityConfig; return }
+            "3" { Invoke-SecuritySyncWorkflow; return }
             "4" {
                 $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
                 Invoke-SecurityBuildWorkflow -TargetDate $targetDate
+                return
             }
             "5" { Invoke-ReleaseSecurityCommand -ReleaseAction Validate }
             "6" {
                 $targetDate = Read-Host "배포 기준일(yyyy-MM-dd, Enter=오늘)"
                 Invoke-SecurityAllWorkflow -TargetDate $targetDate
+                return
             }
             "7" {
                 $targetDate = Read-Host "코드 날짜(yyyy-MM-dd, Enter=오늘)"

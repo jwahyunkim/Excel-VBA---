@@ -50,11 +50,12 @@ npm run workflow
 - main에서 변경 작업을 시작하면 최신 태그의 다음 patch 개발 브랜치를 자동으로 만들고 원격에 게시합니다.
 - 이미 개발 브랜치 또는 그 하위 기능 브랜치라면 현재 개발 버전에 적용하며 patch를 다시 올리지 않습니다.
 - 릴리즈 브랜치에서는 새 보안 변경을 시작할 수 없습니다.
-- 변경 작업을 새 개발 브랜치로 옮겨도 자동 스테이징하지 않습니다. 정식 Release 단계의 배포 준비 커밋만 프로젝트 워크플로가 자동으로 처리합니다.
+- 변경 작업이 성공하면 프로젝트 워크플로가 변경 사항을 자동 스테이징·커밋하고, 기능 브랜치의 부모 병합부터 `develop → release → main` 병합, 배포본 생성·검증, 태그 게시까지 정식 릴리즈를 연속 수행합니다.
+- 따라서 보안 변경 작업 뒤에 VS Code에서 별도로 커밋하거나 `npm run version:release`를 다시 실행할 필요가 없습니다.
 
 자동 검증은 원본 배포본을 복사한 임시 파일에서 저장 시나리오를 실행하며, 원본 배포본은 변경하지 않습니다.
 
-`npm run release:sync-dev`와 `npm run release:build`를 직접 실행해도 같은 변경 작업 규칙을 적용합니다. main이라면 다음 patch 개발 브랜치를 자동으로 시작합니다. `release:status`, `release:code`, `release:validate`는 읽기 전용이므로 브랜치를 만들지 않습니다.
+`npm run release:config`, `npm run release:sync-dev`, `npm run release:build`, `npm run release:all`을 직접 실행해도 같은 자동 릴리즈 규칙을 적용합니다. main이라면 다음 patch 개발 브랜치를 자동으로 시작하고 작업 성공 후 릴리즈까지 완료합니다. `release:status`, `release:code`, `release:validate`는 읽기 전용이므로 브랜치를 만들거나 릴리즈하지 않습니다.
 
 ## 배포본 만들기
 
