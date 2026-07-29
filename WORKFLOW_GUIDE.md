@@ -17,7 +17,8 @@ npm run workflow
 | 새 버전 개발 시작 | `npm run version:start` |
 | 자식 작업 브랜치 생성 | `npm run branch:create -- feature/브랜치명` |
 | 현재 자식 브랜치 병합 | `npm run branch:merge` |
-| 현재 버전 릴리즈 | `npm run version:release` |
+| 개발 완료 및 자동 릴리즈 | `npm run version:release` |
+| 현재 버전 개발 취소 | `npm run version:cancel` |
 | 상태 확인 | `npm run workflow:status` |
 
 ## 브랜치 구조
@@ -127,13 +128,9 @@ npm run branch:create
 새 자식 브랜치 이름: feature/report-export
 ```
 
-### 3. 개발 내용 커밋
+### 3. 개발 작업
 
-```powershell
-git add .
-git commit -m "보고서 내보내기 기능 개발"
-git push
-```
+개발 중간 커밋은 필요할 때 직접 만들 수 있습니다. 다만 최종 완료 시점의 스테이징과 커밋은 프로젝트 워크플로가 자동 처리하므로 필수는 아닙니다.
 
 ### 4. 자식 브랜치를 develop로 병합
 
@@ -145,11 +142,12 @@ npm run branch:merge
 
 스크립트가 다음 작업을 처리합니다.
 
-1. 현재 작업 브랜치 푸시
-2. 기록된 부모 `develop/vA.B.C`를 대상으로 PR 생성
-3. 일반 merge 방식으로 병합
-4. 작업 브랜치 삭제
-5. 부모 develop 브랜치로 이동
+1. 현재 작업 브랜치의 모든 변경을 자동 스테이징·커밋
+2. 현재 작업 브랜치 푸시
+3. 기록된 부모 `develop/vA.B.C`를 대상으로 PR 생성
+4. 일반 merge 방식으로 병합
+5. 작업 브랜치 삭제
+6. 부모 develop 브랜치로 이동
 
 다른 PC에서 받은 브랜치처럼 부모 기록이 없으면 병합 대상 브랜치 이름을 물어봅니다.
 
@@ -159,7 +157,7 @@ npm run branch:merge
 npm run branch:merge -- -SourceBranch feature/report-export -TargetBranch develop/v3.3.0
 ```
 
-### 5. 버전 릴리즈
+### 5. 개발 완료 및 자동 릴리즈
 
 모든 작업 브랜치를 병합한 뒤 `develop/vA.B.C`에서 실행합니다.
 
@@ -169,13 +167,33 @@ npm run version:release
 
 스크립트가 다음 순서로 처리합니다.
 
-1. `main`에서 `release/vA.B.C` 생성
-2. `develop/vA.B.C → release/vA.B.C` PR 생성 및 일반 merge
-3. 보안 배포본 생성 및 임시 복사본 자동 검증
-4. 개발 원본, config, 배포본을 릴리즈 준비 커밋으로 반영
-5. `release/vA.B.C → main` PR 생성 및 일반 merge
-6. 임시 develop/release 브랜치 삭제
-7. `main`에 `vA.B.C` 태그 생성 및 푸시
+1. `develop/vA.B.C`의 모든 남은 변경을 자동 스테이징·커밋하고 푸시
+2. `main`에서 `release/vA.B.C` 생성
+3. `develop/vA.B.C → release/vA.B.C` PR 생성 및 일반 merge
+4. 보안 배포본 생성 및 임시 복사본 자동 검증
+5. 개발 원본, config, 배포본을 릴리즈 준비 커밋으로 반영
+6. `release/vA.B.C → main` PR 생성 및 일반 merge
+7. 임시 develop/release 브랜치 삭제
+8. `main`에 `vA.B.C` 태그 생성 및 푸시
+
+이 자동 스테이징·커밋은 Codex가 임의로 실행하는 것이 아니라 사용자가 `npm run version:release` 또는 메뉴의 완료 항목을 선택했을 때 프로젝트 스크립트가 수행합니다.
+
+### 6. 새 버전 개발 취소
+
+릴리즈 전 `develop/vA.B.C`에서 다음 명령을 실행합니다.
+
+```powershell
+npm run version:cancel
+```
+
+화면에 표시된 개발 브랜치 이름을 다시 입력하면 다음 순서로 취소합니다.
+
+1. 미커밋 변경과 추적되지 않은 파일을 Git stash에 백업
+2. 부모 브랜치에 없는 개발 커밋을 `cancel-backup/vA.B.C-날짜시간` 로컬 태그로 백업
+3. 원래 부모 브랜치(기본값 `main`)로 복귀
+4. 원격 및 로컬 `develop/vA.B.C` 브랜치 삭제
+
+자식 브랜치나 `release/vA.B.C`, 동일 버전 태그가 남아 있으면 안전을 위해 취소하지 않습니다. 완료 화면에 백업 태그와 stash 복구 명령이 표시됩니다. 백업 태그는 원격으로 자동 푸시하지 않습니다.
 
 예를 들어 기존 파일명이 다음과 같다면:
 
@@ -219,7 +237,7 @@ npm run version:start -- minor -BaseBranch maintenance
 
 ## 실행 전 확인
 
-브랜치 생성, 병합 및 릴리즈 전에는 작업 내용을 커밋해야 합니다.
+브랜치 생성 전에는 기존 작업을 정리해야 합니다. 자식 병합과 릴리즈를 선택하면 해당 브랜치의 변경은 프로젝트 워크플로가 자동 스테이징·커밋합니다.
 
 ```powershell
 npm run workflow:status
