@@ -7,6 +7,16 @@ Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
+Option Explicit
+
+Private Sub Workbook_Open()
+    InitializeReleaseSecurity
+End Sub
+
+Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+    PrepareReleaseForSave SaveAsUI, Cancel
+End Sub
+
 Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     Dim duplicateModule As String
 

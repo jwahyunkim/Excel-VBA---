@@ -9,7 +9,12 @@
         "branch:create": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action CreateBranch",
         "branch:merge": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action MergeBranch",
         "version:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action Release",
-        "workflow:status": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action Status"
+        "workflow:status": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action Status",
+        "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./release-security.ps1 -Action Build",
+        "release:code": "powershell -NoProfile -ExecutionPolicy Bypass -File ./release-security.ps1 -Action Code",
+        "release:status": "powershell -NoProfile -ExecutionPolicy Bypass -File ./release-security.ps1 -Action Status",
+        "release:sync-dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./release-security.ps1 -Action SyncDev",
+        "release:validate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./release-security.ps1 -Action Validate"
     },
     "author": "LocalSmart",
     "license": "ISC",
