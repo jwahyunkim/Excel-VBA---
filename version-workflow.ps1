@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidateSet(
-        "Menu", "Start", "StartVersion", "CreateBranch", "MergeBranch", "Release", "Status",
+        "Menu", "Start", "StartVersion", "CreateBranch", "MergeBranch", "Release", "CancelVersion", "Status",
         "Security", "SecurityConfig", "SecurityStatus", "SecuritySync", "SecurityBuild",
         "SecurityValidate", "SecurityAll", "SecurityCode")]
     [string]$Action = "Menu",
@@ -22,7 +22,8 @@ param(
 #   지정 부모의 자식:     .\version-workflow.ps1 -Action CreateBranch -BaseBranch develop/v3.2.13 -BranchName feature/report
 #   기록된 부모로 병합:   .\version-workflow.ps1 -Action MergeBranch
 #   지정 부모로 병합:     .\version-workflow.ps1 -Action MergeBranch -SourceBranch feature/report -TargetBranch develop/v3.2.13
-#   현재 개발 릴리즈:     .\version-workflow.ps1 -Action Release
+#   현재 개발 완료/릴리즈: .\version-workflow.ps1 -Action Release
+#   현재 버전 개발 취소:  .\version-workflow.ps1 -Action CancelVersion
 
 # ============================================================================
 # 사용자 설정
@@ -1048,11 +1049,208 @@ function Merge-ChildBranch {
         $MergeBody
     }
 
+    if ((Get-CurrentBranch) -ne $resolvedSourceBranch) {
+        Assert-CleanWorkingTree
+        Switch-ToUpdatedBranch -Name $resolvedSourceBranch
+    }
+    Commit-CurrentBranchChanges `
+        -ExpectedBranch $resolvedSourceBranch `
+        -CommitMessage "work: $resolvedSourceBranch 변경 사항 반영"
+    Invoke-Git -Arguments @("push", "origin", $resolvedSourceBranch)
+
     Merge-WorkBranch `
         -HeadBranch $resolvedSourceBranch `
         -BaseBranchName $resolvedTargetBranch `
         -Title $resolvedTitle `
         -Body $resolvedBody
+}
+
+function Commit-CurrentBranchChanges {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExpectedBranch,
+        [Parameter(Mandatory = $true)][string]$CommitMessage
+    )
+
+    if ((Get-CurrentBranch) -ne $ExpectedBranch) {
+        throw "자동 커밋은 대상 브랜치에서 실행해야 합니다: $ExpectedBranch"
+    }
+
+    $conflictedFiles = & git diff --name-only --diff-filter=U
+    if ($LASTEXITCODE -ne 0) {
+        throw "병합 충돌 여부를 확인하지 못했습니다."
+    }
+    if (-not [string]::IsNullOrWhiteSpace(($conflictedFiles | Out-String))) {
+        throw "해결되지 않은 병합 충돌이 있습니다. 충돌을 먼저 해결하세요."
+    }
+
+    Invoke-Git -Arguments @("diff", "--check")
+    Invoke-Git -Arguments @("add", "-A", "--", ".")
+    Invoke-Git -Arguments @("diff", "--cached", "--check")
+
+    & git diff --cached --quiet
+    if ($LASTEXITCODE -eq 1) {
+        Invoke-Git -Arguments @("commit", "-m", $CommitMessage)
+    }
+    elseif ($LASTEXITCODE -ne 0) {
+        throw "자동 커밋할 변경 여부를 확인하지 못했습니다."
+    }
+    else {
+        Write-Host "자동 커밋할 변경 사항이 없습니다." -ForegroundColor Yellow
+    }
+}
+
+function Get-ChildBranches {
+    param([Parameter(Mandatory = $true)][string]$ParentBranch)
+
+    $children = @()
+    $localBranches = & git for-each-ref --format='%(refname:short)' refs/heads
+    if ($LASTEXITCODE -ne 0) {
+        throw "로컬 브랜치 목록을 조회하지 못했습니다."
+    }
+
+    foreach ($localBranch in $localBranches) {
+        $branchName = ([string]$localBranch).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($branchName) -and
+            (Get-ConfiguredParentBranch -Name $branchName) -eq $ParentBranch) {
+            $children += $branchName
+        }
+    }
+
+    return @($children)
+}
+
+function Assert-NoChildBranches {
+    param([Parameter(Mandatory = $true)][string]$ParentBranch)
+
+    $children = @(Get-ChildBranches -ParentBranch $ParentBranch)
+    if ($children.Count -gt 0) {
+        throw "먼저 자식 브랜치를 병합하거나 정리하세요: $($children -join ', ')"
+    }
+}
+
+function Commit-DevelopmentChanges {
+    param([Parameter(Mandatory = $true)][string]$DevelopmentBranch)
+
+    $currentBranch = Get-CurrentBranch
+    if ($currentBranch -ne $DevelopmentBranch) {
+        throw "개발 변경 자동 커밋은 대상 개발 브랜치에서 실행해야 합니다: $DevelopmentBranch"
+    }
+
+    $releaseVersion = Get-VersionFromDevelopmentBranch -Name $DevelopmentBranch
+    Commit-CurrentBranchChanges `
+        -ExpectedBranch $DevelopmentBranch `
+        -CommitMessage "develop: v$releaseVersion 변경 사항 반영"
+
+    Invoke-Git -Arguments @("push", "origin", $DevelopmentBranch)
+}
+
+function Complete-VersionDevelopmentAndRelease {
+    $developmentBranch = Get-CurrentBranch
+    $null = Get-VersionFromDevelopmentBranch -Name $developmentBranch
+    if (-not [string]::IsNullOrWhiteSpace($SourceBranch) -and
+        $SourceBranch.Trim() -ne $developmentBranch) {
+        throw "Release는 현재 개발 브랜치만 대상으로 실행할 수 있습니다: $developmentBranch"
+    }
+    Assert-NoChildBranches -ParentBranch $developmentBranch
+
+    Write-Host "개발 변경 사항을 프로젝트 워크플로가 자동 스테이징·커밋합니다." -ForegroundColor Yellow
+    Commit-DevelopmentChanges -DevelopmentBranch $developmentBranch
+    Release-Version
+}
+
+function Cancel-VersionDevelopment {
+    $developmentBranch = Get-CurrentBranch
+    $releaseVersion = Get-VersionFromDevelopmentBranch -Name $developmentBranch
+    $releaseBranch = "release/v$releaseVersion"
+    $tagName = "v$releaseVersion"
+
+    Invoke-Git -Arguments @("fetch", "origin", "--tags", "--prune")
+    Assert-NoChildBranches -ParentBranch $developmentBranch
+
+    if ((Test-LocalBranch -Name $releaseBranch) -or (Test-RemoteTrackingBranch -Name $releaseBranch)) {
+        throw "릴리즈 브랜치가 이미 존재하므로 자동 취소할 수 없습니다: $releaseBranch"
+    }
+
+    & git show-ref --verify --quiet "refs/tags/$tagName"
+    if ($LASTEXITCODE -eq 0) {
+        throw "동일 버전 태그가 이미 존재하므로 자동 취소할 수 없습니다: $tagName"
+    }
+
+    $configuredParent = Get-ConfiguredParentBranch -Name $developmentBranch
+    $parentBranch = if ([string]::IsNullOrWhiteSpace($configuredParent)) {
+        $DefaultVersionBaseBranch
+    }
+    else {
+        $configuredParent
+    }
+    Assert-ValidBranchName -Name $parentBranch
+
+    $parentReference = if (Test-RemoteTrackingBranch -Name $parentBranch) {
+        "origin/$parentBranch"
+    }
+    elseif (Test-LocalBranch -Name $parentBranch) {
+        $parentBranch
+    }
+    else {
+        throw "복귀할 부모 브랜치를 찾을 수 없습니다: $parentBranch"
+    }
+
+    Write-Host ""
+    Write-Host "취소 대상: $developmentBranch" -ForegroundColor Yellow
+    Write-Host "복귀 브랜치: $parentBranch"
+    Write-Host "미커밋 변경은 stash에, 개발 커밋은 로컬 백업 태그에 보관합니다."
+
+    $confirmation = if ([string]::IsNullOrWhiteSpace($Value)) {
+        (Read-Host "취소하려면 브랜치 이름 '$developmentBranch' 을(를) 다시 입력").Trim()
+    }
+    else {
+        $Value.Trim()
+    }
+    if ($confirmation -ne $developmentBranch) {
+        throw "브랜치 이름이 일치하지 않아 개발 취소를 중단했습니다."
+    }
+
+    $stashReference = ""
+    if (-not [string]::IsNullOrWhiteSpace((Get-WorkingTreeStatus))) {
+        $stashMessage = "workflow cancel backup: $developmentBranch $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        Invoke-Git -Arguments @("stash", "push", "--include-untracked", "-m", $stashMessage)
+        $stashReference = Get-GitOutput -Arguments @("stash", "list", "-1", "--format=%gd")
+    }
+
+    $uniqueCommitCount = [int](Get-GitOutput -Arguments @("rev-list", "--count", "$parentReference..$developmentBranch"))
+    $backupTag = ""
+    if ($uniqueCommitCount -gt 0) {
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $backupTag = "cancel-backup/v$releaseVersion-$timestamp"
+        $suffix = 1
+        while ($true) {
+            & git show-ref --verify --quiet "refs/tags/$backupTag"
+            if ($LASTEXITCODE -ne 0) {
+                break
+            }
+            $backupTag = "cancel-backup/v$releaseVersion-$timestamp-$suffix"
+            $suffix++
+        }
+        Invoke-Git -Arguments @("tag", "-a", $backupTag, $developmentBranch, "-m", "$developmentBranch 취소 백업")
+    }
+
+    Switch-ToUpdatedBranch -Name $parentBranch
+
+    if (Test-RemoteTrackingBranch -Name $developmentBranch) {
+        Invoke-Git -Arguments @("push", "origin", "--delete", $developmentBranch)
+    }
+    if (Test-LocalBranch -Name $developmentBranch) {
+        Invoke-Git -Arguments @("branch", "-D", $developmentBranch)
+    }
+
+    Write-Host ""
+    Write-Host "$developmentBranch 개발을 취소하고 $parentBranch 로 돌아왔습니다." -ForegroundColor Green
+    if (-not [string]::IsNullOrWhiteSpace($backupTag)) {
+        Write-Host "커밋 복구용 로컬 태그: $backupTag" -ForegroundColor Yellow
+    }
+    if (-not [string]::IsNullOrWhiteSpace($stashReference)) {
+        Write-Host "미커밋 변경 복구용 stash: $stashReference (git stash apply $stashReference)" -ForegroundColor Yellow
+    }
 }
 
 function Release-Version {
@@ -1136,21 +1334,25 @@ function Release-Version {
 function Select-MenuAction {
     Write-Host ""
     Write-Host "[1] 새 버전 개발 시작"
-    Write-Host "[2] 현재 버전 릴리즈"
-    Write-Host "[3] 설정 및 Git 상태 확인"
-    Write-Host "[4] 현재/지정 브랜치에서 자식 브랜치 생성"
-    Write-Host "[5] 자식 브랜치를 부모 브랜치로 병합"
-    Write-Host "[6] 배포 보안 관리"
+    Write-Host "[2] 개발 완료 + 자동 커밋 + 릴리즈"
+    Write-Host "[3] 현재 버전 개발 취소"
+    Write-Host "[4] 설정 및 Git 상태 확인"
+    Write-Host "[5] 현재/지정 브랜치에서 자식 브랜치 생성"
+    Write-Host "[6] 자식 브랜치를 부모 브랜치로 병합"
+    Write-Host "[7] 배포 보안 관리"
+    Write-Host "[0] 종료"
     $selection = Read-Host "선택"
 
     switch ($selection) {
         "1" { return "Start" }
         "2" { return "Release" }
-        "3" { return "Status" }
-        "4" { return "CreateBranch" }
-        "5" { return "MergeBranch" }
-        "6" { return "Security" }
-        default { throw "1~6 중 올바른 메뉴 번호를 선택하세요." }
+        "3" { return "CancelVersion" }
+        "4" { return "Status" }
+        "5" { return "CreateBranch" }
+        "6" { return "MergeBranch" }
+        "7" { return "Security" }
+        "0" { return "Exit" }
+        default { throw "0~7 중 올바른 메뉴 번호를 선택하세요." }
     }
 }
 
@@ -1166,7 +1368,8 @@ try {
         { $_ -in @("Start", "StartVersion") } { Start-VersionDevelopment }
         "CreateBranch" { Start-ChildBranch }
         "MergeBranch" { Merge-ChildBranch }
-        "Release" { Release-Version }
+        "Release" { Complete-VersionDevelopmentAndRelease }
+        "CancelVersion" { Cancel-VersionDevelopment }
         "Status" { Show-WorkflowStatus }
         "Security" { Show-ReleaseSecurityMenu }
         "SecurityConfig" { Edit-ReleaseSecurityConfig }
@@ -1176,6 +1379,7 @@ try {
         "SecurityValidate" { Invoke-ReleaseSecurityCommand -ReleaseAction Validate }
         "SecurityAll" { Invoke-SecurityAllWorkflow -TargetDate $Value }
         "SecurityCode" { Invoke-ReleaseSecurityCommand -ReleaseAction Code -TargetDate $Value }
+        "Exit" { Write-Host "워크플로를 종료합니다." }
     }
 }
 catch {

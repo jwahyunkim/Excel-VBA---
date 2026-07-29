@@ -9,6 +9,7 @@
         "branch:create": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action CreateBranch",
         "branch:merge": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action MergeBranch",
         "version:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action Release",
+        "version:cancel": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action CancelVersion",
         "workflow:status": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action Status",
         "release:build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action SecurityBuild",
         "release:code": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action SecurityCode",
