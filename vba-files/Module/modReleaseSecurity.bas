@@ -1,9 +1,9 @@
 ﻿Attribute VB_Name = "modReleaseSecurity"
 Option Explicit
 
-Private Const SECURITY_SHEET_NAME As String = "__REO_SECURITY"
+Private Const SECURITY_SHEET_NAME As String = "__RELEASE_SECURITY"
 Private Const GUIDE_SHEET_NAME As String = "사용안내"
-Private Const SECURITY_MARKER As String = "REO_RELEASE_SECURITY_V1"
+Private Const SECURITY_MARKER As String = "RELEASE_SECURITY_V1"
 Private Const SECURITY_ENABLED As String = "Y"
 Private Const SHEET_NAME_SEPARATOR As String = vbLf
 Private Const CODE_MODULUS As Long = 1679616       ' 36 ^ 4
@@ -109,7 +109,7 @@ Public Sub InitializeReleaseSecurity()
             Prompt:="사용 기간이 " & Format$(expiryDate, "yyyy-mm-dd") & _
                     "에 끝났습니다." & vbCrLf & _
                     "오늘 날짜용 기간 연장 코드를 입력하세요.", _
-            Title:="REO 사용 기간 연장", Type:=2)
+            Title:="사용 기간 연장", Type:=2)
 
         If VarType(enteredCode) = vbBoolean Then
             If enteredCode = False Then GoTo SafeExit
@@ -324,7 +324,7 @@ End Sub
 Private Sub WriteGuideSheet(ByVal guideSheet As Worksheet, _
                             ByVal securitySheet As Worksheet)
     With guideSheet
-        .Range("A1").Value2 = "REO 업무 간트 배포본"
+        .Range("A1").Value2 = "업무 간트 배포본"
         .Range("A3").Value2 = "배포 버전"
         .Range("B3").Value2 = CStr(securitySheet.Range("B2").Value2)
         .Range("A4").Value2 = "배포일"
