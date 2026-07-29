@@ -447,7 +447,7 @@ function Read-ReleaseWorkbookState {
                 $sheetName = [string]$sheet.Name
                 if ([int]$sheet.Visible -eq -1) { $visibleSheets += $sheetName }
                 if ($sheetName -eq "사용안내") { $guideVisibility = [int]$sheet.Visible }
-                if ($sheetName -eq "__REO_SECURITY") {
+                if ($sheetName -eq "__RELEASE_SECURITY") {
                     $securityVisibility = [int]$sheet.Visible
                     $marker = [string]$sheet.Range("A1").Value2
                     $expiryDate = [DateTime]::FromOADate([double]$sheet.Range("B4").Value2).Date
@@ -512,9 +512,9 @@ function Test-ReleaseSaveCycle {
             }
         }
 
-        $businessSheets = @($visibleSheets | Where-Object { $_ -notin @("사용안내", "__REO_SECURITY") })
+        $businessSheets = @($visibleSheets | Where-Object { $_ -notin @("사용안내", "__RELEASE_SECURITY") })
         if ($businessSheets.Count -lt 1) { throw "저장 후 업무 시트가 다시 표시되지 않았습니다." }
-        if ($visibleSheets -contains "사용안내" -or $visibleSheets -contains "__REO_SECURITY") {
+        if ($visibleSheets -contains "사용안내" -or $visibleSheets -contains "__RELEASE_SECURITY") {
             throw "저장 후 보안용 시트가 표시되었습니다: $($visibleSheets -join ', ')"
         }
         if (-not [bool]$workbook.Saved) { throw "저장 후 통합문서가 변경 상태로 남았습니다." }
@@ -552,7 +552,7 @@ function Test-ReleaseWorkbook {
 
     Write-Host "[1/4] 매크로 차단 상태에서 디스크 잠금을 확인합니다."
     $lockedBefore = Read-ReleaseWorkbookState -WorkbookPath $releasePath -MacrosEnabled $false
-    if ($lockedBefore.Marker -ne "REO_RELEASE_SECURITY_V1") { throw "배포 보안 표시자가 없습니다." }
+    if ($lockedBefore.Marker -ne "RELEASE_SECURITY_V1") { throw "배포 보안 표시자가 없습니다." }
     if ($lockedBefore.VisibleSheets.Count -ne 1 -or $lockedBefore.VisibleSheets[0] -ne "사용안내") {
         throw "디스크 잠금 상태가 아닙니다: $($lockedBefore.VisibleSheets -join ', ')"
     }
@@ -562,9 +562,9 @@ function Test-ReleaseWorkbook {
 
     Write-Host "[2/4] 매크로 허용 상태에서 정상 잠금 해제를 확인합니다."
     $unlocked = Read-ReleaseWorkbookState -WorkbookPath $releasePath -MacrosEnabled $true
-    $businessSheets = @($unlocked.VisibleSheets | Where-Object { $_ -notin @("사용안내", "__REO_SECURITY") })
+    $businessSheets = @($unlocked.VisibleSheets | Where-Object { $_ -notin @("사용안내", "__RELEASE_SECURITY") })
     if ($businessSheets.Count -lt 1) { throw "정상 업무 시트가 표시되지 않았습니다." }
-    if ($unlocked.VisibleSheets -contains "사용안내" -or $unlocked.VisibleSheets -contains "__REO_SECURITY") {
+    if ($unlocked.VisibleSheets -contains "사용안내" -or $unlocked.VisibleSheets -contains "__RELEASE_SECURITY") {
         throw "잠금 해제 후 보안용 시트가 표시되었습니다: $($unlocked.VisibleSheets -join ', ')"
     }
     if (-not $unlocked.Saved) { throw "정상 개봉 직후 통합문서가 불필요한 변경 상태입니다." }
