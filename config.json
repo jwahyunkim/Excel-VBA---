@@ -12,8 +12,8 @@
     "release_security":  {
                              "usage_days":  90,
                              "renewal_days":  30,
-                             "vba_project_password":  "REO-VBA-4.2!Local",
-                             "renewal_secret":  "REO-Renew-2026!KJ7",
+                             "vba_project_password":  "VBA-Project!Local",
+                             "renewal_secret":  "Renewal-Key!Local-KJ7",
                              "distribution_folder":  "dist"
                          },
     "xvba_packages":  {
