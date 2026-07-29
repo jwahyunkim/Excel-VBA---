@@ -486,6 +486,7 @@ function Start-AutomaticPatchDevelopment {
     Set-DevelopmentWorkbookVersion `
         -TargetVersion $nextVersion `
         -ExpectedCurrentVersion $currentVersion.Version
+    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
     Invoke-Git -Arguments @("push", "-u", "origin", $developmentBranch)
 
     Write-Host ""
@@ -699,7 +700,13 @@ function Edit-ReleaseSecurityConfig {
 }
 
 function Invoke-SecuritySyncWorkflow {
-    $null = Ensure-SecurityMutationDevelopmentContext -Reason "개발본 보안 VBA 동기화"
+    $currentBranch = Get-CurrentBranch
+    $developmentVersion = Get-DevelopmentVersionForBranch -Name $currentBranch
+    if ([string]::IsNullOrWhiteSpace($developmentVersion)) {
+        throw ("개발본 VBA 동기화는 새 버전 개발 브랜치에서 실행하세요: $currentBranch`n" +
+               "main에서는 먼저 '새 버전 개발 시작'을 선택하세요.")
+    }
+    Set-DevelopmentWorkbookVersion -TargetVersion $developmentVersion
     Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
 }
 
@@ -712,8 +719,7 @@ function Invoke-SecurityBuildWorkflow {
 function Invoke-SecurityAllWorkflow {
     param([string]$TargetDate = "")
 
-    $null = Ensure-SecurityMutationDevelopmentContext -Reason "보안 동기화/배포"
-    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
+    Invoke-SecuritySyncWorkflow
     Invoke-ReleaseSecurityCommand -ReleaseAction Build -TargetDate $TargetDate
     Invoke-ReleaseSecurityCommand -ReleaseAction Validate
 }
@@ -848,6 +854,7 @@ function Start-VersionDevelopment {
     Set-DevelopmentWorkbookVersion `
         -TargetVersion $nextVersion `
         -ExpectedCurrentVersion $currentVersion.Version
+    Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
 
     Write-Host ""
     Write-Host "$($currentVersion.Tag) -> v$nextVersion ($versionPart)" -ForegroundColor Green
