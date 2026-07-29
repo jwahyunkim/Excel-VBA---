@@ -162,21 +162,35 @@ End Sub
 
 Public Sub PrepareReleaseForSave(ByVal saveAsUI As Boolean, ByRef cancelSave As Boolean)
     Dim previousEnableEvents As Boolean
+    Dim previousScreenUpdating As Boolean
+    Dim activeBusinessSheetName As String
+    Dim saveSucceeded As Boolean
     Dim errorDescription As String
 
     If Not IsReleaseSecurityEnabled() Then Exit Sub
     If Not mReleaseAuthenticated Then Exit Sub
 
     previousEnableEvents = Application.EnableEvents
+    previousScreenUpdating = Application.ScreenUpdating
+    If ActiveWorkbook Is ThisWorkbook Then
+        If TypeOf ActiveSheet Is Worksheet Then
+            activeBusinessSheetName = ActiveSheet.Name
+        End If
+    End If
     On Error GoTo EH
     Application.EnableEvents = False
+    Application.ScreenUpdating = False
 
     StoreVisibleBusinessSheetNames
     HideBusinessSheets
 
     If saveAsUI Then
-        ' 다른 이름으로 저장은 Excel 기본 흐름을 유지하되 잠금 상태로 저장합니다.
-        ' 새 파일을 다시 열면 Workbook_Open이 정상 업무 화면을 표시합니다.
+        ' 기본 저장을 취소하고 이벤트가 꺼진 저장 대화상자에서 잠금 상태로 저장합니다.
+        ' 사용자가 대화상자를 취소해도 현재 화면은 즉시 복원됩니다.
+        cancelSave = True
+        saveSucceeded = Application.Dialogs(xlDialogSaveAs).Show
+        ShowBusinessSheets activeBusinessSheetName
+        If saveSucceeded Then ThisWorkbook.Saved = True
         GoTo SafeExit
     End If
 
@@ -184,19 +198,21 @@ Public Sub PrepareReleaseForSave(ByVal saveAsUI As Boolean, ByRef cancelSave As 
     ' 따라서 아래 화면 복원은 디스크 파일에 포함되지 않습니다.
     cancelSave = True
     ThisWorkbook.Save
-    ShowBusinessSheets
+    ShowBusinessSheets activeBusinessSheetName
     ThisWorkbook.Saved = True
 
 SafeExit:
     Application.EnableEvents = previousEnableEvents
+    Application.ScreenUpdating = previousScreenUpdating
     Exit Sub
 
 EH:
     errorDescription = Err.Description
     cancelSave = True
     On Error Resume Next
-    ShowBusinessSheets
+    ShowBusinessSheets activeBusinessSheetName
     Application.EnableEvents = previousEnableEvents
+    Application.ScreenUpdating = previousScreenUpdating
     MsgBox "보안 저장 상태를 만들지 못해 저장을 취소했습니다." & vbCrLf & _
            "원인: " & errorDescription, vbExclamation, "저장 취소"
 End Sub
@@ -344,7 +360,9 @@ Private Sub StoreVisibleBusinessSheetNames()
     Set securitySheet = ThisWorkbook.Worksheets(SECURITY_SHEET_NAME)
     visibleBusinessSheets = CollectVisibleBusinessSheetNames()
     If Len(visibleBusinessSheets) > 0 Then
-        securitySheet.Range("B7").Value2 = visibleBusinessSheets
+        If CStr(securitySheet.Range("B7").Value2) <> visibleBusinessSheets Then
+            securitySheet.Range("B7").Value2 = visibleBusinessSheets
+        End If
     End If
 End Sub
 
@@ -366,10 +384,9 @@ Private Sub HideBusinessSheets()
     Next worksheetItem
 
     securitySheet.Visible = xlSheetVeryHidden
-    WriteGuideSheet guideSheet, securitySheet
 End Sub
 
-Private Sub ShowBusinessSheets()
+Private Sub ShowBusinessSheets(Optional ByVal preferredSheetName As String = "")
     Dim securitySheet As Worksheet
     Dim guideSheet As Worksheet
     Dim sheetNames As Variant
@@ -400,7 +417,16 @@ Private Sub ShowBusinessSheets()
     securitySheet.Visible = xlSheetVeryHidden
     ThisWorkbook.Worksheets(INFO_SHEET_NAME).Visible = xlSheetVeryHidden
     If visibleCount > 0 Then
-        ThisWorkbook.Worksheets(firstVisibleSheetName).Activate
+        Set worksheetItem = Nothing
+        If Len(preferredSheetName) > 0 Then
+            On Error Resume Next
+            Set worksheetItem = ThisWorkbook.Worksheets(preferredSheetName)
+            On Error GoTo 0
+        End If
+        If worksheetItem Is Nothing Then
+            Set worksheetItem = ThisWorkbook.Worksheets(firstVisibleSheetName)
+        End If
+        worksheetItem.Activate
         guideSheet.Visible = xlSheetVeryHidden
     End If
 End Sub
