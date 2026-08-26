@@ -2,11 +2,19 @@
 Option Explicit
 
 Private Const WEEKLY_PPT_TEMPLATE_SHEET_NAME As String = "WeeklyPptTemplate"
-Private Const WEEKLY_PPT_TEMPLATE_MARKER As String = "REO_WEEKLY_PPT_TEMPLATE_BASE64_V1"
 Private Const WEEKLY_PPT_OUTPUT_FOLDER As String = "주간보고"
 Private Const WEEKLY_PPT_FILE_PREFIX As String = "Digital MFG팀_주간보고_김좌현_"
 Private Const PPT_SAVE_AS_OPEN_XML_PRESENTATION As Long = 24
 Private Const WEEKLY_UNASSIGNED_MODULE As String = "모듈 미지정"
+Private Const WEEKLY_PPT_SLIDE_WIDTH As Single = 780!
+Private Const WEEKLY_PPT_SLIDE_HEIGHT As Single = 540!
+Private Const PPT_LAYOUT_BLANK As Long = 12
+Private Const PPT_ALIGN_LEFT As Long = 1
+Private Const PPT_ALIGN_CENTER As Long = 2
+Private Const PPT_BORDER_TOP As Long = 1
+Private Const PPT_BORDER_LEFT As Long = 2
+Private Const PPT_BORDER_BOTTOM As Long = 3
+Private Const PPT_BORDER_RIGHT As Long = 4
 
 Public Sub 주간보고PPT_생성()
     Call GenerateWeeklyPptReport(True)
@@ -120,7 +128,6 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim currentWeekEnd As Date
     Dim nextWeekStart As Date
     Dim nextWeekEnd As Date
-    Dim templatePath As String
     Dim outputFolder As String
     Dim outputPath As String
     Dim lastRow As Long
@@ -230,10 +237,6 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     outputFolder = ThisWorkbook.Path & Application.PathSeparator & WEEKLY_PPT_OUTPUT_FOLDER
     If Len(Dir$(outputFolder, vbDirectory)) = 0 Then MkDir outputFolder
 
-    templatePath = outputFolder & Application.PathSeparator & _
-                   "~weekly_ppt_template_" & Format$(Now, "yyyymmdd_hhnnss") & ".pptx"
-    ExtractEmbeddedWeeklyPptTemplate templatePath
-
     outputPath = outputFolder & Application.PathSeparator & _
                  WEEKLY_PPT_FILE_PREFIX & Format$(reportFriday, "yyyymmdd") & ".pptx"
 
@@ -244,7 +247,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     End If
 
     Set pptApp = CreateObject("PowerPoint.Application")
-    Set presentation = pptApp.Presentations.Open(templatePath, False, False, False)
+    Set presentation = CreateCodeBasedWeeklyPptPresentation(pptApp)
 
     Set outputCurrentItemPages = New Collection
     Set outputCurrentDatePages = New Collection
@@ -302,7 +305,6 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     presentation.SaveAs outputPath, PPT_SAVE_AS_OPEN_XML_PRESENTATION
     presentation.Close
     Set presentation = Nothing
-    DeleteTemporaryWeeklyPptTemplate templatePath
 
     If showCompletionMessage Then
         pptApp.Visible = True
@@ -331,7 +333,6 @@ EH:
     On Error Resume Next
     If Not presentation Is Nothing Then presentation.Close
     If Not pptApp Is Nothing Then pptApp.Quit
-    DeleteTemporaryWeeklyPptTemplate templatePath
     On Error GoTo 0
 
     If showCompletionMessage Then
@@ -1526,54 +1527,378 @@ Private Function FindTextShape(ByVal slide As Object, ByVal searchText As String
     Next shape
 End Function
 
-Private Sub ExtractEmbeddedWeeklyPptTemplate(ByVal targetPath As String)
-    Dim templateWs As Worksheet
-    Dim lastRow As Long
-    Dim r As Long
-    Dim base64Text As String
-    Dim xmlDocument As Object
-    Dim base64Node As Object
-    Dim stream As Object
+Private Function CreateCodeBasedWeeklyPptPresentation(ByVal pptApp As Object) As Object
+    Dim presentation As Object
+    Dim slide As Object
 
-    On Error Resume Next
-    Set templateWs = ThisWorkbook.Worksheets(WEEKLY_PPT_TEMPLATE_SHEET_NAME)
-    On Error GoTo 0
+    Set presentation = pptApp.Presentations.Add(msoFalse)
+    presentation.PageSetup.SlideWidth = WEEKLY_PPT_SLIDE_WIDTH
+    presentation.PageSetup.SlideHeight = WEEKLY_PPT_SLIDE_HEIGHT
 
-    If templateWs Is Nothing Then
-        Err.Raise vbObjectError + 7540, "ExtractEmbeddedWeeklyPptTemplate", _
-                  "엑셀 내부의 주간보고 PPT 템플릿 시트를 찾을 수 없습니다."
-    End If
+    Set slide = presentation.Slides.Add(1, PPT_LAYOUT_BLANK)
+    slide.FollowMasterBackground = msoFalse
+    With slide.Background.Fill
+        .Visible = msoTrue
+        .Solid
+        .ForeColor.RGB = RGB(255, 255, 255)
+        .Transparency = 0
+    End With
 
-    If CStr(templateWs.Range("A1").Value2) <> WEEKLY_PPT_TEMPLATE_MARKER Then
-        Err.Raise vbObjectError + 7541, "ExtractEmbeddedWeeklyPptTemplate", _
-                  "엑셀 내부의 주간보고 PPT 템플릿 데이터가 올바르지 않습니다."
-    End If
+    BuildCodeBasedWeeklyPptSlide slide
+    Set CreateCodeBasedWeeklyPptPresentation = presentation
+End Function
 
-    lastRow = templateWs.Cells(templateWs.Rows.Count, 1).End(xlUp).Row
-    For r = 2 To lastRow
-        base64Text = base64Text & CStr(templateWs.Cells(r, 1).Value2)
-    Next r
-
-    If Len(base64Text) = 0 Then
-        Err.Raise vbObjectError + 7542, "ExtractEmbeddedWeeklyPptTemplate", _
-                  "엑셀 내부의 주간보고 PPT 템플릿 데이터가 비어 있습니다."
-    End If
-
-    Set xmlDocument = CreateObject("MSXML2.DOMDocument.6.0")
-    Set base64Node = xmlDocument.createElement("base64")
-    base64Node.DataType = "bin.base64"
-    base64Node.Text = base64Text
-
-    Set stream = CreateObject("ADODB.Stream")
-    stream.Type = 1
-    stream.Open
-    stream.Write base64Node.nodeTypedValue
-    stream.SaveToFile targetPath, 2
-    stream.Close
+Private Sub BuildCodeBasedWeeklyPptSlide(ByVal slide As Object)
+    AddWeeklyPptTitleArea slide
+    AddWeeklyPptSectionBar slide
+    AddWeeklyPptPeriodHeadings slide
+    AddWeeklyPptCurrentTable slide
+    AddWeeklyPptPlanArea slide
 End Sub
 
-Private Sub DeleteTemporaryWeeklyPptTemplate(ByVal templatePath As String)
-    If Len(templatePath) = 0 Then Exit Sub
-    If Len(Dir$(templatePath)) = 0 Then Exit Sub
-    Kill templatePath
+Private Sub AddWeeklyPptTitleArea(ByVal slide As Object)
+    Dim titleShape As Object
+    Dim lineShape As Object
+
+    Set titleShape = slide.Shapes.AddShape( _
+                         msoShapeRectangle, _
+                         14.16945, -0.14063, 464.9578, 31.50472)
+    titleShape.Name = "WeeklyPptTitle"
+    ConfigureWeeklyPptTransparentShape titleShape
+    With titleShape.TextFrame
+        .AutoSize = 0
+        .WordWrap = msoTrue
+        .VerticalAnchor = msoAnchorTop
+        .MarginLeft = 7.2
+        .MarginRight = 7.2
+        .MarginTop = 3.6
+        .MarginBottom = 3.6
+    End With
+    With titleShape.TextFrame.TextRange
+        .Text = "1. Last Week / This Week - Job Plan "
+        .Font.Name = "Calibri"
+        .Font.Size = 20
+        .Font.Bold = msoTrue
+        .Font.Color.RGB = RGB(0, 0, 0)
+        .ParagraphFormat.Alignment = PPT_ALIGN_LEFT
+        .ParagraphFormat.Bullet.Visible = msoFalse
+    End With
+
+    Set lineShape = slide.Shapes.AddLine(17.93244, 25.54063, 557.83994, 25.54063)
+    lineShape.Name = "WeeklyPptTitleLine"
+    With lineShape.Line
+        .Visible = msoTrue
+        .ForeColor.RGB = RGB(0, 0, 0)
+        .Weight = 1
+    End With
+
+    AddWeeklyPptLogoRectangle slide, 545.9321, 15.10528, 14.17323, 8.42992, RGB(0, 0, 0)
+    AddWeeklyPptLogoRectangle slide, 532.1849, 15.03299, 1.41732, 8.42992, RGB(89, 89, 89)
+    AddWeeklyPptLogoRectangle slide, 540.0345, 15.03299, 4.25197, 8.42992, RGB(38, 38, 38)
+    AddWeeklyPptLogoRectangle slide, 535.2422, 15.10701, 2.83465, 8.42992, RGB(64, 64, 64)
+End Sub
+
+Private Sub AddWeeklyPptLogoRectangle(ByVal slide As Object, _
+                                      ByVal shapeLeft As Single, _
+                                      ByVal shapeTop As Single, _
+                                      ByVal shapeWidth As Single, _
+                                      ByVal shapeHeight As Single, _
+                                      ByVal fillColor As Long)
+    Dim logoShape As Object
+
+    Set logoShape = slide.Shapes.AddShape( _
+                        msoShapeRectangle, _
+                        shapeLeft, shapeTop, shapeWidth, shapeHeight)
+    With logoShape
+        .Fill.Visible = msoTrue
+        .Fill.Solid
+        .Fill.ForeColor.RGB = fillColor
+        .Fill.Transparency = 0
+        .Line.Visible = msoTrue
+        .Line.ForeColor.RGB = fillColor
+        .Line.Weight = 1
+    End With
+End Sub
+
+Private Sub AddWeeklyPptSectionBar(ByVal slide As Object)
+    Dim barShape As Object
+    Dim barText As Object
+
+    Set barShape = slide.Shapes.AddShape( _
+                       msoShapeRectangle, _
+                       12.84842, 29.62236, 760.1697, 23.44803)
+    barShape.Name = "WeeklyPptSectionBar"
+    With barShape
+        .Fill.Visible = msoTrue
+        .Fill.Solid
+        .Fill.ForeColor.RGB = RGB(127, 127, 127)
+        .Fill.Transparency = 0
+        .Line.Visible = msoTrue
+        .Line.ForeColor.RGB = RGB(127, 127, 127)
+        .Line.Weight = 1
+    End With
+    With barShape.TextFrame
+        .AutoSize = 0
+        .WordWrap = msoTrue
+        .VerticalAnchor = msoAnchorMiddle
+        .MarginLeft = 7.2
+        .MarginRight = 7.2
+        .MarginTop = 3.6
+        .MarginBottom = 3.6
+    End With
+
+    Set barText = barShape.TextFrame.TextRange
+    With barText
+        .Text = "Digital MFG 팀 Update"
+        .Font.Name = "Calibri"
+        .Font.Size = 16
+        .Font.Bold = msoTrue
+        .Font.Color.RGB = RGB(255, 255, 255)
+        .ParagraphFormat.Alignment = PPT_ALIGN_CENTER
+        .ParagraphFormat.Bullet.Visible = msoFalse
+    End With
+    barText.Characters(12, 9).Font.Name = "맑은 고딕"
+End Sub
+
+Private Sub AddWeeklyPptPeriodHeadings(ByVal slide As Object)
+    AddWeeklyPptPeriodHeading _
+        slide, _
+        "WeeklyPptPreviousPeriod", _
+        6.78646, 52.11292, 334.8887, 24.23441, _
+        "( 전주 중요 추진 업무 현황 ) ", _
+        "2000.01.01~2000.01.05", _
+        12
+
+    AddWeeklyPptPeriodHeading _
+        slide, _
+        "WeeklyPptNextPeriod", _
+        502.6909, 52.36205, 250.5733, 24.23441, _
+        "( 금주 주요 계획 )", _
+        " 2000.01.08~2000.01.12", _
+        10.5
+End Sub
+
+Private Sub AddWeeklyPptPeriodHeading(ByVal slide As Object, _
+                                      ByVal shapeName As String, _
+                                      ByVal shapeLeft As Single, _
+                                      ByVal shapeTop As Single, _
+                                      ByVal shapeWidth As Single, _
+                                      ByVal shapeHeight As Single, _
+                                      ByVal headingText As String, _
+                                      ByVal dateText As String, _
+                                      ByVal dateFontSize As Single)
+    Dim headingShape As Object
+    Dim fullText As String
+    Dim textRange As Object
+
+    fullText = headingText & dateText
+    Set headingShape = slide.Shapes.AddTextbox( _
+                           msoTextOrientationHorizontal, _
+                           shapeLeft, shapeTop, shapeWidth, shapeHeight)
+    headingShape.Name = shapeName
+    ConfigureWeeklyPptTransparentShape headingShape
+    With headingShape.TextFrame
+        .AutoSize = 0
+        .WordWrap = msoFalse
+        .VerticalAnchor = msoAnchorTop
+        .MarginLeft = 7.2
+        .MarginRight = 7.2
+        .MarginTop = 3.6
+        .MarginBottom = 3.6
+    End With
+
+    Set textRange = headingShape.TextFrame.TextRange
+    With textRange
+        .Text = fullText
+        .Font.Name = "맑은 고딕"
+        .Font.Bold = msoTrue
+        .ParagraphFormat.Alignment = PPT_ALIGN_LEFT
+        .ParagraphFormat.Bullet.Visible = msoFalse
+    End With
+    With textRange.Characters(1, Len(headingText)).Font
+        .Name = "맑은 고딕"
+        .Size = 14
+        .Bold = msoTrue
+        .Color.RGB = RGB(0, 32, 96)
+    End With
+    With textRange.Characters(Len(headingText) + 1, Len(dateText)).Font
+        .Name = "맑은 고딕"
+        .Size = dateFontSize
+        .Bold = msoTrue
+        .Color.RGB = RGB(0, 0, 0)
+    End With
+End Sub
+
+Private Sub AddWeeklyPptCurrentTable(ByVal slide As Object)
+    Dim tableShape As Object
+    Dim table As Object
+    Dim r As Long
+    Dim c As Long
+
+    Set tableShape = slide.Shapes.AddTable( _
+                         2, 3, 16.63512, 73.56583, 472.6729, 455.8427)
+    tableShape.Name = "WeeklyPptCurrentTable"
+    Set table = tableShape.Table
+
+    table.Columns(1).Width = 65.88307
+    table.Columns(2).Width = 331.5997
+    table.Columns(3).Width = 75.19016
+    table.Rows(1).Height = 20.4
+    table.Rows(2).Height = 435.4427
+
+    For r = 1 To 2
+        For c = 1 To 3
+            ConfigureWeeklyPptTableCell table.Cell(r, c)
+        Next c
+    Next r
+
+    table.Cell(1, 1).Merge table.Cell(1, 2)
+    ConfigureWeeklyPptTableCell table.Cell(1, 1)
+    ConfigureWeeklyPptTableCell table.Cell(1, 3)
+
+    SetWeeklyPptTableCellText table.Cell(1, 1), "업무 현황", _
+                              "맑은 고딕", 11, msoTrue, _
+                              PPT_ALIGN_CENTER, msoAnchorMiddle, 3.6
+    SetWeeklyPptTableCellText table.Cell(1, 3), "완료예상일", _
+                              "맑은 고딕", 11, msoTrue, _
+                              PPT_ALIGN_CENTER, msoAnchorMiddle, 3.6
+    SetWeeklyPptTableCellText table.Cell(2, 1), "GMES", _
+                              "맑은 고딕", 11, msoTrue, _
+                              PPT_ALIGN_CENTER, msoAnchorMiddle, 0.28346
+    SetWeeklyPptTableCellText table.Cell(2, 2), _
+                              BuildWeeklyPptBlankParagraphs(20), _
+                              "맑은 고딕", 11, msoFalse, _
+                              PPT_ALIGN_LEFT, msoAnchorTop, 0.28346
+    SetWeeklyPptTableCellText table.Cell(2, 3), _
+                              BuildWeeklyPptBlankParagraphs(19), _
+                              "맑은 고딕", 11, msoFalse, _
+                              PPT_ALIGN_CENTER, msoAnchorTop, 0.28346
+End Sub
+
+Private Sub ConfigureWeeklyPptTableCell(ByVal tableCell As Object)
+    Dim borderIndex As Variant
+
+    With tableCell.Shape.Fill
+        .Visible = msoTrue
+        .Solid
+        .ForeColor.RGB = RGB(255, 255, 255)
+        .Transparency = 0
+    End With
+
+    For Each borderIndex In Array( _
+            PPT_BORDER_TOP, PPT_BORDER_LEFT, _
+            PPT_BORDER_BOTTOM, PPT_BORDER_RIGHT)
+        With tableCell.Borders(CLng(borderIndex))
+            .Visible = msoTrue
+            .ForeColor.RGB = RGB(0, 0, 0)
+            .Weight = 1
+            .DashStyle = msoLineSolid
+        End With
+    Next borderIndex
+End Sub
+
+Private Sub SetWeeklyPptTableCellText(ByVal tableCell As Object, _
+                                      ByVal textValue As String, _
+                                      ByVal fontName As String, _
+                                      ByVal fontSize As Single, _
+                                      ByVal fontBold As Long, _
+                                      ByVal alignment As Long, _
+                                      ByVal verticalAnchor As Long, _
+                                      ByVal verticalMargin As Single)
+    With tableCell.Shape.TextFrame
+        .VerticalAnchor = verticalAnchor
+        .MarginLeft = 7.2
+        .MarginRight = 7.2
+        .MarginTop = verticalMargin
+        .MarginBottom = verticalMargin
+    End With
+
+    With tableCell.Shape.TextFrame.TextRange
+        .Text = textValue
+        .Font.Name = fontName
+        .Font.Size = fontSize
+        .Font.Bold = fontBold
+        .Font.Color.RGB = RGB(0, 0, 0)
+        .ParagraphFormat.Alignment = alignment
+        .ParagraphFormat.Bullet.Visible = msoFalse
+        .ParagraphFormat.SpaceBefore = 0
+        .ParagraphFormat.SpaceAfter = 0
+        .ParagraphFormat.SpaceWithin = 1
+    End With
+End Sub
+
+Private Function BuildWeeklyPptBlankParagraphs( _
+                     ByVal paragraphCount As Long) As String
+    Dim i As Long
+    Dim result As String
+
+    If paragraphCount < 1 Then paragraphCount = 1
+    result = " "
+    For i = 2 To paragraphCount
+        result = result & vbCr & " "
+    Next i
+    BuildWeeklyPptBlankParagraphs = result
+End Function
+
+Private Sub AddWeeklyPptPlanArea(ByVal slide As Object)
+    Dim planShape As Object
+    Dim planText As String
+    Dim headingIndex As Variant
+
+    Set planShape = slide.Shapes.AddShape( _
+                        msoShapeRectangle, _
+                        502.4265, 73.19197, 258.5454, 456.0357)
+    planShape.Name = "WeeklyPptPlanArea"
+    With planShape
+        .Fill.Visible = msoTrue
+        .Fill.Solid
+        .Fill.ForeColor.RGB = RGB(255, 255, 255)
+        .Fill.Transparency = 0
+        .Line.Visible = msoTrue
+        .Line.ForeColor.RGB = RGB(0, 0, 0)
+        .Line.Weight = 0.5
+    End With
+    With planShape.TextFrame
+        .AutoSize = 0
+        .WordWrap = msoTrue
+        .VerticalAnchor = msoAnchorTop
+        .MarginLeft = 7.2
+        .MarginRight = 7.2
+        .MarginTop = 3.6
+        .MarginBottom = 3.6
+    End With
+
+    planText = Join(Array( _
+                   "(개발 항목)", "", "", _
+                   "(유지보수 항목)", "", "", "", "", _
+                   "(기타 항목)", "", "", "", _
+                   "(이슈 사항)"), vbCr)
+    With planShape.TextFrame.TextRange
+        .Text = planText
+        .Font.Name = "맑은 고딕"
+        .Font.Size = 11
+        .Font.Bold = msoFalse
+        .Font.Color.RGB = RGB(0, 0, 0)
+        .ParagraphFormat.Alignment = PPT_ALIGN_LEFT
+        .ParagraphFormat.Bullet.Visible = msoFalse
+        .ParagraphFormat.SpaceBefore = 0
+        .ParagraphFormat.SpaceAfter = 0
+        .ParagraphFormat.SpaceWithin = 1.5
+    End With
+
+    For Each headingIndex In Array(1, 4, 9, 13)
+        With planShape.TextFrame.TextRange.Paragraphs(CLng(headingIndex)).Font
+            .Name = "맑은 고딕"
+            .Size = 11
+            .Bold = msoTrue
+            .Color.RGB = RGB(0, 0, 0)
+        End With
+    Next headingIndex
+End Sub
+
+Private Sub ConfigureWeeklyPptTransparentShape(ByVal shape As Object)
+    With shape
+        .Fill.Visible = msoFalse
+        .Line.Visible = msoFalse
+    End With
 End Sub
