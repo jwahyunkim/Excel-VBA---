@@ -32,7 +32,6 @@ Public Sub 주간보고PPT_버튼_생성()
 
     Set ws = ActiveSheet
     If ws.Name = CONFIG_SHEET_NAME Or _
-       ws.Name = REPORT_HISTORY_SHEET_NAME Or _
        ws.Name = WEEKLY_PPT_TEMPLATE_SHEET_NAME Then
         MsgBox "업무 시트에서 실행하세요.", vbExclamation
         Exit Sub
@@ -106,8 +105,6 @@ End Sub
 
 Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) As String
     Dim ws As Worksheet
-    Dim holidayDict As Object
-    Dim workdayDict As Object
     Dim currentItems As Collection
     Dim currentDates As Collection
     Dim currentLevels As Collection
@@ -155,7 +152,6 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
 
     Set ws = ActiveSheet
     If ws.Name = CONFIG_SHEET_NAME Or _
-       ws.Name = REPORT_HISTORY_SHEET_NAME Or _
        ws.Name = WEEKLY_PPT_TEMPLATE_SHEET_NAME Then
         Err.Raise vbObjectError + 7501, "GenerateWeeklyPptReport", "업무 시트에서 실행하세요."
     End If
@@ -186,8 +182,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     If pageMode = WEEKLY_REPORT_PAGE_MODE_CUSTOM Then
         LoadWeeklyReportCustomPageAssignments customPageAssignments
     End If
-    LoadHolidaySettings holidayDict, workdayDict
-    UpdateDevelopmentProgressStatuses ws, lastRow, holidayDict, workdayDict
+    UpdateWeeklyReportStatuses ws, lastRow
 
     For r = DATA_START_ROW To lastRow
         If HasTaskContent(ws, r) Then
