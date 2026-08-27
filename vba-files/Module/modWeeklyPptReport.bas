@@ -1,4 +1,4 @@
-﻿Attribute VB_Name = "modWeeklyPptReport"
+Attribute VB_Name = "modWeeklyPptReport"
 Option Explicit
 
 Private Const WEEKLY_PPT_TEMPLATE_SHEET_NAME As String = "WeeklyPptTemplate"
@@ -6,6 +6,7 @@ Private Const WEEKLY_PPT_OUTPUT_FOLDER As String = "주간보고"
 Private Const WEEKLY_PPT_FILE_PREFIX As String = "Digital MFG팀_주간보고_김좌현_"
 Private Const PPT_SAVE_AS_OPEN_XML_PRESENTATION As Long = 24
 Private Const WEEKLY_UNASSIGNED_MODULE As String = "모듈 미지정"
+Private Const WEEKLY_UNASSIGNED_PROGRAM As String = "프로그램 미지정"
 Private Const WEEKLY_PPT_SLIDE_WIDTH As Single = 780!
 Private Const WEEKLY_PPT_SLIDE_HEIGHT As Single = 540!
 Private Const PPT_LAYOUT_BLANK As Long = 12
@@ -161,9 +162,11 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim statusText As String
     Dim taskText As String
     Dim moduleText As String
+    Dim programText As String
     Dim ownerText As String
     Dim hierarchyPath As Variant
     Dim showOwnerNames As Boolean
+    Dim groupByProgram As Boolean
     Dim pageMode As String
     Dim overflowMode As String
     Dim pageIndex As Long
@@ -206,6 +209,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     EnsureConfigSheet
     SynchronizeTaskHierarchyModules ws, lastRow, False
     showOwnerNames = GetWeeklyReportShowOwnerFlag()
+    groupByProgram = GetWeeklyReportGroupByProgramFlag()
     pageMode = GetWeeklyReportPageMode()
     overflowMode = GetWeeklyReportOverflowMode()
     If pageMode = WEEKLY_REPORT_PAGE_MODE_CUSTOM Then
@@ -218,8 +222,10 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
             statusText = Trim$(CStr(ws.Cells(r, COL_WEEKLY_REPORT).Value2))
             taskText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_TASK).Value2))
             moduleText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_MODULE).Value2))
+            programText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_PROGRAM).Value2))
             ownerText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_OWNER).Value2))
             If Len(moduleText) = 0 Then moduleText = WEEKLY_UNASSIGNED_MODULE
+            If Len(programText) = 0 Then programText = WEEKLY_UNASSIGNED_PROGRAM
 
             If Len(taskText) > 0 And Not HasChildTask(ws, r, lastRow) Then
                 hierarchyPath = BuildWeeklyHierarchyPath(ws, r)
@@ -229,7 +235,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                             moduleText, _
                             taskText, 2, GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty), _
                             BuildInProgressEndDateText(ws.Cells(r, COL_PLAN_END).Value), _
-                            False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath)
+                            False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText)
 
                     Case UCase$(REPORT_STATUS_COMPLETED)
                         If IsCompletedInReportWeek(ws, r, currentWeekStart, currentWeekEnd) Then
@@ -237,7 +243,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                                 moduleText, _
                                 taskText, 1, GetWeeklySortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value), _
                                 BuildCompletedEndDateText(ws, r), _
-                                False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath)
+                                False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText)
                         End If
 
                     Case UCase$(REPORT_STATUS_PLANNED)
@@ -245,7 +251,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                             AddSortedWeeklyRow plannedRows, Array( _
                                 moduleText, _
                                 taskText, 3, GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty), "", _
-                                False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath)
+                                False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText)
                         End If
                 End Select
             End If
@@ -295,8 +301,10 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         Set currentLevels = New Collection
         Set plannedItems = New Collection
         BuildWeeklyGroupedCurrentItems _
-            pageCurrentRows, currentItems, currentDates, currentLevels, showOwnerNames
-        BuildWeeklyGroupedPlanItems pagePlannedRows, plannedItems, showOwnerNames
+            pageCurrentRows, currentItems, currentDates, currentLevels, _
+            showOwnerNames, groupByProgram
+        BuildWeeklyGroupedPlanItems _
+            pagePlannedRows, plannedItems, showOwnerNames, groupByProgram
 
         AppendWeeklyOutputPages _
             currentItems, currentDates, currentLevels, plannedItems, _
@@ -319,7 +327,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         Set slide = presentation.Slides(pageIndex)
         FillWeeklyReportPeriodText _
             slide, currentWeekStart, currentWeekEnd, nextWeekStart, nextWeekEnd
-        FillWeeklyReportCurrentTable slide, currentItems, currentDates, currentLevels
+        FillWeeklyReportCurrentTable _
+            slide, currentItems, currentDates, currentLevels, groupByProgram
         FillWeeklyReportPlanArea _
             slide, _
             plannedItems, _
@@ -438,16 +447,14 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
                                            ByVal items As Collection, _
                                            ByVal dates As Collection, _
                                            ByVal levels As Collection, _
-                                           ByVal showOwnerNames As Boolean)
+                                           ByVal showOwnerNames As Boolean, _
+                                           ByVal groupByProgram As Boolean)
     Dim moduleNames As Collection
     Dim moduleSeen As Object
     Dim rowItem As Variant
     Dim moduleName As Variant
-    Dim currentPath As Variant
-    Dim previousPath As Variant
-    Dim hierarchyOwners As Object
-    Dim sourceRow As Long
-    Dim maxSourceRow As Long
+    Dim programNames As Collection
+    Dim programName As Variant
 
     Set moduleNames = New Collection
     Set moduleSeen = CreateObject("Scripting.Dictionary")
@@ -468,30 +475,70 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
         dates.Add ""
         levels.Add 0
 
-        Set hierarchyOwners = BuildWeeklyHierarchyOwnerMap(rows, CStr(moduleName))
-        If IsArray(previousPath) Then Erase previousPath
-        previousPath = Empty
-        maxSourceRow = GetWeeklyMaxSourceRow(rows, CStr(moduleName))
-
-        For sourceRow = DATA_START_ROW To maxSourceRow
-            For Each rowItem In rows
-                If CLng(rowItem(8)) = sourceRow And _
-                   StrComp(GetWeeklyRowModuleName(rowItem), _
-                           CStr(moduleName), vbTextCompare) = 0 Then
-                    currentPath = rowItem(9)
-                    AppendWeeklyCurrentHierarchyPath _
-                        items, dates, levels, currentPath, previousPath, _
-                        CStr(rowItem(4)), hierarchyOwners, showOwnerNames
-                    previousPath = currentPath
-                    Exit For
-                End If
-            Next rowItem
-        Next sourceRow
+        If groupByProgram Then
+            Set programNames = CollectWeeklyProgramNames(rows, CStr(moduleName))
+            For Each programName In programNames
+                items.Add AppendWeeklyOwnerText( _
+                              CStr(programName), _
+                              GetWeeklyProgramOwnerText( _
+                                  rows, CStr(moduleName), CStr(programName)), _
+                              showOwnerNames)
+                dates.Add ""
+                levels.Add 1
+                AppendWeeklyCurrentRowsForGroup _
+                    rows, items, dates, levels, CStr(moduleName), _
+                    CStr(programName), True, 1, showOwnerNames
+            Next programName
+        Else
+            AppendWeeklyCurrentRowsForGroup _
+                rows, items, dates, levels, CStr(moduleName), _
+                "", False, 0, showOwnerNames
+        End If
     Next moduleName
 End Sub
 
+Private Sub AppendWeeklyCurrentRowsForGroup(ByVal rows As Collection, _
+                                            ByVal items As Collection, _
+                                            ByVal dates As Collection, _
+                                            ByVal levels As Collection, _
+                                            ByVal moduleName As String, _
+                                            ByVal programName As String, _
+                                            ByVal filterByProgram As Boolean, _
+                                            ByVal levelOffset As Long, _
+                                            ByVal showOwnerNames As Boolean)
+    Dim currentPath As Variant
+    Dim previousPath As Variant
+    Dim hierarchyOwners As Object
+    Dim rowItem As Variant
+    Dim sourceRow As Long
+    Dim maxSourceRow As Long
+
+    Set hierarchyOwners = BuildWeeklyHierarchyOwnerMap( _
+                              rows, moduleName, programName, filterByProgram)
+    previousPath = Empty
+    maxSourceRow = GetWeeklyMaxSourceRow( _
+                       rows, moduleName, programName, filterByProgram)
+
+    For sourceRow = DATA_START_ROW To maxSourceRow
+        For Each rowItem In rows
+            If CLng(rowItem(8)) = sourceRow And _
+               WeeklyRowMatchesGroup( _
+                   rowItem, moduleName, programName, filterByProgram) Then
+                currentPath = rowItem(9)
+                AppendWeeklyCurrentHierarchyPath _
+                    items, dates, levels, currentPath, previousPath, _
+                    CStr(rowItem(4)), hierarchyOwners, showOwnerNames, levelOffset
+                previousPath = currentPath
+                Exit For
+            End If
+        Next rowItem
+    Next sourceRow
+End Sub
+
 Private Function BuildWeeklyHierarchyOwnerMap(ByVal rows As Collection, _
-                                              ByVal moduleName As String) As Object
+                                              ByVal moduleName As String, _
+                                              ByVal programName As String, _
+                                              ByVal filterByProgram As Boolean) As Object
     Dim hierarchyOwners As Object
     Dim ownerSet As Object
     Dim rowItem As Variant
@@ -504,8 +551,8 @@ Private Function BuildWeeklyHierarchyOwnerMap(ByVal rows As Collection, _
     hierarchyOwners.CompareMode = vbTextCompare
 
     For Each rowItem In rows
-        If StrComp(GetWeeklyRowModuleName(rowItem), _
-                   moduleName, vbTextCompare) = 0 Then
+        If WeeklyRowMatchesGroup( _
+               rowItem, moduleName, programName, filterByProgram) Then
             itemPath = rowItem(9)
             ownerText = Trim$(CStr(rowItem(7)))
 
@@ -529,12 +576,14 @@ Private Function BuildWeeklyHierarchyOwnerMap(ByVal rows As Collection, _
 End Function
 
 Private Function GetWeeklyMaxSourceRow(ByVal rows As Collection, _
-                                       ByVal moduleName As String) As Long
+                                       ByVal moduleName As String, _
+                                       ByVal programName As String, _
+                                       ByVal filterByProgram As Boolean) As Long
     Dim rowItem As Variant
 
     For Each rowItem In rows
-        If StrComp(GetWeeklyRowModuleName(rowItem), _
-                   moduleName, vbTextCompare) = 0 Then
+        If WeeklyRowMatchesGroup( _
+               rowItem, moduleName, programName, filterByProgram) Then
             If CLng(rowItem(8)) > GetWeeklyMaxSourceRow Then
                 GetWeeklyMaxSourceRow = CLng(rowItem(8))
             End If
@@ -549,7 +598,8 @@ Private Sub AppendWeeklyCurrentHierarchyPath(ByVal items As Collection, _
                                              ByVal previousPath As Variant, _
                                              ByVal leafDateText As String, _
                                              ByVal hierarchyOwners As Object, _
-                                             ByVal showOwnerNames As Boolean)
+                                             ByVal showOwnerNames As Boolean, _
+                                             ByVal levelOffset As Long)
     Dim commonDepth As Long
     Dim depth As Long
     Dim pathToken As String
@@ -571,7 +621,7 @@ Private Sub AppendWeeklyCurrentHierarchyPath(ByVal items As Collection, _
 
         items.Add displayText
         dates.Add dateText
-        levels.Add depth + 1
+        levels.Add depth + 1 + levelOffset
     Next depth
 End Sub
 
@@ -732,6 +782,60 @@ Private Function GetWeeklyRowModuleName(ByVal rowItem As Variant) As String
     If Len(GetWeeklyRowModuleName) = 0 Then
         GetWeeklyRowModuleName = WEEKLY_UNASSIGNED_MODULE
     End If
+End Function
+
+Private Function GetWeeklyRowProgramName(ByVal rowItem As Variant) As String
+    GetWeeklyRowProgramName = Trim$(CStr(rowItem(10)))
+    If Len(GetWeeklyRowProgramName) = 0 Then
+        GetWeeklyRowProgramName = WEEKLY_UNASSIGNED_PROGRAM
+    End If
+End Function
+
+Private Function WeeklyRowMatchesGroup(ByVal rowItem As Variant, _
+                                       ByVal moduleName As String, _
+                                       ByVal programName As String, _
+                                       ByVal filterByProgram As Boolean) As Boolean
+    If StrComp(GetWeeklyRowModuleName(rowItem), _
+               moduleName, vbTextCompare) <> 0 Then Exit Function
+
+    If filterByProgram Then
+        If StrComp(GetWeeklyRowProgramName(rowItem), _
+                   programName, vbTextCompare) <> 0 Then Exit Function
+    End If
+
+    WeeklyRowMatchesGroup = True
+End Function
+
+Private Function CollectWeeklyProgramNames(ByVal rows As Collection, _
+                                           ByVal moduleName As String) As Collection
+    Dim result As Collection
+    Dim programSeen As Object
+    Dim rowItem As Variant
+    Dim programName As String
+    Dim sourceRow As Long
+    Dim maxSourceRow As Long
+
+    Set result = New Collection
+    Set programSeen = CreateObject("Scripting.Dictionary")
+    programSeen.CompareMode = vbTextCompare
+    maxSourceRow = GetWeeklyMaxSourceRow(rows, moduleName, "", False)
+
+    For sourceRow = DATA_START_ROW To maxSourceRow
+        For Each rowItem In rows
+            If CLng(rowItem(8)) = sourceRow And _
+               StrComp(GetWeeklyRowModuleName(rowItem), _
+                       moduleName, vbTextCompare) = 0 Then
+                programName = GetWeeklyRowProgramName(rowItem)
+                If Not programSeen.Exists(programName) Then
+                    programSeen.Add programName, True
+                    result.Add programName
+                End If
+                Exit For
+            End If
+        Next rowItem
+    Next sourceRow
+
+    Set CollectWeeklyProgramNames = result
 End Function
 
 Private Function GetWeeklyReportCurrentPageCapacity(ByVal slide As Object) As Long
@@ -996,18 +1100,16 @@ Private Function CountWeeklyPlanItemLines(ByVal itemText As String) As Long
 End Function
 
 Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
-                                         ByVal items As Collection, _
-                                         ByVal showOwnerNames As Boolean)
+                                        ByVal items As Collection, _
+                                        ByVal showOwnerNames As Boolean, _
+                                        ByVal groupByProgram As Boolean)
     Dim moduleNames As Collection
     Dim moduleSeen As Object
     Dim rowItem As Variant
     Dim moduleName As Variant
+    Dim programNames As Collection
+    Dim programName As Variant
     Dim blockText As String
-    Dim currentPath As Variant
-    Dim previousPath As Variant
-    Dim hierarchyOwners As Object
-    Dim sourceRow As Long
-    Dim maxSourceRow As Long
 
     Set moduleNames = New Collection
     Set moduleSeen = CreateObject("Scripting.Dictionary")
@@ -1024,37 +1126,73 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
         blockText = AppendWeeklyOwnerText( _
                         CStr(moduleName), _
                         GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
-        showOwnerNames)
+                        showOwnerNames)
 
-        Set hierarchyOwners = BuildWeeklyHierarchyOwnerMap(rows, CStr(moduleName))
-        If IsArray(previousPath) Then Erase previousPath
-        previousPath = Empty
-        maxSourceRow = GetWeeklyMaxSourceRow(rows, CStr(moduleName))
-
-        For sourceRow = DATA_START_ROW To maxSourceRow
-            For Each rowItem In rows
-                If CLng(rowItem(8)) = sourceRow And _
-                   StrComp(GetWeeklyRowModuleName(rowItem), _
-                           CStr(moduleName), vbTextCompare) = 0 Then
-                    currentPath = rowItem(9)
-                    AppendWeeklyPlanHierarchyPath _
-                        blockText, currentPath, previousPath, _
-                        hierarchyOwners, showOwnerNames
-                    previousPath = currentPath
-                    Exit For
-                End If
-            Next rowItem
-        Next sourceRow
+        If groupByProgram Then
+            Set programNames = CollectWeeklyProgramNames(rows, CStr(moduleName))
+            For Each programName In programNames
+                blockText = blockText & ChrW(11) & Space$(4) & _
+                            GetWeeklyReportProgramBullet() & " " & _
+                            AppendWeeklyOwnerText( _
+                                CStr(programName), _
+                                GetWeeklyProgramOwnerText( _
+                                    rows, CStr(moduleName), CStr(programName)), _
+                                showOwnerNames)
+                AppendWeeklyPlanRowsForGroup _
+                    rows, blockText, CStr(moduleName), CStr(programName), _
+                    True, 1, showOwnerNames
+            Next programName
+        Else
+            AppendWeeklyPlanRowsForGroup _
+                rows, blockText, CStr(moduleName), "", False, 0, showOwnerNames
+        End If
 
         items.Add blockText
     Next moduleName
+End Sub
+
+Private Sub AppendWeeklyPlanRowsForGroup(ByVal rows As Collection, _
+                                         ByRef blockText As String, _
+                                         ByVal moduleName As String, _
+                                         ByVal programName As String, _
+                                         ByVal filterByProgram As Boolean, _
+                                         ByVal levelOffset As Long, _
+                                         ByVal showOwnerNames As Boolean)
+    Dim currentPath As Variant
+    Dim previousPath As Variant
+    Dim hierarchyOwners As Object
+    Dim rowItem As Variant
+    Dim sourceRow As Long
+    Dim maxSourceRow As Long
+
+    Set hierarchyOwners = BuildWeeklyHierarchyOwnerMap( _
+                              rows, moduleName, programName, filterByProgram)
+    previousPath = Empty
+    maxSourceRow = GetWeeklyMaxSourceRow( _
+                       rows, moduleName, programName, filterByProgram)
+
+    For sourceRow = DATA_START_ROW To maxSourceRow
+        For Each rowItem In rows
+            If CLng(rowItem(8)) = sourceRow And _
+               WeeklyRowMatchesGroup( _
+                   rowItem, moduleName, programName, filterByProgram) Then
+                currentPath = rowItem(9)
+                AppendWeeklyPlanHierarchyPath _
+                    blockText, currentPath, previousPath, _
+                    hierarchyOwners, showOwnerNames, levelOffset
+                previousPath = currentPath
+                Exit For
+            End If
+        Next rowItem
+    Next sourceRow
 End Sub
 
 Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
                                           ByVal currentPath As Variant, _
                                           ByVal previousPath As Variant, _
                                           ByVal hierarchyOwners As Object, _
-                                          ByVal showOwnerNames As Boolean)
+                                          ByVal showOwnerNames As Boolean, _
+                                          ByVal levelOffset As Long)
     Dim commonDepth As Long
     Dim depth As Long
     Dim pathToken As String
@@ -1071,7 +1209,7 @@ Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
         End If
 
         blockText = blockText & ChrW(11) & _
-                    Space$(4 + (depth * 4)) & _
+                    Space$(4 + ((depth + levelOffset) * 4)) & _
                     GetWeeklyReportLevelBullet(depth + 1) & " " & _
                     displayText
     Next depth
@@ -1106,6 +1244,26 @@ Private Function GetWeeklyModuleOwnerText(ByVal rows As Collection, _
     Next rowItem
 
     GetWeeklyModuleOwnerText = JoinOwnerNameSet(ownerSeen, ", ")
+End Function
+
+Private Function GetWeeklyProgramOwnerText(ByVal rows As Collection, _
+                                           ByVal moduleName As String, _
+                                           ByVal programName As String) As String
+    Dim ownerSeen As Object
+    Dim rowItem As Variant
+    Dim ownerText As String
+
+    Set ownerSeen = CreateObject("Scripting.Dictionary")
+    ownerSeen.CompareMode = vbTextCompare
+
+    For Each rowItem In rows
+        If WeeklyRowMatchesGroup(rowItem, moduleName, programName, True) Then
+            ownerText = Trim$(CStr(rowItem(7)))
+            AddDistinctOwnerNames ownerSeen, ownerText
+        End If
+    Next rowItem
+
+    GetWeeklyProgramOwnerText = JoinOwnerNameSet(ownerSeen, ", ")
 End Function
 
 Private Function GetWeeklyReportFriday(ByVal targetDate As Date) As Date
@@ -1236,7 +1394,8 @@ End Sub
 Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
                                          ByVal items As Collection, _
                                          ByVal dateItems As Collection, _
-                                         ByVal levelItems As Collection)
+                                         ByVal levelItems As Collection, _
+                                         ByVal groupByProgram As Boolean)
     Dim tableShape As Object
     Dim table As Object
     Dim taskTextRange As Object
@@ -1278,9 +1437,15 @@ Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
         displayText = CStr(items(i))
 
         Set taskParagraph = taskTextRange.Paragraphs(i)
-        If levelValue > 0 Then
+        If groupByProgram And levelValue = 1 Then
+            displayText = Space$(4) & _
+                          GetWeeklyReportProgramBullet() & " " & _
+                          displayText
+            taskParagraph.ParagraphFormat.Bullet.Visible = False
+        ElseIf levelValue > 0 Then
             displayText = Space$(levelValue * 4) & _
-                          GetWeeklyReportLevelBullet(levelValue) & " " & _
+                          GetWeeklyReportLevelBullet( _
+                              levelValue - IIf(groupByProgram, 1, 0)) & " " & _
                           displayText
             taskParagraph.ParagraphFormat.Bullet.Visible = False
         Else
