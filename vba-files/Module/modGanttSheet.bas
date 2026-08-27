@@ -10,6 +10,7 @@ Public Sub SetupDataHeaders(ws As Worksheet)
     ws.Cells(HEADER_ROW, COL_NO).Value = "No."
     ws.Cells(HEADER_ROW, COL_LEVEL).Value = "Level"
     ws.Cells(HEADER_ROW, COL_MODULE).Value = "모듈"
+    ws.Cells(HEADER_ROW, COL_PROGRAM).Value = "프로그램"
     ws.Cells(HEADER_ROW, COL_TASK).Value = "내용"
     ws.Cells(HEADER_ROW, COL_OWNER).Value = "담당"
     ws.Cells(HEADER_ROW, COL_NOTE).Value = "비고"
@@ -79,6 +80,10 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MODULE).Value)) <> "모듈" Then
         ws.Columns(COL_MODULE).Insert Shift:=xlToRight
+    End If
+
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_PROGRAM).Value)) <> "프로그램" Then
+        ws.Columns(COL_PROGRAM).Insert Shift:=xlToRight
     End If
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_OWNER).Value)) <> "담당" Then
@@ -929,6 +934,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_LEVEL).ColumnWidth = 7
     ws.Columns(COL_TASK).WrapText = False
     ws.Columns(COL_MODULE).ColumnWidth = 14
+    ws.Columns(COL_PROGRAM).ColumnWidth = 14
     ws.Columns(COL_TASK).AutoFit
     ws.Columns(COL_OWNER).ColumnWidth = 12
     ws.Columns(COL_NOTE).ColumnWidth = 4.5
