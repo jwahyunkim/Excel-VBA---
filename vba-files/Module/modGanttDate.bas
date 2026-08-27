@@ -9,7 +9,7 @@ Public Function GetLastDataRow(ws As Worksheet) As Long
 
     lastRow = HEADER_ROW
 
-    For Each colAddr In Array(COL_LEVEL, COL_TASK, COL_NOTE, COL_PLAN_START, COL_PLAN_END, COL_ACTUAL_START, COL_ACTUAL_END, COL_MANUAL_STATUS, COL_WEEKLY_REPORT, COL_DEV_PROGRESS)
+    For Each colAddr In Array(COL_LEVEL, COL_TASK, COL_NOTE, COL_PLAN_START, COL_PLAN_END, COL_ACTUAL_START, COL_ACTUAL_END, COL_MANUAL_STATUS, COL_WEEKLY_REPORT)
         colLastRow = ws.Cells(ws.Rows.Count, CStr(colAddr)).End(xlUp).Row
         If colLastRow > lastRow Then lastRow = colLastRow
     Next colAddr
@@ -138,7 +138,6 @@ Public Function HasAnyTaskInput(ws As Worksheet, ByVal rowNum As Long) As Boolea
         Len(Trim$(CStr(ws.Cells(rowNum, COL_NOTE).Value))) > 0 Or _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value))) > 0 Or _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value))) > 0 Or _
-        Len(Trim$(CStr(ws.Cells(rowNum, COL_DEV_PROGRESS).Value))) > 0 Or _
         HasAnyTaskDate(ws, rowNum)
 End Function
 

@@ -222,9 +222,6 @@ Public Sub 버튼_생성_선택()
         "초기화", _
         "항목 숨김", _
         "개체삽입", _
-        "개인 보고", _
-        "팀 보고", _
-        "모듈 보고", _
         "주간 PPT")
 
     setupSheet.Range("A2").Value = "버튼"
@@ -298,8 +295,8 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     Dim setupSheet As Worksheet
     Dim targetSheet As Worksheet
     Dim targetSheetName As String
-    Dim selectedIndexes(1 To 10) As Long
-    Dim selectedOrders(1 To 10) As Long
+    Dim selectedIndexes(1 To 7) As Long
+    Dim selectedOrders(1 To 7) As Long
     Dim selectedCount As Long
     Dim optionIndex As Long
     Dim optionOrder As Long
@@ -313,7 +310,7 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     targetSheetName = CStr(setupSheet.Range("Z1").Value2)
     Set targetSheet = ThisWorkbook.Worksheets(targetSheetName)
 
-    For optionIndex = 1 To 10
+    For optionIndex = 1 To 7
         If IsSetupOptionChecked(setupSheet, optionIndex) Then
             optionOrder = GetSetupOptionOrder(setupSheet, optionIndex)
             If optionOrder < 1 Then
@@ -402,12 +399,6 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 6
             CreateVersionButton ws, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", buttonOrder, 72
         Case 7
-            CreateVersionButton ws, "btnPersonalDevReport", "개인 보고", "개인개발보고_텍스트생성", buttonOrder, 72
-        Case 8
-            CreateVersionButton ws, "btnTeamDevReport", "팀 보고", "팀개발보고_텍스트생성", buttonOrder, 72
-        Case 9
-            CreateVersionButton ws, "btnModuleDevReport", "모듈 보고", "모듈개발보고_텍스트생성", buttonOrder, 72
-        Case 10
             CreateVersionButton ws, "btnWeeklyPptReport", "주간 PPT", "주간보고PPT_생성", buttonOrder, 72
     End Select
 End Sub
@@ -555,7 +546,7 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
     targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
                       COL_PROGRESS & clearLastRow).ClearContents
     targetSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
-                      COL_DEV_PROGRESS & clearLastRow).ClearContents
+                      COL_WEEKLY_REPORT & clearLastRow).ClearContents
 
     If sourceLastRow >= DATA_START_ROW Then
         targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
@@ -564,9 +555,9 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
                               COL_PROGRESS & sourceLastRow).Value2
 
         targetSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
-                          COL_DEV_PROGRESS & sourceLastRow).Value2 = _
+                          COL_WEEKLY_REPORT & sourceLastRow).Value2 = _
             sourceSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
-                              COL_DEV_PROGRESS & sourceLastRow).Value2
+                              COL_WEEKLY_REPORT & sourceLastRow).Value2
 
         For rowNum = DATA_START_ROW To sourceLastRow
             If CStr(targetSheet.Cells(rowNum, COL_NOTE).Value2) = ChrW(&H25A0) Then
@@ -777,7 +768,7 @@ Private Function GetMigrationLastRow(ByVal ws As Worksheet) As Long
     Dim lastRow As Long
 
     On Error Resume Next
-    Set lastCell = ws.Range(COL_LEVEL & ":" & COL_DEV_PROGRESS).Find( _
+    Set lastCell = ws.Range(COL_LEVEL & ":" & COL_WEEKLY_REPORT).Find( _
         What:="*", _
         After:=ws.Cells(1, ws.Range(COL_LEVEL & "1").Column), _
         LookIn:=xlFormulas, _
@@ -832,7 +823,6 @@ End Function
 
 Private Function IsTaskSheet(ByVal ws As Worksheet) As Boolean
     IsTaskSheet = (StrComp(ws.Name, CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
-                   StrComp(ws.Name, REPORT_HISTORY_SHEET_NAME, vbTextCompare) <> 0 And _
                    StrComp(ws.Name, "WeeklyPptTemplate", vbTextCompare) <> 0 And _
                    StrComp(ws.Name, BUTTON_SETUP_SHEET_NAME, vbTextCompare) <> 0)
 End Function
