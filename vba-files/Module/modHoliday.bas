@@ -1,4 +1,4 @@
-﻿Attribute VB_Name = "modHoliday"
+Attribute VB_Name = "modHoliday"
 Option Explicit
 
 Public Sub EnsureConfigSheet()
@@ -16,9 +16,11 @@ Public Sub EnsureConfigSheet()
     Dim rngWeeklyReportOwner As Range
     Dim rngWeeklyReportPageMode As Range
     Dim rngWeeklyReportOverflowMode As Range
+    Dim rngWeeklyReportProgramGroup As Range
     Dim rngWeeklyReportBullets As Range
     Dim rngWeeklyCustomPageNumbers As Range
     Dim legacyTaskMaxLength As Variant
+    Dim migrationRow As Long
 
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
@@ -37,6 +39,15 @@ Public Sub EnsureConfigSheet()
     If ws Is Nothing Then
         Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
         ws.Name = CONFIG_SHEET_NAME
+    End If
+
+    If Trim$(CStr(ws.Range("O5").Value2)) = "커스텀 페이지 번호" Then
+        For migrationRow = 200 To 6 Step -1
+            ws.Range("O" & CStr(migrationRow + 1) & ":P" & _
+                     CStr(migrationRow + 1)).Value2 = _
+                ws.Range("O" & CStr(migrationRow) & ":P" & _
+                         CStr(migrationRow)).Value2
+        Next migrationRow
     End If
 
     ws.Range(HOLIDAY_COL_DATE & HOLIDAY_HEADER_ROW).Value = "날짜"
@@ -69,11 +80,13 @@ Public Sub EnsureConfigSheet()
     ws.Range(WEEKLY_REPORT_OWNER_LABEL_CELL).Value = "담당자 이름 출력"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_LABEL_CELL).Value = "페이지 출력 모드"
     ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_LABEL_CELL).Value = "내용 넘침 처리"
+    ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_LABEL_CELL).Value = "프로그램별"
     ws.Range(WEEKLY_REPORT_BULLET_TITLE_CELL).Value = "주간보고 글머리 기호"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_LABEL_CELL).Value = "Level 1"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_LABEL_CELL).Value = "Level 2"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_LABEL_CELL).Value = "Level 3"
     ws.Range(WEEKLY_REPORT_BULLET_MODULE_LABEL_CELL).Value = "모듈"
+    ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_LABEL_CELL).Value = "프로그램"
     ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_HEADER_CELL).Value = "커스텀 페이지 번호"
     ws.Range(WEEKLY_REPORT_CUSTOM_MODULE_HEADER_CELL).Value = "모듈명"
     ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "숨김 제외 No."
@@ -98,6 +111,8 @@ Public Sub EnsureConfigSheet()
         ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_ALL
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).Value = "N"
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value = ChrW(&H2022)
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_VALUE_CELL).Value)) = "" Then _
@@ -106,6 +121,8 @@ Public Sub EnsureConfigSheet()
         ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL).Value = ChrW(&HB7)
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_MODULE_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_BULLET_MODULE_VALUE_CELL).Value = ChrW(&H2022)
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL).Value = "-"
 
 
     ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
@@ -143,13 +160,13 @@ Public Sub EnsureConfigSheet()
     ws.Range("I8:J10").Borders.LineStyle = xlContinuous
     ws.Range("O1:P1").Font.Bold = True
     ws.Range("O1:P1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O1:P4").Borders.LineStyle = xlContinuous
-    ws.Range("O5:P5").Font.Bold = True
-    ws.Range("O5:P5").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O5:P" & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).Borders.LineStyle = xlContinuous
+    ws.Range("O1:P5").Borders.LineStyle = xlContinuous
+    ws.Range("O6:P6").Font.Bold = True
+    ws.Range("O6:P6").Interior.Color = RGB(252, 228, 214)
+    ws.Range("O6:P" & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).Borders.LineStyle = xlContinuous
     ws.Range("R1:S1").Font.Bold = True
     ws.Range("R1:S1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("R1:S5").Borders.LineStyle = xlContinuous
+    ws.Range("R1:S6").Borders.LineStyle = xlContinuous
 
     ws.Range("F2:G2").Borders.LineStyle = xlContinuous
     ws.Range("I2:J5").Borders.LineStyle = xlContinuous
@@ -168,8 +185,9 @@ Public Sub EnsureConfigSheet()
     ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).NumberFormat = "General"
+    ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & _
-             WEEKLY_REPORT_BULLET_MODULE_VALUE_CELL).NumberFormat = "General"
+             WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
              WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).NumberFormat = "0"
 
@@ -186,9 +204,10 @@ Public Sub EnsureConfigSheet()
     Set rngWeeklyReportOwner = ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL)
     Set rngWeeklyReportPageMode = ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL)
     Set rngWeeklyReportOverflowMode = ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL)
+    Set rngWeeklyReportProgramGroup = ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL)
     Set rngWeeklyReportBullets = ws.Range( _
         WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & _
-        WEEKLY_REPORT_BULLET_MODULE_VALUE_CELL)
+        WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL)
     Set rngWeeklyCustomPageNumbers = ws.Range( _
         WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
         WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW))
@@ -206,6 +225,7 @@ Public Sub EnsureConfigSheet()
     rngWeeklyReportOwner.Validation.Delete
     rngWeeklyReportPageMode.Validation.Delete
     rngWeeklyReportOverflowMode.Validation.Delete
+    rngWeeklyReportProgramGroup.Validation.Delete
     rngWeeklyReportBullets.Validation.Delete
     rngWeeklyCustomPageNumbers.Validation.Delete
     On Error GoTo 0
@@ -331,6 +351,18 @@ Public Sub EnsureConfigSheet()
         "영역을 계속 늘리거나 템플릿 수용량에 맞춰 새 슬라이드로 나눌 수 있습니다."
     rngWeeklyReportOverflowMode.Validation.ErrorTitle = "설정값 오류"
     rngWeeklyReportOverflowMode.Validation.ErrorMessage = "목록에 있는 내용 넘침 처리 모드만 선택할 수 있습니다."
+
+    rngWeeklyReportProgramGroup.Validation.Add Type:=xlValidateList, _
+                                                AlertStyle:=xlValidAlertStop, _
+                                                Operator:=xlBetween, _
+                                                Formula1:="Y,N"
+    rngWeeklyReportProgramGroup.Validation.IgnoreBlank = False
+    rngWeeklyReportProgramGroup.Validation.InCellDropdown = True
+    rngWeeklyReportProgramGroup.Validation.InputTitle = "프로그램별 계층 출력"
+    rngWeeklyReportProgramGroup.Validation.InputMessage = _
+        "모듈 아래에 프로그램 단계를 추가하려면 Y, 기존 형식을 유지하려면 N을 선택하세요."
+    rngWeeklyReportProgramGroup.Validation.ErrorTitle = "설정값 오류"
+    rngWeeklyReportProgramGroup.Validation.ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
 
     rngWeeklyReportBullets.Validation.Add Type:=xlValidateTextLength, _
                                            AlertStyle:=xlValidAlertStop, _
@@ -480,7 +512,8 @@ Public Function GetWeeklyReportLevelBullet(ByVal taskLevel As Long) As String
     Dim ws As Worksheet
     Dim bulletText As String
 
-    If taskLevel < 1 Or taskLevel > 3 Then taskLevel = 1
+    If taskLevel < 1 Then taskLevel = 1
+    If taskLevel > 3 Then taskLevel = 3
 
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
@@ -500,6 +533,20 @@ Public Function GetWeeklyReportLevelBullet(ByVal taskLevel As Long) As String
     GetWeeklyReportLevelBullet = bulletText
 End Function
 
+Public Function GetWeeklyReportGroupByProgramFlag() As Boolean
+    Dim ws As Worksheet
+    Dim settingValue As String
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    settingValue = UCase$(Trim$(CStr( _
+                       ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).Value2)))
+    GetWeeklyReportGroupByProgramFlag = (settingValue = "Y")
+End Function
+
 Public Function GetWeeklyReportModuleBullet() As String
     Dim ws As Worksheet
     Dim bulletText As String
@@ -513,6 +560,21 @@ Public Function GetWeeklyReportModuleBullet() As String
 
     If Len(bulletText) = 0 Then bulletText = ChrW(&H2022)
     GetWeeklyReportModuleBullet = bulletText
+End Function
+
+Public Function GetWeeklyReportProgramBullet() As String
+    Dim ws As Worksheet
+    Dim bulletText As String
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If Not ws Is Nothing Then
+        bulletText = Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL).Value2))
+    End If
+
+    If Len(bulletText) = 0 Then bulletText = "-"
+    GetWeeklyReportProgramBullet = bulletText
 End Function
 
 Public Function GetWeeklyReportShowOwnerFlag() As Boolean
