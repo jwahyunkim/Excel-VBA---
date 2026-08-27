@@ -22,7 +22,6 @@ Public Sub SetupDataHeaders(ws As Worksheet)
     ws.Cells(HEADER_ROW, COL_MANUAL_PROGRESS).Value = "진행률 수동"
     ws.Cells(HEADER_ROW, COL_MANUAL_STATUS).Value = "상태 수동"
     ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value = "주간보고"
-    ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value = "개발진행"
     ws.Cells(HEADER_ROW, COL_PLAN_DAYS).Value = "계획일수"
     ws.Cells(HEADER_ROW, COL_ACTUAL_DAYS).Value = "실소요일수"
     ws.Cells(HEADER_ROW, COL_STATUS).Value = "상태"
@@ -91,16 +90,13 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
     ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & ws.Rows.Count).Validation.Delete
     On Error GoTo 0
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" And _
-       Trim$(CStr(ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value)) <> "개발진행" Then
-        ws.Range(COL_WEEKLY_REPORT & ":" & COL_DEV_PROGRESS).EntireColumn.Insert Shift:=xlToRight
-    Else
-        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" Then
-            ws.Columns(COL_WEEKLY_REPORT).Insert Shift:=xlToRight
-        End If
-        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_DEV_PROGRESS).Value)) <> "개발진행" Then
-            ws.Columns(COL_DEV_PROGRESS).Insert Shift:=xlToRight
-        End If
+    ' Remove the retired development-report column from existing workbooks.
+    If Trim$(CStr(ws.Cells(HEADER_ROW, 17).Value)) = "개발진행" Then
+        ws.Columns(17).Delete Shift:=xlToLeft
+    End If
+
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" Then
+        ws.Columns(COL_WEEKLY_REPORT).Insert Shift:=xlToRight
     End If
 
     lastMigrationRow = Application.Max( _
@@ -113,12 +109,10 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
         If manualStatusText = STATUS_WEEKLY_REPORT Then
             ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_IN_PROGRESS
             ws.Cells(r, COL_MANUAL_STATUS).ClearContents
-        ElseIf manualStatusText = STATUS_DEV_PROGRESS Or manualStatusText = "개발 진행" Then
-            ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_IN_PROGRESS
+        ElseIf manualStatusText = "개발진행" Or manualStatusText = "개발 진행" Then
             ws.Cells(r, COL_MANUAL_STATUS).ClearContents
         End If
         NormalizeReportStatusCell ws.Cells(r, COL_WEEKLY_REPORT)
-        NormalizeReportStatusCell ws.Cells(r, COL_DEV_PROGRESS)
     Next r
 
     Set targetRange = ws.Range(COL_NO & HEADER_ROW & ":" & ws.Cells(HEADER_ROW, ws.Columns.Count).Address(False, False))
@@ -289,12 +283,9 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
     End With
 End Sub
 
-Public Sub UpdateDevelopmentProgressStatuses(ByVal ws As Worksheet, _
-                                             ByVal lastRow As Long, _
-                                             ByVal holidayDict As Object, _
-                                             ByVal workdayDict As Object)
+Public Sub UpdateWeeklyReportStatuses(ByVal ws As Worksheet, _
+                                      ByVal lastRow As Long)
     Dim r As Long
-    Dim statusText As String
     Dim actualStart As Variant
     Dim actualEnd As Variant
 
@@ -302,27 +293,17 @@ Public Sub UpdateDevelopmentProgressStatuses(ByVal ws As Worksheet, _
 
     For r = DATA_START_ROW To lastRow
         If HasTaskContent(ws, r) Then
-            If HasChildTask(ws, r, lastRow) Then
-                statusText = Trim$(CStr(ws.Cells(r, COL_STATUS).Value2))
-            Else
-                statusText = GetTaskStatus(ws, r, holidayDict, workdayDict)
-            End If
-
             actualStart = ws.Cells(r, COL_ACTUAL_START).Value
             actualEnd = ws.Cells(r, COL_ACTUAL_END).Value
 
             If IsDate(actualEnd) And CLng(CDate(actualEnd)) <= CLng(Date) Then
-                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_COMPLETED
                 ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_COMPLETED
             ElseIf IsDate(actualStart) And CLng(CDate(actualStart)) <= CLng(Date) Then
-                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_IN_PROGRESS
                 ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_IN_PROGRESS
             Else
-                ws.Cells(r, COL_DEV_PROGRESS).Value = REPORT_STATUS_PLANNED
                 ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_PLANNED
             End If
         Else
-            ws.Cells(r, COL_DEV_PROGRESS).ClearContents
             ws.Cells(r, COL_WEEKLY_REPORT).ClearContents
         End If
     Next r
@@ -343,7 +324,7 @@ Public Sub DrawTaskBars(ws As Worksheet, ByVal lastRow As Long, ByVal chartStart
     Dim markerText As String
 
     ApplyHierarchySummaryValues ws, lastRow, holidayDict, workdayDict
-    UpdateDevelopmentProgressStatuses ws, lastRow, holidayDict, workdayDict
+    UpdateWeeklyReportStatuses ws, lastRow
 
     startCol = ws.Range(COL_GANTT_START & "1").Column
 
@@ -960,7 +941,6 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_MANUAL_PROGRESS).ColumnWidth = 11
     ws.Columns(COL_MANUAL_STATUS).ColumnWidth = 11
     ws.Columns(COL_WEEKLY_REPORT).ColumnWidth = 12
-    ws.Columns(COL_DEV_PROGRESS).ColumnWidth = 12
     ws.Columns(COL_PLAN_DAYS).ColumnWidth = 9
     ws.Columns(COL_ACTUAL_DAYS).ColumnWidth = 10
     ws.Columns(COL_STATUS).ColumnWidth = 15
@@ -986,7 +966,7 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
     Dim changedModuleOrLevel As Boolean
 
     If ws Is Nothing Or Target Is Nothing Then Exit Sub
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = REPORT_HISTORY_SHEET_NAME Then Exit Sub
+    If ws.Name = CONFIG_SHEET_NAME Then Exit Sub
 
     Set watchedRange = Union( _
         ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
@@ -1278,7 +1258,6 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     Dim rngProgress As Range
     Dim rngManualProgress As Range
     Dim rngWeeklyReport As Range
-    Dim rngDevProgress As Range
     
     lastSheetRow = ws.Rows.Count
 
@@ -1372,11 +1351,9 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     rngManualProgress.Validation.ErrorMessage = "Y 또는 N만 입력할 수 있습니다."
     
     Set rngWeeklyReport = ws.Range(COL_WEEKLY_REPORT & DATA_START_ROW & ":" & COL_WEEKLY_REPORT & lastSheetRow)
-    Set rngDevProgress = ws.Range(COL_DEV_PROGRESS & DATA_START_ROW & ":" & COL_DEV_PROGRESS & lastSheetRow)
 
     On Error Resume Next
     rngWeeklyReport.Validation.Delete
-    rngDevProgress.Validation.Delete
     On Error GoTo 0
 
     rngWeeklyReport.Validation.Add Type:=xlValidateList, _
@@ -1390,16 +1367,6 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     rngWeeklyReport.Validation.ErrorTitle = "입력 오류"
     rngWeeklyReport.Validation.ErrorMessage = "Planned, In Progress, Completed만 입력할 수 있습니다."
 
-    rngDevProgress.Validation.Add Type:=xlValidateList, _
-                                  AlertStyle:=xlValidAlertStop, _
-                                  Operator:=xlBetween, _
-                                  Formula1:=REPORT_STATUS_PLANNED & "," & REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
-    rngDevProgress.Validation.IgnoreBlank = True
-    rngDevProgress.Validation.InCellDropdown = True
-    rngDevProgress.Validation.InputTitle = "개발진행 상태"
-    rngDevProgress.Validation.InputMessage = "Planned, In Progress, Completed 중 자동 계산됩니다."
-    rngDevProgress.Validation.ErrorTitle = "입력 오류"
-    rngDevProgress.Validation.ErrorMessage = "Planned, In Progress, Completed만 입력할 수 있습니다."
     ApplyManualStatusValidation ws, lastSheetRow
 End Sub
 
@@ -1539,7 +1506,7 @@ Public Sub ApplyDisplayTaskRowFilter(ws As Worksheet, ByVal lastRow As Long, ByV
 
             If showRow Then
                 Select Case reportOnlyFlag
-                    Case STATUS_WEEKLY_REPORT, STATUS_DEV_PROGRESS
+                    Case STATUS_WEEKLY_REPORT
                         showRow = IsTaskManualStatus(ws, r, reportOnlyFlag)
                     Case REPORT_FILTER_EMPTY
                         showRow = IsTaskManualStatusEmpty(ws, r)
@@ -1567,8 +1534,6 @@ Private Function IsTaskManualStatus(ws As Worksheet, ByVal rowNum As Long, ByVal
     Select Case statusText
         Case STATUS_WEEKLY_REPORT
             IsTaskManualStatus = HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value)
-        Case STATUS_DEV_PROGRESS
-            IsTaskManualStatus = HasReportStatusValue(ws.Cells(rowNum, COL_DEV_PROGRESS).Value)
         Case Else
             IsTaskManualStatus = (Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value)) = statusText)
     End Select
@@ -1576,8 +1541,7 @@ End Function
 
 Private Function IsTaskManualStatusEmpty(ws As Worksheet, ByVal rowNum As Long) As Boolean
     IsTaskManualStatusEmpty = _
-        Not HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value) And _
-        Not HasReportStatusValue(ws.Cells(rowNum, COL_DEV_PROGRESS).Value)
+        Not HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value)
 End Function
 
 Private Function HasReportStatusValue(ByVal statusValue As Variant) As Boolean

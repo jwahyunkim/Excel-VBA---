@@ -54,8 +54,6 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
         GoTo SafeExit
     End If
 
-    If Sh.Name = REPORT_HISTORY_SHEET_NAME Then Exit Sub
-
     Application.enableEvents = False
     HandleTaskHierarchyChange Sh, Target
 
