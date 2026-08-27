@@ -25,6 +25,7 @@ Public Sub 주간보고PPT_버튼_생성()
     Dim btn As Shape
     Dim anchorCell As Range
     Dim buttonName As String
+    Dim buttonLeft As Double
     Dim lastRow As Long
     Dim wasProtected As Boolean
 
@@ -46,9 +47,10 @@ Public Sub 주간보고PPT_버튼_생성()
     On Error GoTo EH
 
     Set anchorCell = ws.Range("B2")
+    buttonLeft = GetWeeklyPptButtonLeft(ws, anchorCell)
     Set btn = ws.Shapes.AddShape( _
         msoShapeRoundedRectangle, _
-        anchorCell.Left + (8 * 80), _
+        buttonLeft, _
         anchorCell.Top + anchorCell.Height - 22, _
         72, _
         22)
@@ -102,6 +104,33 @@ EH:
     End If
     MsgBox "버튼을 생성할 수 없습니다: " & Err.Description, vbExclamation
 End Sub
+
+Private Function GetWeeklyPptButtonLeft(ByVal ws As Worksheet, _
+                                        ByVal anchorCell As Range) As Double
+    Dim managedButtonNames As Variant
+    Dim buttonName As Variant
+    Dim existingButton As Shape
+    Dim nextButtonLeft As Double
+
+    GetWeeklyPptButtonLeft = anchorCell.Left
+    managedButtonNames = Array( _
+        "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
+        "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert")
+
+    For Each buttonName In managedButtonNames
+        Set existingButton = Nothing
+        On Error Resume Next
+        Set existingButton = ws.Shapes(CStr(buttonName))
+        On Error GoTo 0
+
+        If Not existingButton Is Nothing Then
+            nextButtonLeft = existingButton.Left + 80
+            If nextButtonLeft > GetWeeklyPptButtonLeft Then
+                GetWeeklyPptButtonLeft = nextButtonLeft
+            End If
+        End If
+    Next buttonName
+End Function
 
 Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) As String
     Dim ws As Worksheet

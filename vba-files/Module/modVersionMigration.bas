@@ -532,6 +532,7 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
     Dim clearLastRow As Long
     Dim rowNum As Long
     Dim sourceOle As OLEObject
+    Dim sourceHasProgramColumn As Boolean
 
     sourceLastRow = GetMigrationLastRow(sourceSheet)
     targetLastRow = GetMigrationLastRow(targetSheet)
@@ -542,6 +543,8 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
     UnprotectTaskSheet targetSheet
     DeleteTargetPptObjects targetSheet
     ClearTargetPptIcons targetSheet, clearLastRow
+    sourceHasProgramColumn = _
+        (Trim$(CStr(sourceSheet.Cells(HEADER_ROW, COL_PROGRAM).Value2)) = "프로그램")
 
     targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
                       COL_PROGRESS & clearLastRow).ClearContents
@@ -549,15 +552,29 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
                       COL_WEEKLY_REPORT & clearLastRow).ClearContents
 
     If sourceLastRow >= DATA_START_ROW Then
-        targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
-                          COL_PROGRESS & sourceLastRow).Value2 = _
-            sourceSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
-                              COL_PROGRESS & sourceLastRow).Value2
+        If sourceHasProgramColumn Then
+            targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
+                              COL_PROGRESS & sourceLastRow).Value2 = _
+                sourceSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
+                                  COL_PROGRESS & sourceLastRow).Value2
 
-        targetSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
-                          COL_WEEKLY_REPORT & sourceLastRow).Value2 = _
-            sourceSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
-                              COL_WEEKLY_REPORT & sourceLastRow).Value2
+            targetSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
+                              COL_WEEKLY_REPORT & sourceLastRow).Value2 = _
+                sourceSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
+                                  COL_WEEKLY_REPORT & sourceLastRow).Value2
+        Else
+            targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
+                              COL_MODULE & sourceLastRow).Value2 = _
+                sourceSheet.Range("C" & DATA_START_ROW & ":D" & sourceLastRow).Value2
+
+            targetSheet.Range(COL_TASK & DATA_START_ROW & ":" & _
+                              COL_PROGRESS & sourceLastRow).Value2 = _
+                sourceSheet.Range("E" & DATA_START_ROW & ":L" & sourceLastRow).Value2
+
+            targetSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
+                              COL_WEEKLY_REPORT & sourceLastRow).Value2 = _
+                sourceSheet.Range("N" & DATA_START_ROW & ":P" & sourceLastRow).Value2
+        End If
 
         For rowNum = DATA_START_ROW To sourceLastRow
             If CStr(targetSheet.Cells(rowNum, COL_NOTE).Value2) = ChrW(&H25A0) Then
