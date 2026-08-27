@@ -13,13 +13,21 @@ Public Sub EnsureConfigSheet()
     Dim rngDisplayGanttOnly As Range
     Dim rngDisplayReportOnly As Range
     Dim rngTaskMaxLength As Range
-    Dim rngWeeklyReportOwner As Range
+    Dim rngWeeklyReportModuleOwner As Range
+    Dim rngWeeklyReportProgramOwner As Range
+    Dim rngWeeklyReportTaskOwner As Range
+    Dim rngWeeklyReportTaskOwnerLevel As Range
     Dim rngWeeklyReportPageMode As Range
     Dim rngWeeklyReportOverflowMode As Range
     Dim rngWeeklyReportProgramGroup As Range
     Dim rngWeeklyReportBullets As Range
     Dim rngWeeklyCustomPageNumbers As Range
     Dim legacyTaskMaxLength As Variant
+    Dim legacyWeeklyOwnerValue As String
+    Dim legacyWeeklyPageMode As String
+    Dim legacyWeeklyOverflowMode As String
+    Dim legacyWeeklyProgramGroup As String
+    Dim migrateWeeklyOwnerSettings As Boolean
     Dim migrationRow As Long
 
     On Error Resume Next
@@ -41,8 +49,33 @@ Public Sub EnsureConfigSheet()
         ws.Name = CONFIG_SHEET_NAME
     End If
 
+    migrateWeeklyOwnerSettings = _
+        (Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value2)) <> "모듈")
+    If migrateWeeklyOwnerSettings Then
+        legacyWeeklyOwnerValue = UCase$(Trim$(CStr(ws.Range("P2").Value2)))
+        legacyWeeklyPageMode = Trim$(CStr(ws.Range("P3").Value2))
+        legacyWeeklyOverflowMode = Trim$(CStr(ws.Range("P4").Value2))
+        legacyWeeklyProgramGroup = UCase$(Trim$(CStr(ws.Range("P5").Value2)))
+        If legacyWeeklyOwnerValue <> "N" Then legacyWeeklyOwnerValue = "Y"
+
+        If Trim$(CStr(ws.Range("U1").Value2)) = "" And _
+           Trim$(CStr(ws.Range("R1").Value2)) = "주간보고 글머리 기호" Then
+            ws.Range("U1:V6").Value2 = ws.Range("R1:S6").Value2
+        End If
+        ws.Range("R1:S6").Clear
+    End If
+
     If Trim$(CStr(ws.Range("O5").Value2)) = "커스텀 페이지 번호" Then
         For migrationRow = 200 To 6 Step -1
+            ws.Range("O" & CStr(migrationRow + 1) & ":P" & _
+                     CStr(migrationRow + 1)).Value2 = _
+                ws.Range("O" & CStr(migrationRow) & ":P" & _
+                         CStr(migrationRow)).Value2
+        Next migrationRow
+    End If
+
+    If Trim$(CStr(ws.Range("O6").Value2)) = "커스텀 페이지 번호" Then
+        For migrationRow = 201 To 7 Step -1
             ws.Range("O" & CStr(migrationRow + 1) & ":P" & _
                      CStr(migrationRow + 1)).Value2 = _
                 ws.Range("O" & CStr(migrationRow) & ":P" & _
@@ -78,6 +111,10 @@ Public Sub EnsureConfigSheet()
     ws.Range("L1:M7").Clear
     ws.Range(WEEKLY_REPORT_SETTING_TITLE_CELL).Value = "주간보고 설정"
     ws.Range(WEEKLY_REPORT_OWNER_LABEL_CELL).Value = "담당자 이름 출력"
+    ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value = "모듈"
+    ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_LABEL_CELL).Value = "프로그램"
+    ws.Range(WEEKLY_REPORT_OWNER_TASK_LABEL_CELL).Value = "업무명"
+    ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_LABEL_CELL).Value = "업무 레벨"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_LABEL_CELL).Value = "페이지 출력 모드"
     ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_LABEL_CELL).Value = "내용 넘침 처리"
     ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_LABEL_CELL).Value = "프로그램별"
@@ -105,8 +142,28 @@ Public Sub EnsureConfigSheet()
     If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value)) = "" Then
         ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value = legacyTaskMaxLength
     End If
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value = "Y"
+    If migrateWeeklyOwnerSettings Then
+        ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value = legacyWeeklyOwnerValue
+        ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL).Value = legacyWeeklyOwnerValue
+        ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL).Value = legacyWeeklyOwnerValue
+        ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).Value = _
+            WEEKLY_REPORT_OWNER_TASK_LEVEL_ALL
+        If Len(legacyWeeklyPageMode) > 0 Then _
+            ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = legacyWeeklyPageMode
+        If Len(legacyWeeklyOverflowMode) > 0 Then _
+            ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value = legacyWeeklyOverflowMode
+        If Len(legacyWeeklyProgramGroup) > 0 Then _
+            ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).Value = legacyWeeklyProgramGroup
+    End If
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value = "Y"
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL).Value = "Y"
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL).Value = "Y"
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).Value = _
+            WEEKLY_REPORT_OWNER_TASK_LEVEL_ALL
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_ALL
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value)) = "" Then _
@@ -135,8 +192,11 @@ Public Sub EnsureConfigSheet()
     ws.Columns("J").ColumnWidth = 14
     ws.Columns("O").ColumnWidth = 20
     ws.Columns("P").ColumnWidth = 14
-    ws.Columns("R").ColumnWidth = 24
+    ws.Columns("Q").ColumnWidth = 14
+    ws.Columns("R").ColumnWidth = 14
     ws.Columns("S").ColumnWidth = 16
+    ws.Columns("U").ColumnWidth = 24
+    ws.Columns("V").ColumnWidth = 16
 
     ws.Range("A1:C1").Font.Bold = True
     ws.Range("A1:C1").Interior.Color = RGB(242, 242, 242)
@@ -158,15 +218,18 @@ Public Sub EnsureConfigSheet()
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(221, 235, 247)
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Borders.LineStyle = xlContinuous
     ws.Range("I8:J10").Borders.LineStyle = xlContinuous
-    ws.Range("O1:P1").Font.Bold = True
-    ws.Range("O1:P1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O1:P5").Borders.LineStyle = xlContinuous
-    ws.Range("O6:P6").Font.Bold = True
-    ws.Range("O6:P6").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O6:P" & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).Borders.LineStyle = xlContinuous
-    ws.Range("R1:S1").Font.Bold = True
-    ws.Range("R1:S1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("R1:S6").Borders.LineStyle = xlContinuous
+    ws.Range("O1:S1").Font.Bold = True
+    ws.Range("O1:S1").Interior.Color = RGB(252, 228, 214)
+    ws.Range("O1:S1").Borders.LineStyle = xlContinuous
+    ws.Range("O2:S2").Font.Bold = True
+    ws.Range("O2:S3").Borders.LineStyle = xlContinuous
+    ws.Range("O4:P6").Borders.LineStyle = xlContinuous
+    ws.Range("O7:P7").Font.Bold = True
+    ws.Range("O7:P7").Interior.Color = RGB(252, 228, 214)
+    ws.Range("O7:P" & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).Borders.LineStyle = xlContinuous
+    ws.Range("U1:V1").Font.Bold = True
+    ws.Range("U1:V1").Interior.Color = RGB(252, 228, 214)
+    ws.Range("U1:V6").Borders.LineStyle = xlContinuous
 
     ws.Range("F2:G2").Borders.LineStyle = xlContinuous
     ws.Range("I2:J5").Borders.LineStyle = xlContinuous
@@ -182,7 +245,8 @@ Public Sub EnsureConfigSheet()
     ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).NumberFormat = "0"
-    ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).NumberFormat = "General"
+    ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL & ":" & _
+             WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).NumberFormat = "General"
@@ -201,7 +265,10 @@ Public Sub EnsureConfigSheet()
     Set rngDisplayGanttOnly = ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL)
     Set rngDisplayReportOnly = ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL)
     Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_RANGE)
-    Set rngWeeklyReportOwner = ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL)
+    Set rngWeeklyReportModuleOwner = ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL)
+    Set rngWeeklyReportProgramOwner = ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL)
+    Set rngWeeklyReportTaskOwner = ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL)
+    Set rngWeeklyReportTaskOwnerLevel = ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL)
     Set rngWeeklyReportPageMode = ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL)
     Set rngWeeklyReportOverflowMode = ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL)
     Set rngWeeklyReportProgramGroup = ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL)
@@ -222,7 +289,10 @@ Public Sub EnsureConfigSheet()
     rngDisplayGanttOnly.Validation.Delete
     rngDisplayReportOnly.Validation.Delete
     rngTaskMaxLength.Validation.Delete
-    rngWeeklyReportOwner.Validation.Delete
+    rngWeeklyReportModuleOwner.Validation.Delete
+    rngWeeklyReportProgramOwner.Validation.Delete
+    rngWeeklyReportTaskOwner.Validation.Delete
+    rngWeeklyReportTaskOwnerLevel.Validation.Delete
     rngWeeklyReportPageMode.Validation.Delete
     rngWeeklyReportOverflowMode.Validation.Delete
     rngWeeklyReportProgramGroup.Validation.Delete
@@ -313,17 +383,34 @@ Public Sub EnsureConfigSheet()
         "레벨별 내용 최대 글자 수는 " & MIN_TASK_MAX_LENGTH & "~" & _
         MAX_TASK_MAX_LENGTH & " 사이 정수여야 합니다."
 
-    rngWeeklyReportOwner.Validation.Add Type:=xlValidateList, _
-                                        AlertStyle:=xlValidAlertStop, _
-                                        Operator:=xlBetween, _
-                                        Formula1:="Y,N"
-    rngWeeklyReportOwner.Validation.IgnoreBlank = False
-    rngWeeklyReportOwner.Validation.InCellDropdown = True
-    rngWeeklyReportOwner.Validation.InputTitle = "주간보고 담당자 표시"
-    rngWeeklyReportOwner.Validation.InputMessage = _
-        "모듈명과 업무명 뒤에 담당자를 표시하려면 Y, 숨기려면 N을 선택하세요."
-    rngWeeklyReportOwner.Validation.ErrorTitle = "설정값 오류"
-    rngWeeklyReportOwner.Validation.ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
+    With rngWeeklyReportModuleOwner.Resize(1, 3).Validation
+        .Add Type:=xlValidateList, _
+             AlertStyle:=xlValidAlertStop, _
+             Operator:=xlBetween, _
+             Formula1:="Y,N"
+        .IgnoreBlank = False
+        .InCellDropdown = True
+        .InputTitle = "주간보고 담당자 표시"
+        .InputMessage = "해당 구분의 담당자를 표시하려면 Y, 숨기려면 N을 선택하세요."
+        .ErrorTitle = "설정값 오류"
+        .ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
+    End With
+
+    With rngWeeklyReportTaskOwnerLevel.Validation
+        .Add Type:=xlValidateList, _
+             AlertStyle:=xlValidAlertStop, _
+             Operator:=xlBetween, _
+             Formula1:=WEEKLY_REPORT_OWNER_TASK_LEVEL_ALL & "," & _
+                       WEEKLY_REPORT_OWNER_TASK_LEVEL1 & "," & _
+                       WEEKLY_REPORT_OWNER_TASK_LEVEL2 & "," & _
+                       WEEKLY_REPORT_OWNER_TASK_LEVEL3
+        .IgnoreBlank = False
+        .InCellDropdown = True
+        .InputTitle = "업무 담당자 출력 레벨"
+        .InputMessage = "전체 또는 담당자를 표시할 업무 레벨을 선택하세요."
+        .ErrorTitle = "설정값 오류"
+        .ErrorMessage = "목록에 있는 업무 레벨만 선택할 수 있습니다."
+    End With
 
     rngWeeklyReportPageMode.Validation.Add Type:=xlValidateList, _
                                            AlertStyle:=xlValidAlertStop, _
@@ -577,19 +664,53 @@ Public Function GetWeeklyReportProgramBullet() As String
     GetWeeklyReportProgramBullet = bulletText
 End Function
 
-Public Function GetWeeklyReportShowOwnerFlag() As Boolean
+Public Function GetWeeklyReportShowModuleOwnerFlag() As Boolean
+    GetWeeklyReportShowModuleOwnerFlag = GetWeeklyReportOwnerFlag( _
+                                             WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL)
+End Function
+
+Public Function GetWeeklyReportShowProgramOwnerFlag() As Boolean
+    GetWeeklyReportShowProgramOwnerFlag = GetWeeklyReportOwnerFlag( _
+                                              WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL)
+End Function
+
+Public Function GetWeeklyReportShowTaskOwnerFlag() As Boolean
+    GetWeeklyReportShowTaskOwnerFlag = GetWeeklyReportOwnerFlag( _
+                                           WEEKLY_REPORT_OWNER_TASK_VALUE_CELL)
+End Function
+
+Private Function GetWeeklyReportOwnerFlag(ByVal valueCell As String) As Boolean
     Dim ws As Worksheet
     Dim settingValue As String
 
-    GetWeeklyReportShowOwnerFlag = True
+    GetWeeklyReportOwnerFlag = True
 
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     On Error GoTo 0
     If ws Is Nothing Then Exit Function
 
-    settingValue = UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_VALUE_CELL).Value2)))
-    If settingValue = "N" Then GetWeeklyReportShowOwnerFlag = False
+    settingValue = UCase$(Trim$(CStr(ws.Range(valueCell).Value2)))
+    If settingValue = "N" Then GetWeeklyReportOwnerFlag = False
+End Function
+
+Public Function GetWeeklyReportTaskOwnerLevel() As Long
+    Dim ws As Worksheet
+    Dim settingValue As String
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    settingValue = Trim$(CStr( _
+                       ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).Value2))
+    Select Case settingValue
+        Case WEEKLY_REPORT_OWNER_TASK_LEVEL1: GetWeeklyReportTaskOwnerLevel = 1
+        Case WEEKLY_REPORT_OWNER_TASK_LEVEL2: GetWeeklyReportTaskOwnerLevel = 2
+        Case WEEKLY_REPORT_OWNER_TASK_LEVEL3: GetWeeklyReportTaskOwnerLevel = 3
+        Case Else: GetWeeklyReportTaskOwnerLevel = 0
+    End Select
 End Function
 
 Public Function GetWeeklyReportPageMode() As String

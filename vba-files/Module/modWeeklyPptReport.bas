@@ -165,7 +165,10 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim programText As String
     Dim ownerText As String
     Dim hierarchyPath As Variant
-    Dim showOwnerNames As Boolean
+    Dim showModuleOwnerNames As Boolean
+    Dim showProgramOwnerNames As Boolean
+    Dim showTaskOwnerNames As Boolean
+    Dim taskOwnerLevel As Long
     Dim groupByProgram As Boolean
     Dim pageMode As String
     Dim overflowMode As String
@@ -208,7 +211,10 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     lastRow = GetLastDataRow(ws)
     EnsureConfigSheet
     SynchronizeTaskHierarchyModules ws, lastRow, False
-    showOwnerNames = GetWeeklyReportShowOwnerFlag()
+    showModuleOwnerNames = GetWeeklyReportShowModuleOwnerFlag()
+    showProgramOwnerNames = GetWeeklyReportShowProgramOwnerFlag()
+    showTaskOwnerNames = GetWeeklyReportShowTaskOwnerFlag()
+    taskOwnerLevel = GetWeeklyReportTaskOwnerLevel()
     groupByProgram = GetWeeklyReportGroupByProgramFlag()
     pageMode = GetWeeklyReportPageMode()
     overflowMode = GetWeeklyReportOverflowMode()
@@ -302,9 +308,12 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         Set plannedItems = New Collection
         BuildWeeklyGroupedCurrentItems _
             pageCurrentRows, currentItems, currentDates, currentLevels, _
-            showOwnerNames, groupByProgram
+            showModuleOwnerNames, showProgramOwnerNames, _
+            showTaskOwnerNames, taskOwnerLevel, groupByProgram
         BuildWeeklyGroupedPlanItems _
-            pagePlannedRows, plannedItems, showOwnerNames, groupByProgram
+            pagePlannedRows, plannedItems, showModuleOwnerNames, _
+            showProgramOwnerNames, showTaskOwnerNames, _
+            taskOwnerLevel, groupByProgram
 
         AppendWeeklyOutputPages _
             currentItems, currentDates, currentLevels, plannedItems, _
@@ -447,7 +456,10 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
                                            ByVal items As Collection, _
                                            ByVal dates As Collection, _
                                            ByVal levels As Collection, _
-                                           ByVal showOwnerNames As Boolean, _
+                                           ByVal showModuleOwnerNames As Boolean, _
+                                           ByVal showProgramOwnerNames As Boolean, _
+                                           ByVal showTaskOwnerNames As Boolean, _
+                                           ByVal taskOwnerLevel As Long, _
                                            ByVal groupByProgram As Boolean)
     Dim moduleNames As Collection
     Dim moduleSeen As Object
@@ -471,7 +483,7 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
         items.Add AppendWeeklyOwnerText( _
                       CStr(moduleName), _
                       GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
-                      showOwnerNames)
+                      showModuleOwnerNames)
         dates.Add ""
         levels.Add 0
 
@@ -482,17 +494,17 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
                               CStr(programName), _
                               GetWeeklyProgramOwnerText( _
                                   rows, CStr(moduleName), CStr(programName)), _
-                              showOwnerNames)
+                              showProgramOwnerNames)
                 dates.Add ""
                 levels.Add 1
                 AppendWeeklyCurrentRowsForGroup _
                     rows, items, dates, levels, CStr(moduleName), _
-                    CStr(programName), True, 1, showOwnerNames
+                    CStr(programName), True, 1, showTaskOwnerNames, taskOwnerLevel
             Next programName
         Else
             AppendWeeklyCurrentRowsForGroup _
                 rows, items, dates, levels, CStr(moduleName), _
-                "", False, 0, showOwnerNames
+                "", False, 0, showTaskOwnerNames, taskOwnerLevel
         End If
     Next moduleName
 End Sub
@@ -505,7 +517,8 @@ Private Sub AppendWeeklyCurrentRowsForGroup(ByVal rows As Collection, _
                                             ByVal programName As String, _
                                             ByVal filterByProgram As Boolean, _
                                             ByVal levelOffset As Long, _
-                                            ByVal showOwnerNames As Boolean)
+                                            ByVal showTaskOwnerNames As Boolean, _
+                                            ByVal taskOwnerLevel As Long)
     Dim currentPath As Variant
     Dim previousPath As Variant
     Dim hierarchyOwners As Object
@@ -527,7 +540,8 @@ Private Sub AppendWeeklyCurrentRowsForGroup(ByVal rows As Collection, _
                 currentPath = rowItem(9)
                 AppendWeeklyCurrentHierarchyPath _
                     items, dates, levels, currentPath, previousPath, _
-                    CStr(rowItem(4)), hierarchyOwners, showOwnerNames, levelOffset
+                    CStr(rowItem(4)), hierarchyOwners, showTaskOwnerNames, _
+                    taskOwnerLevel, levelOffset
                 previousPath = currentPath
                 Exit For
             End If
@@ -598,7 +612,8 @@ Private Sub AppendWeeklyCurrentHierarchyPath(ByVal items As Collection, _
                                              ByVal previousPath As Variant, _
                                              ByVal leafDateText As String, _
                                              ByVal hierarchyOwners As Object, _
-                                             ByVal showOwnerNames As Boolean, _
+                                             ByVal showTaskOwnerNames As Boolean, _
+                                             ByVal taskOwnerLevel As Long, _
                                              ByVal levelOffset As Long)
     Dim commonDepth As Long
     Dim depth As Long
@@ -611,7 +626,9 @@ Private Sub AppendWeeklyCurrentHierarchyPath(ByVal items As Collection, _
     For depth = commonDepth To UBound(currentPath)
         pathToken = CStr(currentPath(depth))
         displayText = GetWeeklyHierarchyPathText(pathToken)
-        If showOwnerNames And hierarchyOwners.Exists(pathToken) Then
+        If showTaskOwnerNames And _
+           (taskOwnerLevel = 0 Or taskOwnerLevel = depth + 1) And _
+           hierarchyOwners.Exists(pathToken) Then
             displayText = displayText & " (" & _
                           JoinOwnerNameSet(hierarchyOwners(pathToken), ", ") & ")"
         End If
@@ -1101,7 +1118,10 @@ End Function
 
 Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
                                         ByVal items As Collection, _
-                                        ByVal showOwnerNames As Boolean, _
+                                        ByVal showModuleOwnerNames As Boolean, _
+                                        ByVal showProgramOwnerNames As Boolean, _
+                                        ByVal showTaskOwnerNames As Boolean, _
+                                        ByVal taskOwnerLevel As Long, _
                                         ByVal groupByProgram As Boolean)
     Dim moduleNames As Collection
     Dim moduleSeen As Object
@@ -1126,7 +1146,7 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
         blockText = AppendWeeklyOwnerText( _
                         CStr(moduleName), _
                         GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
-                        showOwnerNames)
+                        showModuleOwnerNames)
 
         If groupByProgram Then
             Set programNames = CollectWeeklyProgramNames(rows, CStr(moduleName))
@@ -1137,14 +1157,15 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
                                 CStr(programName), _
                                 GetWeeklyProgramOwnerText( _
                                     rows, CStr(moduleName), CStr(programName)), _
-                                showOwnerNames)
+                                showProgramOwnerNames)
                 AppendWeeklyPlanRowsForGroup _
                     rows, blockText, CStr(moduleName), CStr(programName), _
-                    True, 1, showOwnerNames
+                    True, 1, showTaskOwnerNames, taskOwnerLevel
             Next programName
         Else
             AppendWeeklyPlanRowsForGroup _
-                rows, blockText, CStr(moduleName), "", False, 0, showOwnerNames
+                rows, blockText, CStr(moduleName), "", False, 0, _
+                showTaskOwnerNames, taskOwnerLevel
         End If
 
         items.Add blockText
@@ -1157,7 +1178,8 @@ Private Sub AppendWeeklyPlanRowsForGroup(ByVal rows As Collection, _
                                          ByVal programName As String, _
                                          ByVal filterByProgram As Boolean, _
                                          ByVal levelOffset As Long, _
-                                         ByVal showOwnerNames As Boolean)
+                                         ByVal showTaskOwnerNames As Boolean, _
+                                         ByVal taskOwnerLevel As Long)
     Dim currentPath As Variant
     Dim previousPath As Variant
     Dim hierarchyOwners As Object
@@ -1179,7 +1201,8 @@ Private Sub AppendWeeklyPlanRowsForGroup(ByVal rows As Collection, _
                 currentPath = rowItem(9)
                 AppendWeeklyPlanHierarchyPath _
                     blockText, currentPath, previousPath, _
-                    hierarchyOwners, showOwnerNames, levelOffset
+                    hierarchyOwners, showTaskOwnerNames, _
+                    taskOwnerLevel, levelOffset
                 previousPath = currentPath
                 Exit For
             End If
@@ -1191,7 +1214,8 @@ Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
                                           ByVal currentPath As Variant, _
                                           ByVal previousPath As Variant, _
                                           ByVal hierarchyOwners As Object, _
-                                          ByVal showOwnerNames As Boolean, _
+                                          ByVal showTaskOwnerNames As Boolean, _
+                                          ByVal taskOwnerLevel As Long, _
                                           ByVal levelOffset As Long)
     Dim commonDepth As Long
     Dim depth As Long
@@ -1203,7 +1227,9 @@ Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
     For depth = commonDepth To UBound(currentPath)
         pathToken = CStr(currentPath(depth))
         displayText = GetWeeklyHierarchyPathText(pathToken)
-        If showOwnerNames And hierarchyOwners.Exists(pathToken) Then
+        If showTaskOwnerNames And _
+           (taskOwnerLevel = 0 Or taskOwnerLevel = depth + 1) And _
+           hierarchyOwners.Exists(pathToken) Then
             displayText = displayText & " (" & _
                           JoinOwnerNameSet(hierarchyOwners(pathToken), ", ") & ")"
         End If
