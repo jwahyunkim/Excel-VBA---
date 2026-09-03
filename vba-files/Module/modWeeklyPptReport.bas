@@ -5,8 +5,8 @@ Private Const WEEKLY_PPT_TEMPLATE_SHEET_NAME As String = "WeeklyPptTemplate"
 Private Const WEEKLY_PPT_OUTPUT_FOLDER As String = "주간보고"
 Private Const WEEKLY_PPT_FILE_PREFIX As String = "Digital MFG팀_주간보고_김좌현_"
 Private Const PPT_SAVE_AS_OPEN_XML_PRESENTATION As Long = 24
-Private Const WEEKLY_UNASSIGNED_MODULE As String = "모듈 미지정"
-Private Const WEEKLY_UNASSIGNED_PROGRAM As String = "프로그램 미지정"
+Private Const WEEKLY_UNASSIGNED_MODULE As String = "대분류 미지정"
+Private Const WEEKLY_UNASSIGNED_PROGRAM As String = "소분류 미지정"
 Private Const WEEKLY_PPT_SLIDE_WIDTH As Single = 780!
 Private Const WEEKLY_PPT_SLIDE_HEIGHT As Single = 540!
 Private Const PPT_LAYOUT_BLANK As Long = 12
@@ -170,6 +170,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim showTaskOwnerNames As Boolean
     Dim taskOwnerLevel As Long
     Dim groupByProgram As Boolean
+    Dim categoryDepth As Long
     Dim pageMode As String
     Dim overflowMode As String
     Dim pageIndex As Long
@@ -182,6 +183,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim duplicatedSlides As Object
     Dim errNumber As Long
     Dim errDescription As String
+    Dim taskSheetWasProtected As Boolean
 
     On Error GoTo EH
 
@@ -195,6 +197,15 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         Err.Raise vbObjectError + 7502, "GenerateWeeklyPptReport", "통합문서를 먼저 저장하세요."
     End If
 
+    taskSheetWasProtected = _
+        (ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios)
+    If taskSheetWasProtected Then UnprotectTaskSheet ws
+    SetupDataHeaders ws
+    If taskSheetWasProtected Then
+        lastRow = GetLastDataRow(ws)
+        If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
+        ApplyCalculatedColumnsProtection ws, lastRow
+    End If
     reportFriday = GetWeeklyReportFriday(Date)
     currentWeekStart = reportFriday - 4
     currentWeekEnd = reportFriday
@@ -215,7 +226,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     showProgramOwnerNames = GetWeeklyReportShowProgramOwnerFlag()
     showTaskOwnerNames = GetWeeklyReportShowTaskOwnerFlag()
     taskOwnerLevel = GetWeeklyReportTaskOwnerLevel()
-    groupByProgram = GetWeeklyReportGroupByProgramFlag()
+    categoryDepth = GetWeeklyReportCategoryDepth()
+    groupByProgram = (categoryDepth >= 4)
     pageMode = GetWeeklyReportPageMode()
     overflowMode = GetWeeklyReportOverflowMode()
     If pageMode = WEEKLY_REPORT_PAGE_MODE_CUSTOM Then
@@ -227,10 +239,9 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         If HasTaskContent(ws, r) Then
             statusText = Trim$(CStr(ws.Cells(r, COL_WEEKLY_REPORT).Value2))
             taskText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_TASK).Value2))
-            moduleText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_MODULE).Value2))
-            programText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_PROGRAM).Value2))
+            programText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_MINOR_CATEGORY).Value2))
             ownerText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_OWNER).Value2))
-            If Len(moduleText) = 0 Then moduleText = WEEKLY_UNASSIGNED_MODULE
+            moduleText = GetWeeklyReportClassificationPath(ws, r)
             If Len(programText) = 0 Then programText = WEEKLY_UNASSIGNED_PROGRAM
 
             If Len(taskText) > 0 And Not HasChildTask(ws, r, lastRow) Then
@@ -708,11 +719,11 @@ Private Function BuildWeeklyPageModuleGroups(ByVal currentRows As Collection, _
     Else
         If customPageAssignments Is Nothing Then
             Err.Raise vbObjectError + 7530, "BuildWeeklyPageModuleGroups", _
-                      "커스텀 페이지 모드에서는 config 시트에 페이지 번호와 모듈을 한 건 이상 설정해야 합니다."
+                      "커스텀 페이지 모드에서는 config 시트에 페이지 번호와 분류 경로를 한 건 이상 설정해야 합니다."
         End If
         If customPageAssignments.Count = 0 Then
             Err.Raise vbObjectError + 7530, "BuildWeeklyPageModuleGroups", _
-                      "커스텀 페이지 모드에서는 config 시트에 페이지 번호와 모듈을 한 건 이상 설정해야 합니다."
+                      "커스텀 페이지 모드에서는 config 시트에 페이지 번호와 분류 경로를 한 건 이상 설정해야 합니다."
         End If
 
         Set pageGroupsByNumber = CreateObject("Scripting.Dictionary")

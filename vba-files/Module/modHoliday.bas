@@ -50,7 +50,9 @@ Public Sub EnsureConfigSheet()
     End If
 
     migrateWeeklyOwnerSettings = _
-        (Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value2)) <> "모듈")
+        (Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value2)) <> "모듈" And _
+         Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value2)) <> "대분류" And _
+         Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value2)) <> "대분류 경로")
     If migrateWeeklyOwnerSettings Then
         legacyWeeklyOwnerValue = UCase$(Trim$(CStr(ws.Range("P2").Value2)))
         legacyWeeklyPageMode = Trim$(CStr(ws.Range("P3").Value2))
@@ -111,21 +113,21 @@ Public Sub EnsureConfigSheet()
     ws.Range("L1:M7").Clear
     ws.Range(WEEKLY_REPORT_SETTING_TITLE_CELL).Value = "주간보고 설정"
     ws.Range(WEEKLY_REPORT_OWNER_LABEL_CELL).Value = "담당자 이름 출력"
-    ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value = "모듈"
-    ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_LABEL_CELL).Value = "프로그램"
+    ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value = "대분류 경로"
+    ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_LABEL_CELL).Value = "소분류"
     ws.Range(WEEKLY_REPORT_OWNER_TASK_LABEL_CELL).Value = "업무명"
     ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_LABEL_CELL).Value = "업무 레벨"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_LABEL_CELL).Value = "페이지 출력 모드"
     ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_LABEL_CELL).Value = "내용 넘침 처리"
-    ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_LABEL_CELL).Value = "프로그램별"
+    ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_LABEL_CELL).Value = "분류 출력 범위"
     ws.Range(WEEKLY_REPORT_BULLET_TITLE_CELL).Value = "주간보고 글머리 기호"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_LABEL_CELL).Value = "Level 1"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_LABEL_CELL).Value = "Level 2"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_LABEL_CELL).Value = "Level 3"
-    ws.Range(WEEKLY_REPORT_BULLET_MODULE_LABEL_CELL).Value = "모듈"
-    ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_LABEL_CELL).Value = "프로그램"
+    ws.Range(WEEKLY_REPORT_BULLET_MODULE_LABEL_CELL).Value = "대분류 경로"
+    ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_LABEL_CELL).Value = "소분류"
     ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_HEADER_CELL).Value = "커스텀 페이지 번호"
-    ws.Range(WEEKLY_REPORT_CUSTOM_MODULE_HEADER_CELL).Value = "모듈명"
+    ws.Range(WEEKLY_REPORT_CUSTOM_MODULE_HEADER_CELL).Value = "분류 경로"
     ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "숨김 제외 No."
     ws.Range(HIDE_EXCLUDE_DATE_HEADER_CELL).Value = "숨김 제외 날짜"
 
@@ -152,8 +154,15 @@ Public Sub EnsureConfigSheet()
             ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = legacyWeeklyPageMode
         If Len(legacyWeeklyOverflowMode) > 0 Then _
             ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value = legacyWeeklyOverflowMode
-        If Len(legacyWeeklyProgramGroup) > 0 Then _
-            ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).Value = legacyWeeklyProgramGroup
+        If Len(legacyWeeklyProgramGroup) > 0 Then
+            If legacyWeeklyProgramGroup = "Y" Then
+                ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_VALUE_CELL).Value = _
+                    WEEKLY_REPORT_CATEGORY_DEPTH_MINOR
+            Else
+                ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_VALUE_CELL).Value = _
+                    WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR
+            End If
+        End If
     End If
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value = "Y"
@@ -166,10 +175,19 @@ Public Sub EnsureConfigSheet()
             WEEKLY_REPORT_OWNER_TASK_LEVEL_ALL
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_ALL
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value)) = _
+       WEEKLY_REPORT_PAGE_MODE_LEGACY_MODULE Then _
+        ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_MODULE
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).Value = "N"
+    Select Case UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_VALUE_CELL).Value)))
+        Case "Y"
+            ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_VALUE_CELL).Value = _
+                WEEKLY_REPORT_CATEGORY_DEPTH_MINOR
+        Case "N", ""
+            ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_VALUE_CELL).Value = _
+                WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR
+    End Select
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value = ChrW(&H2022)
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_VALUE_CELL).Value)) = "" Then _
@@ -422,7 +440,7 @@ Public Sub EnsureConfigSheet()
     rngWeeklyReportPageMode.Validation.InCellDropdown = True
     rngWeeklyReportPageMode.Validation.InputTitle = "주간보고 페이지 출력"
     rngWeeklyReportPageMode.Validation.InputMessage = _
-        "전체 통합, 모듈별 페이지 또는 커스텀 페이지를 선택하세요."
+        "전체 통합, 분류 경로별 페이지 또는 커스텀 페이지를 선택하세요."
     rngWeeklyReportPageMode.Validation.ErrorTitle = "설정값 오류"
     rngWeeklyReportPageMode.Validation.ErrorMessage = "목록에 있는 페이지 출력 모드만 선택할 수 있습니다."
 
@@ -442,14 +460,16 @@ Public Sub EnsureConfigSheet()
     rngWeeklyReportProgramGroup.Validation.Add Type:=xlValidateList, _
                                                 AlertStyle:=xlValidAlertStop, _
                                                 Operator:=xlBetween, _
-                                                Formula1:="Y,N"
+                                                Formula1:=WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR & "," & _
+                                                          WEEKLY_REPORT_CATEGORY_DEPTH_MIDDLE & "," & _
+                                                          WEEKLY_REPORT_CATEGORY_DEPTH_MINOR
     rngWeeklyReportProgramGroup.Validation.IgnoreBlank = False
     rngWeeklyReportProgramGroup.Validation.InCellDropdown = True
-    rngWeeklyReportProgramGroup.Validation.InputTitle = "프로그램별 계층 출력"
+    rngWeeklyReportProgramGroup.Validation.InputTitle = "주간보고 분류 출력 범위"
     rngWeeklyReportProgramGroup.Validation.InputMessage = _
-        "모듈 아래에 프로그램 단계를 추가하려면 Y, 기존 형식을 유지하려면 N을 선택하세요."
+        "타입/대분류는 항상 반영되며, 중분류 또는 소분류까지 출력할지 선택하세요."
     rngWeeklyReportProgramGroup.Validation.ErrorTitle = "설정값 오류"
-    rngWeeklyReportProgramGroup.Validation.ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
+    rngWeeklyReportProgramGroup.Validation.ErrorMessage = "목록에 있는 분류 출력 범위만 선택할 수 있습니다."
 
     rngWeeklyReportBullets.Validation.Add Type:=xlValidateTextLength, _
                                            AlertStyle:=xlValidAlertStop, _
@@ -471,7 +491,7 @@ Public Sub EnsureConfigSheet()
     rngWeeklyCustomPageNumbers.Validation.IgnoreBlank = True
     rngWeeklyCustomPageNumbers.Validation.InputTitle = "커스텀 페이지 번호"
     rngWeeklyCustomPageNumbers.Validation.InputMessage = _
-        "같은 페이지에 넣을 모듈에는 같은 페이지 번호를 입력하세요."
+        "같은 페이지에 넣을 분류 경로에는 같은 페이지 번호를 입력하세요."
     rngWeeklyCustomPageNumbers.Validation.ErrorTitle = "설정값 오류"
     rngWeeklyCustomPageNumbers.Validation.ErrorMessage = "페이지 번호는 1~1000 사이 정수여야 합니다."
 
@@ -621,17 +641,54 @@ Public Function GetWeeklyReportLevelBullet(ByVal taskLevel As Long) As String
 End Function
 
 Public Function GetWeeklyReportGroupByProgramFlag() As Boolean
+    GetWeeklyReportGroupByProgramFlag = (GetWeeklyReportCategoryDepth() >= 4)
+End Function
+
+Public Function GetWeeklyReportCategoryDepth() As Long
     Dim ws As Worksheet
     Dim settingValue As String
 
+    GetWeeklyReportCategoryDepth = 2
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     On Error GoTo 0
     If ws Is Nothing Then Exit Function
 
-    settingValue = UCase$(Trim$(CStr( _
-                       ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).Value2)))
-    GetWeeklyReportGroupByProgramFlag = (settingValue = "Y")
+    settingValue = Trim$(CStr( _
+                       ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_VALUE_CELL).Value2))
+    Select Case settingValue
+        Case WEEKLY_REPORT_CATEGORY_DEPTH_MIDDLE
+            GetWeeklyReportCategoryDepth = 3
+        Case WEEKLY_REPORT_CATEGORY_DEPTH_MINOR, "Y"
+            GetWeeklyReportCategoryDepth = 4
+    End Select
+End Function
+
+Public Function GetWeeklyReportClassificationPath(ByVal taskWs As Worksheet, _
+                                                  ByVal rowNum As Long) As String
+    Dim typeText As String
+    Dim majorText As String
+    Dim middleText As String
+
+    If Trim$(CStr(taskWs.Range("D" & HEADER_ROW).Value2)) = "타입" Then
+        typeText = Trim$(CStr(taskWs.Cells(rowNum, COL_TYPE).Value2))
+        majorText = Trim$(CStr(taskWs.Cells(rowNum, COL_MAJOR_CATEGORY).Value2))
+        middleText = Trim$(CStr(taskWs.Cells(rowNum, COL_MIDDLE_CATEGORY).Value2))
+    Else
+        majorText = Trim$(CStr(taskWs.Range("D" & rowNum).Value2))
+    End If
+
+    If Len(majorText) = 0 Then majorText = "대분류 미지정"
+    If Len(typeText) > 0 Then
+        GetWeeklyReportClassificationPath = typeText & " > " & majorText
+    Else
+        GetWeeklyReportClassificationPath = majorText
+    End If
+
+    If GetWeeklyReportCategoryDepth() >= 3 And Len(middleText) > 0 Then
+        GetWeeklyReportClassificationPath = GetWeeklyReportClassificationPath & _
+                                            " > " & middleText
+    End If
 End Function
 
 Public Function GetWeeklyReportModuleBullet() As String
@@ -730,6 +787,8 @@ Public Function GetWeeklyReportPageMode() As String
              WEEKLY_REPORT_PAGE_MODE_MODULE, _
              WEEKLY_REPORT_PAGE_MODE_CUSTOM
             GetWeeklyReportPageMode = settingValue
+        Case WEEKLY_REPORT_PAGE_MODE_LEGACY_MODULE
+            GetWeeklyReportPageMode = WEEKLY_REPORT_PAGE_MODE_MODULE
     End Select
 End Function
 
@@ -780,7 +839,7 @@ Public Sub LoadWeeklyReportCustomPageAssignments(ByRef modulePageDict As Object)
             If Len(Trim$(CStr(pageValue))) = 0 Or Len(moduleName) = 0 Then
                 Err.Raise vbObjectError + 7120, "LoadWeeklyReportCustomPageAssignments", _
                           "config 시트의 커스텀 페이지 설정 " & CStr(r) & _
-                          "행에 페이지 번호와 모듈명을 모두 입력하세요."
+                          "행에 페이지 번호와 분류 경로를 모두 입력하세요."
             End If
 
             If Not IsNumeric(pageValue) Or CDbl(pageValue) <> Fix(CDbl(pageValue)) Then
@@ -796,7 +855,7 @@ Public Sub LoadWeeklyReportCustomPageAssignments(ByRef modulePageDict As Object)
 
             If modulePageDict.Exists(moduleName) Then
                 Err.Raise vbObjectError + 7123, "LoadWeeklyReportCustomPageAssignments", _
-                          "config 시트의 커스텀 페이지 설정에 같은 모듈이 중복되었습니다: " & moduleName
+                          "config 시트의 커스텀 페이지 설정에 같은 분류 경로가 중복되었습니다: " & moduleName
             End If
 
             modulePageDict.Add moduleName, pageNumber
@@ -838,10 +897,13 @@ Public Sub RefreshWeeklyReportModuleDropdown()
 
     For Each taskWs In ThisWorkbook.Worksheets
         If taskWs.Name <> CONFIG_SHEET_NAME And _
-           taskWs.Name <> "WeeklyPptTemplate" Then
+           taskWs.Name <> "WeeklyPptTemplate" And _
+           (Trim$(CStr(taskWs.Range("H" & HEADER_ROW).Value2)) = "내용" Or _
+            Trim$(CStr(taskWs.Range("F" & HEADER_ROW).Value2)) = "내용" Or _
+            Trim$(CStr(taskWs.Range("E" & HEADER_ROW).Value2)) = "내용") Then
             lastRow = GetLastDataRow(taskWs)
             For r = DATA_START_ROW To lastRow
-                moduleName = Trim$(CStr(taskWs.Cells(r, COL_MODULE).Value2))
+                moduleName = GetWeeklyReportClassificationPath(taskWs, r)
                 If Len(moduleName) > 0 And _
                    Not selectedModuleSeen.Exists(moduleName) And _
                    Not moduleSeen.Exists(moduleName) Then
@@ -853,7 +915,7 @@ Public Sub RefreshWeeklyReportModuleDropdown()
     Next taskWs
 
     configWs.Columns(WEEKLY_REPORT_MODULE_LIST_COLUMN).ClearContents
-    configWs.Cells(1, WEEKLY_REPORT_MODULE_LIST_COLUMN).Value = "주간보고 미선택 모듈 목록"
+    configWs.Cells(1, WEEKLY_REPORT_MODULE_LIST_COLUMN).Value = "주간보고 미선택 분류 경로 목록"
     outputRow = WEEKLY_REPORT_MODULE_LIST_START_ROW
     For Each moduleNameItem In moduleNames
         configWs.Cells(outputRow, WEEKLY_REPORT_MODULE_LIST_COLUMN).Value = CStr(moduleNameItem)
@@ -883,10 +945,10 @@ Public Sub RefreshWeeklyReportModuleDropdown()
     rngCustomModules.Validation.IgnoreBlank = True
     rngCustomModules.Validation.InCellDropdown = True
     rngCustomModules.Validation.ShowError = True
-    rngCustomModules.Validation.InputTitle = "커스텀 모듈 선택"
-    rngCustomModules.Validation.InputMessage = "아직 선택하지 않은 모듈만 표시됩니다."
-    rngCustomModules.Validation.ErrorTitle = "모듈 선택 오류"
-    rngCustomModules.Validation.ErrorMessage = "드롭다운에 있는 미선택 모듈만 선택할 수 있습니다."
+    rngCustomModules.Validation.InputTitle = "커스텀 분류 경로 선택"
+    rngCustomModules.Validation.InputMessage = "아직 선택하지 않은 분류 경로만 표시됩니다."
+    rngCustomModules.Validation.ErrorTitle = "분류 경로 선택 오류"
+    rngCustomModules.Validation.ErrorMessage = "드롭다운에 있는 미선택 분류 경로만 선택할 수 있습니다."
 End Sub
 
 Public Function GetDuplicateWeeklyReportCustomModule(ByVal configWs As Worksheet) As String

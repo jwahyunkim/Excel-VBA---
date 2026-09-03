@@ -9,7 +9,11 @@ Public Function GetLastDataRow(ws As Worksheet) As Long
 
     lastRow = HEADER_ROW
 
-    For Each colAddr In Array(COL_LEVEL, COL_MODULE, COL_PROGRAM, COL_TASK, COL_NOTE, COL_PLAN_START, COL_PLAN_END, COL_ACTUAL_START, COL_ACTUAL_END, COL_MANUAL_STATUS, COL_WEEKLY_REPORT)
+    For Each colAddr In Array(COL_LEVEL, COL_TYPE, COL_MAJOR_CATEGORY, _
+                              COL_MIDDLE_CATEGORY, COL_MINOR_CATEGORY, COL_TASK, _
+                              COL_NOTE, COL_PLAN_START, COL_PLAN_END, _
+                              COL_ACTUAL_START, COL_ACTUAL_END, _
+                              COL_MANUAL_STATUS, COL_WEEKLY_REPORT)
         colLastRow = ws.Cells(ws.Rows.Count, CStr(colAddr)).End(xlUp).Row
         If colLastRow > lastRow Then lastRow = colLastRow
     Next colAddr
@@ -134,7 +138,10 @@ End Function
 Public Function HasAnyTaskInput(ws As Worksheet, ByVal rowNum As Long) As Boolean
     HasAnyTaskInput = _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_LEVEL).Value))) > 0 Or _
-        Len(Trim$(CStr(ws.Cells(rowNum, COL_PROGRAM).Value))) > 0 Or _
+        Len(Trim$(CStr(ws.Cells(rowNum, COL_TYPE).Value))) > 0 Or _
+        Len(Trim$(CStr(ws.Cells(rowNum, COL_MAJOR_CATEGORY).Value))) > 0 Or _
+        Len(Trim$(CStr(ws.Cells(rowNum, COL_MIDDLE_CATEGORY).Value))) > 0 Or _
+        Len(Trim$(CStr(ws.Cells(rowNum, COL_MINOR_CATEGORY).Value))) > 0 Or _
         HasTaskContent(ws, rowNum) Or _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_NOTE).Value))) > 0 Or _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value))) > 0 Or _
@@ -221,8 +228,9 @@ Public Function GetTaskErrorReason(ws As Worksheet, ByVal rowNum As Long) As Str
     Dim rawLevel As Variant
     Dim taskLevel As Long
     Dim parentRow As Long
-    Dim parentModule As String
-    Dim childModule As String
+    Dim parentClassifications As Variant
+    Dim childClassifications As Variant
+    Dim classificationIndex As Long
     Dim maxTaskLength As Long
     
     planS = ws.Cells(rowNum, COL_PLAN_START).Value
@@ -306,17 +314,19 @@ Public Function GetTaskErrorReason(ws As Worksheet, ByVal rowNum As Long) As Str
             Exit Function
         End If
 
-        parentModule = Trim$(CStr(ws.Cells(parentRow, COL_MODULE).Value2))
-        childModule = Trim$(CStr(ws.Cells(rowNum, COL_MODULE).Value2))
-        If Len(parentModule) = 0 Then
-            GetTaskErrorReason = "부모 작업(행 " & parentRow & ")의 모듈이 비어 있습니다."
-            Exit Function
-        End If
-        If StrComp(parentModule, childModule, vbTextCompare) <> 0 Then
-            GetTaskErrorReason = "하위 모듈 '" & childModule & _
-                                 "'이 부모 모듈 '" & parentModule & "'과 다릅니다."
-            Exit Function
-        End If
+        parentClassifications = ws.Range(COL_TYPE & parentRow & ":" & _
+                                         COL_MINOR_CATEGORY & parentRow).Value2
+        childClassifications = ws.Range(COL_TYPE & rowNum & ":" & _
+                                        COL_MINOR_CATEGORY & rowNum).Value2
+        For classificationIndex = 1 To 4
+            If StrComp(Trim$(CStr(parentClassifications(1, classificationIndex))), _
+                       Trim$(CStr(childClassifications(1, classificationIndex))), _
+                       vbTextCompare) <> 0 Then
+                GetTaskErrorReason = _
+                    "하위 작업의 타입/대분류/중분류/소분류가 부모 작업과 다릅니다."
+                Exit Function
+            End If
+        Next classificationIndex
     End If
 End Function
 

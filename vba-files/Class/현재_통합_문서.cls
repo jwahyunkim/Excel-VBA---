@@ -45,9 +45,9 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
             duplicateModule = GetDuplicateWeeklyReportCustomModule(Sh)
             If Len(duplicateModule) > 0 Then
                 Application.Undo
-                MsgBox "이미 선택한 모듈은 다시 선택할 수 없습니다: " & duplicateModule, _
+                MsgBox "이미 선택한 분류 경로는 다시 선택할 수 없습니다: " & duplicateModule, _
                        vbExclamation, _
-                       "커스텀 모듈 중복"
+                       "커스텀 분류 경로 중복"
             End If
             RefreshWeeklyReportModuleDropdown
         End If
@@ -68,10 +68,10 @@ EH:
                vbExclamation, _
                "config 설정 오류"
     Else
-        MsgBox "모듈 계층을 자동 처리하는 중 오류가 발생했습니다." & vbCrLf & _
+        MsgBox "분류 계층을 자동 처리하는 중 오류가 발생했습니다." & vbCrLf & _
                "원인: " & Err.Description, _
                vbExclamation, _
-               "모듈 자동 상속 오류"
+               "분류 자동 상속 오류"
     End If
     Resume SafeExit
 End Sub

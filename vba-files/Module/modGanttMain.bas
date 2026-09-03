@@ -11,6 +11,7 @@ Public Sub 칸트차트_생성()
     Dim holidayDict As Object
     Dim workdayDict As Object
     Dim hasDisplayRange As Boolean
+    Dim taskSheetWasProtected As Boolean
 
     On Error GoTo EH
 
@@ -22,6 +23,15 @@ Public Sub 칸트차트_생성()
     End If
 
     EnsureConfigSheet
+    taskSheetWasProtected = _
+        (ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios)
+    If taskSheetWasProtected Then UnprotectTaskSheet ws
+    SetupDataHeaders ws
+    If taskSheetWasProtected Then
+        lastRow = GetLastDataRow(ws)
+        If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
+        ApplyCalculatedColumnsProtection ws, lastRow
+    End If
     LoadHolidaySettings holidayDict, workdayDict
 
     lastRow = GetLastDataRow(ws)
@@ -44,7 +54,6 @@ Public Sub 칸트차트_생성()
     Application.EnableEvents = False
 
     UnprotectTaskSheet ws
-    SetupDataHeaders ws
     SynchronizeTaskHierarchyModules ws, lastRow, True
     ShowTaskInputErrorReasons ws, lastRow
     UpdateTaskNumbers ws, lastRow
