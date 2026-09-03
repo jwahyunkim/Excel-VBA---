@@ -972,6 +972,18 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_ACTUAL_DAYS).ColumnWidth = 10
     ws.Columns(COL_STATUS).ColumnWidth = 15
 
+    ' 새로고침 후 화면의 문자열이 열 너비 때문에 잘리지 않도록
+    ' 분류, 업무명, 담당자 및 상태 열을 실제 내용에 맞춘다.
+    ws.Range(COL_NO & HEADER_ROW & ":" & _
+             COL_TASK & lastRow).Columns.AutoFit
+    ws.Range(COL_OWNER & HEADER_ROW & ":" & _
+             COL_OWNER & lastRow).Columns.AutoFit
+    ws.Range(COL_MANUAL_STATUS & HEADER_ROW & ":" & _
+             COL_WEEKLY_REPORT & lastRow).Columns.AutoFit
+    ws.Range(COL_STATUS & HEADER_ROW & ":" & _
+             COL_STATUS & lastRow).Columns.AutoFit
+    ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).AutoFit
+
     ws.Rows(GANTT_HEADER_ROW_MONTH).RowHeight = 20
     ws.Rows(GANTT_HEADER_ROW_WEEK).RowHeight = 20
     ws.Rows(GANTT_HEADER_ROW_DAY).RowHeight = 20

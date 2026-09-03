@@ -509,7 +509,12 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
                               CStr(categoryParts(categoryIndex)), _
                               GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
                               GetWeeklyReportShowCategoryOwnerFlag(categoryIndex + 1))
-                dates.Add ""
+                If GetWeeklyReportShowExpectedDateFlag(categoryIndex + 1) Then
+                    dates.Add GetWeeklyCategoryExpectedDateText( _
+                                  rows, categoryParts, categoryIndex)
+                Else
+                    dates.Add ""
+                End If
                 levels.Add -(categoryIndex + 1)
             End If
         Next categoryIndex
@@ -522,7 +527,12 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
                               GetWeeklyProgramOwnerText( _
                                   rows, CStr(moduleName), CStr(programName)), _
                               GetWeeklyReportShowCategoryOwnerFlag(4))
-                dates.Add ""
+                If GetWeeklyReportShowExpectedDateFlag(4) Then
+                    dates.Add GetWeeklyProgramExpectedDateText( _
+                                  rows, CStr(moduleName), CStr(programName))
+                Else
+                    dates.Add ""
+                End If
                 levels.Add -4
                 AppendWeeklyCurrentRowsForGroup _
                     rows, items, dates, levels, CStr(moduleName), _
@@ -700,7 +710,8 @@ Private Sub AppendWeeklyCurrentHierarchyPath(ByVal items As Collection, _
         End If
 
         dateText = ""
-        If depth = UBound(currentPath) Then dateText = leafDateText
+        If depth = UBound(currentPath) And _
+           GetWeeklyReportShowTaskExpectedDateFlag() Then dateText = leafDateText
 
         items.Add displayText
         dates.Add dateText
@@ -873,8 +884,8 @@ Private Sub CopyWeeklyRowsForModuleGroup(ByVal sourceRows As Collection, _
 End Sub
 
 Private Function GetWeeklyRowModuleName(ByVal rowItem As Variant) As String
-    GetWeeklyRowModuleName = Trim$(CStr(rowItem(0)))
-    If Len(GetWeeklyRowModuleName) = 0 Then
+    GetWeeklyRowModuleName = CStr(rowItem(0))
+    If Len(Trim$(GetWeeklyRowModuleName)) = 0 Then
         GetWeeklyRowModuleName = WEEKLY_UNASSIGNED_MODULE
     End If
 End Function
@@ -1414,6 +1425,63 @@ Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
         End If
     Next depth
 End Sub
+
+Private Function GetWeeklyCategoryExpectedDateText( _
+                         ByVal rows As Collection, _
+                         ByVal categoryParts As Variant, _
+                         ByVal categoryIndex As Long) As String
+    Dim rowItem As Variant
+    Dim rowParts As Variant
+    Dim compareIndex As Long
+    Dim pathMatches As Boolean
+    Dim dateSerial As Double
+    Dim latestDateSerial As Double
+
+    latestDateSerial = -1
+    For Each rowItem In rows
+        rowParts = Split(GetWeeklyRowModuleName(rowItem), " > ")
+        pathMatches = (UBound(rowParts) >= categoryIndex)
+        If pathMatches Then
+            For compareIndex = LBound(categoryParts) To categoryIndex
+                If StrComp(CStr(rowParts(compareIndex)), _
+                           CStr(categoryParts(compareIndex)), _
+                           vbTextCompare) <> 0 Then
+                    pathMatches = False
+                    Exit For
+                End If
+            Next compareIndex
+        End If
+        If pathMatches And Len(CStr(rowItem(4))) > 0 Then
+            dateSerial = CDbl(rowItem(3))
+            If dateSerial > latestDateSerial Then
+                latestDateSerial = dateSerial
+                GetWeeklyCategoryExpectedDateText = CStr(rowItem(4))
+            End If
+        End If
+    Next rowItem
+End Function
+
+Private Function GetWeeklyProgramExpectedDateText( _
+                         ByVal rows As Collection, _
+                         ByVal moduleName As String, _
+                         ByVal programName As String) As String
+    Dim rowItem As Variant
+    Dim dateSerial As Double
+    Dim latestDateSerial As Double
+
+    latestDateSerial = -1
+    For Each rowItem In rows
+        If WeeklyRowMatchesGroup( _
+               rowItem, moduleName, programName, True) And _
+           Len(CStr(rowItem(4))) > 0 Then
+            dateSerial = CDbl(rowItem(3))
+            If dateSerial > latestDateSerial Then
+                latestDateSerial = dateSerial
+                GetWeeklyProgramExpectedDateText = CStr(rowItem(4))
+            End If
+        End If
+    Next rowItem
+End Function
 
 Private Function AppendWeeklyOwnerText(ByVal displayText As String, _
                                        ByVal ownerText As String, _
