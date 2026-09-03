@@ -28,6 +28,16 @@ Public Sub EnsureConfigSheet()
     Dim legacyWeeklyOverflowMode As String
     Dim legacyWeeklyProgramGroup As String
     Dim migrateWeeklyOwnerSettings As Boolean
+    Dim migrateClassificationSettings As Boolean
+    Dim legacyMajorOwner As String
+    Dim legacyMinorOwner As String
+    Dim legacyTaskOwner As String
+    Dim legacyTaskOwnerLevel As String
+    Dim legacyMajorBullet As String
+    Dim legacyMinorBullet As String
+    Dim legacyLevel1Bullet As String
+    Dim legacyLevel2Bullet As String
+    Dim legacyLevel3Bullet As String
     Dim migrationRow As Long
 
     On Error Resume Next
@@ -50,9 +60,10 @@ Public Sub EnsureConfigSheet()
     End If
 
     migrateWeeklyOwnerSettings = _
-        (Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value2)) <> "모듈" And _
-         Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value2)) <> "대분류" And _
-         Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value2)) <> "대분류 경로")
+        (Trim$(CStr(ws.Range("P2").Value2)) <> "모듈" And _
+         Trim$(CStr(ws.Range("P2").Value2)) <> "대분류" And _
+         Trim$(CStr(ws.Range("P2").Value2)) <> "대분류 경로" And _
+         Trim$(CStr(ws.Range("P2").Value2)) <> "타입")
     If migrateWeeklyOwnerSettings Then
         legacyWeeklyOwnerValue = UCase$(Trim$(CStr(ws.Range("P2").Value2)))
         legacyWeeklyPageMode = Trim$(CStr(ws.Range("P3").Value2))
@@ -65,6 +76,32 @@ Public Sub EnsureConfigSheet()
             ws.Range("U1:V6").Value2 = ws.Range("R1:S6").Value2
         End If
         ws.Range("R1:S6").Clear
+    End If
+
+    migrateClassificationSettings = _
+        (Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_TITLE_CELL).Value2)) <> _
+         "주간보고 글머리 기호")
+    If migrateClassificationSettings Then
+        If migrateWeeklyOwnerSettings Then
+            legacyMajorOwner = legacyWeeklyOwnerValue
+            legacyMinorOwner = legacyWeeklyOwnerValue
+            legacyTaskOwner = legacyWeeklyOwnerValue
+            legacyTaskOwnerLevel = WEEKLY_REPORT_OWNER_TASK_LEVEL_ALL
+        Else
+            legacyMajorOwner = UCase$(Trim$(CStr(ws.Range("P3").Value2)))
+            legacyMinorOwner = UCase$(Trim$(CStr(ws.Range("Q3").Value2)))
+            legacyTaskOwner = UCase$(Trim$(CStr(ws.Range("R3").Value2)))
+            legacyTaskOwnerLevel = Trim$(CStr(ws.Range("S3").Value2))
+        End If
+        legacyLevel1Bullet = Trim$(CStr(ws.Range("V2").Value2))
+        legacyLevel2Bullet = Trim$(CStr(ws.Range("V3").Value2))
+        legacyLevel3Bullet = Trim$(CStr(ws.Range("V4").Value2))
+        legacyMajorBullet = Trim$(CStr(ws.Range("V5").Value2))
+        legacyMinorBullet = Trim$(CStr(ws.Range("V6").Value2))
+        If legacyMajorOwner <> "N" Then legacyMajorOwner = "Y"
+        If legacyMinorOwner <> "N" Then legacyMinorOwner = "Y"
+        If legacyTaskOwner <> "N" Then legacyTaskOwner = "Y"
+        ws.Range("U1:V6").Clear
     End If
 
     If Trim$(CStr(ws.Range("O5").Value2)) = "커스텀 페이지 번호" Then
@@ -113,19 +150,23 @@ Public Sub EnsureConfigSheet()
     ws.Range("L1:M7").Clear
     ws.Range(WEEKLY_REPORT_SETTING_TITLE_CELL).Value = "주간보고 설정"
     ws.Range(WEEKLY_REPORT_OWNER_LABEL_CELL).Value = "담당자 이름 출력"
-    ws.Range(WEEKLY_REPORT_OWNER_MODULE_LABEL_CELL).Value = "대분류 경로"
-    ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_LABEL_CELL).Value = "소분류"
+    ws.Range(WEEKLY_REPORT_OWNER_TYPE_LABEL_CELL).Value = "타입"
+    ws.Range(WEEKLY_REPORT_OWNER_MAJOR_LABEL_CELL).Value = "대분류"
+    ws.Range(WEEKLY_REPORT_OWNER_MIDDLE_LABEL_CELL).Value = "중분류"
+    ws.Range(WEEKLY_REPORT_OWNER_MINOR_LABEL_CELL).Value = "소분류"
     ws.Range(WEEKLY_REPORT_OWNER_TASK_LABEL_CELL).Value = "업무명"
     ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_LABEL_CELL).Value = "업무 레벨"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_LABEL_CELL).Value = "페이지 출력 모드"
     ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_LABEL_CELL).Value = "내용 넘침 처리"
     ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_LABEL_CELL).Value = "분류 출력 범위"
     ws.Range(WEEKLY_REPORT_BULLET_TITLE_CELL).Value = "주간보고 글머리 기호"
+    ws.Range(WEEKLY_REPORT_BULLET_TYPE_LABEL_CELL).Value = "타입"
+    ws.Range(WEEKLY_REPORT_BULLET_MAJOR_LABEL_CELL).Value = "대분류"
+    ws.Range(WEEKLY_REPORT_BULLET_MIDDLE_LABEL_CELL).Value = "중분류"
+    ws.Range(WEEKLY_REPORT_BULLET_MINOR_LABEL_CELL).Value = "소분류"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_LABEL_CELL).Value = "Level 1"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_LABEL_CELL).Value = "Level 2"
     ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_LABEL_CELL).Value = "Level 3"
-    ws.Range(WEEKLY_REPORT_BULLET_MODULE_LABEL_CELL).Value = "대분류 경로"
-    ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_LABEL_CELL).Value = "소분류"
     ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_HEADER_CELL).Value = "커스텀 페이지 번호"
     ws.Range(WEEKLY_REPORT_CUSTOM_MODULE_HEADER_CELL).Value = "분류 경로"
     ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "숨김 제외 No."
@@ -164,8 +205,29 @@ Public Sub EnsureConfigSheet()
             End If
         End If
     End If
+    If migrateClassificationSettings Then
+        ws.Range(WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL).Value = legacyMajorOwner
+        ws.Range(WEEKLY_REPORT_OWNER_MAJOR_VALUE_CELL).Value = legacyMajorOwner
+        ws.Range(WEEKLY_REPORT_OWNER_MIDDLE_VALUE_CELL).Value = legacyMajorOwner
+        ws.Range(WEEKLY_REPORT_OWNER_MINOR_VALUE_CELL).Value = legacyMinorOwner
+        ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL).Value = legacyTaskOwner
+        If Len(legacyTaskOwnerLevel) = 0 Then _
+            legacyTaskOwnerLevel = WEEKLY_REPORT_OWNER_TASK_LEVEL_ALL
+        ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).Value = legacyTaskOwnerLevel
+        ws.Range(WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL).Value = legacyMajorBullet
+        ws.Range(WEEKLY_REPORT_BULLET_MAJOR_VALUE_CELL).Value = legacyMajorBullet
+        ws.Range(WEEKLY_REPORT_BULLET_MIDDLE_VALUE_CELL).Value = legacyMinorBullet
+        ws.Range(WEEKLY_REPORT_BULLET_MINOR_VALUE_CELL).Value = legacyMinorBullet
+        ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value = legacyLevel1Bullet
+        ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_VALUE_CELL).Value = legacyLevel2Bullet
+        ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL).Value = legacyLevel3Bullet
+    End If
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL).Value = "Y"
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value = "Y"
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MIDDLE_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_OWNER_MIDDLE_VALUE_CELL).Value = "Y"
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL).Value = "Y"
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL).Value)) = "" Then _
@@ -188,16 +250,20 @@ Public Sub EnsureConfigSheet()
             ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_VALUE_CELL).Value = _
                 WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR
     End Select
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL).Value = ChrW(&H2022)
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_MAJOR_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_BULLET_MAJOR_VALUE_CELL).Value = "-"
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_MIDDLE_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_BULLET_MIDDLE_VALUE_CELL).Value = ChrW(&HB7)
+    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_MINOR_VALUE_CELL).Value)) = "" Then _
+        ws.Range(WEEKLY_REPORT_BULLET_MINOR_VALUE_CELL).Value = ChrW(&H25E6)
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value = ChrW(&H2022)
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_VALUE_CELL).Value = "-"
     If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL).Value)) = "" Then _
         ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL).Value = ChrW(&HB7)
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_MODULE_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_MODULE_VALUE_CELL).Value = ChrW(&H2022)
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL).Value = "-"
 
 
     ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
@@ -212,9 +278,11 @@ Public Sub EnsureConfigSheet()
     ws.Columns("P").ColumnWidth = 14
     ws.Columns("Q").ColumnWidth = 14
     ws.Columns("R").ColumnWidth = 14
-    ws.Columns("S").ColumnWidth = 16
-    ws.Columns("U").ColumnWidth = 24
-    ws.Columns("V").ColumnWidth = 16
+    ws.Columns("S").ColumnWidth = 14
+    ws.Columns("T").ColumnWidth = 14
+    ws.Columns("U").ColumnWidth = 16
+    ws.Columns("W").ColumnWidth = 18
+    ws.Columns("X").ColumnWidth = 12
 
     ws.Range("A1:C1").Font.Bold = True
     ws.Range("A1:C1").Interior.Color = RGB(242, 242, 242)
@@ -236,18 +304,18 @@ Public Sub EnsureConfigSheet()
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(221, 235, 247)
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Borders.LineStyle = xlContinuous
     ws.Range("I8:J10").Borders.LineStyle = xlContinuous
-    ws.Range("O1:S1").Font.Bold = True
-    ws.Range("O1:S1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O1:S1").Borders.LineStyle = xlContinuous
-    ws.Range("O2:S2").Font.Bold = True
-    ws.Range("O2:S3").Borders.LineStyle = xlContinuous
+    ws.Range("O1:U1").Font.Bold = True
+    ws.Range("O1:U1").Interior.Color = RGB(252, 228, 214)
+    ws.Range("O1:U1").Borders.LineStyle = xlContinuous
+    ws.Range("O2:U2").Font.Bold = True
+    ws.Range("O2:U3").Borders.LineStyle = xlContinuous
     ws.Range("O4:P6").Borders.LineStyle = xlContinuous
     ws.Range("O7:P7").Font.Bold = True
     ws.Range("O7:P7").Interior.Color = RGB(252, 228, 214)
     ws.Range("O7:P" & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).Borders.LineStyle = xlContinuous
-    ws.Range("U1:V1").Font.Bold = True
-    ws.Range("U1:V1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("U1:V6").Borders.LineStyle = xlContinuous
+    ws.Range("W1:X1").Font.Bold = True
+    ws.Range("W1:X1").Interior.Color = RGB(252, 228, 214)
+    ws.Range("W1:X8").Borders.LineStyle = xlContinuous
 
     ws.Range("F2:G2").Borders.LineStyle = xlContinuous
     ws.Range("I2:J5").Borders.LineStyle = xlContinuous
@@ -263,13 +331,13 @@ Public Sub EnsureConfigSheet()
     ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).NumberFormat = "0"
-    ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL & ":" & _
+    ws.Range(WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL & ":" & _
              WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL).NumberFormat = "General"
-    ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & _
-             WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL).NumberFormat = "General"
+    ws.Range(WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL & ":" & _
+             WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL).NumberFormat = "General"
     ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
              WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).NumberFormat = "0"
 
@@ -283,7 +351,9 @@ Public Sub EnsureConfigSheet()
     Set rngDisplayGanttOnly = ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL)
     Set rngDisplayReportOnly = ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL)
     Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_RANGE)
-    Set rngWeeklyReportModuleOwner = ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL)
+    Set rngWeeklyReportModuleOwner = ws.Range( _
+        WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL & ":" & _
+        WEEKLY_REPORT_OWNER_TASK_VALUE_CELL)
     Set rngWeeklyReportProgramOwner = ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL)
     Set rngWeeklyReportTaskOwner = ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL)
     Set rngWeeklyReportTaskOwnerLevel = ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL)
@@ -291,8 +361,8 @@ Public Sub EnsureConfigSheet()
     Set rngWeeklyReportOverflowMode = ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL)
     Set rngWeeklyReportProgramGroup = ws.Range(WEEKLY_REPORT_PROGRAM_GROUP_VALUE_CELL)
     Set rngWeeklyReportBullets = ws.Range( _
-        WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL & ":" & _
-        WEEKLY_REPORT_BULLET_PROGRAM_VALUE_CELL)
+        WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL & ":" & _
+        WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL)
     Set rngWeeklyCustomPageNumbers = ws.Range( _
         WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
         WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW))
@@ -401,7 +471,7 @@ Public Sub EnsureConfigSheet()
         "레벨별 내용 최대 글자 수는 " & MIN_TASK_MAX_LENGTH & "~" & _
         MAX_TASK_MAX_LENGTH & " 사이 정수여야 합니다."
 
-    With rngWeeklyReportModuleOwner.Resize(1, 3).Validation
+    With rngWeeklyReportModuleOwner.Validation
         .Add Type:=xlValidateList, _
              AlertStyle:=xlValidAlertStop, _
              Operator:=xlBetween, _
@@ -460,14 +530,15 @@ Public Sub EnsureConfigSheet()
     rngWeeklyReportProgramGroup.Validation.Add Type:=xlValidateList, _
                                                 AlertStyle:=xlValidAlertStop, _
                                                 Operator:=xlBetween, _
-                                                Formula1:=WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR & "," & _
+                                                Formula1:=WEEKLY_REPORT_CATEGORY_DEPTH_TYPE & "," & _
+                                                          WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR & "," & _
                                                           WEEKLY_REPORT_CATEGORY_DEPTH_MIDDLE & "," & _
                                                           WEEKLY_REPORT_CATEGORY_DEPTH_MINOR
     rngWeeklyReportProgramGroup.Validation.IgnoreBlank = False
     rngWeeklyReportProgramGroup.Validation.InCellDropdown = True
     rngWeeklyReportProgramGroup.Validation.InputTitle = "주간보고 분류 출력 범위"
     rngWeeklyReportProgramGroup.Validation.InputMessage = _
-        "타입/대분류는 항상 반영되며, 중분류 또는 소분류까지 출력할지 선택하세요."
+        "타입, 대분류, 중분류, 소분류 중 마지막으로 출력할 단계를 선택하세요."
     rngWeeklyReportProgramGroup.Validation.ErrorTitle = "설정값 오류"
     rngWeeklyReportProgramGroup.Validation.ErrorMessage = "목록에 있는 분류 출력 범위만 선택할 수 있습니다."
 
@@ -657,6 +728,10 @@ Public Function GetWeeklyReportCategoryDepth() As Long
     settingValue = Trim$(CStr( _
                        ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_VALUE_CELL).Value2))
     Select Case settingValue
+        Case WEEKLY_REPORT_CATEGORY_DEPTH_TYPE
+            GetWeeklyReportCategoryDepth = 1
+        Case WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR
+            GetWeeklyReportCategoryDepth = 2
         Case WEEKLY_REPORT_CATEGORY_DEPTH_MIDDLE
             GetWeeklyReportCategoryDepth = 3
         Case WEEKLY_REPORT_CATEGORY_DEPTH_MINOR, "Y"
@@ -678,17 +753,59 @@ Public Function GetWeeklyReportClassificationPath(ByVal taskWs As Worksheet, _
         majorText = Trim$(CStr(taskWs.Range("D" & rowNum).Value2))
     End If
 
+    If Len(typeText) = 0 Then typeText = "타입 미지정"
     If Len(majorText) = 0 Then majorText = "대분류 미지정"
-    If Len(typeText) > 0 Then
-        GetWeeklyReportClassificationPath = typeText & " > " & majorText
-    Else
-        GetWeeklyReportClassificationPath = majorText
+    If Len(middleText) = 0 Then middleText = "중분류 미지정"
+    GetWeeklyReportClassificationPath = typeText
+    If GetWeeklyReportCategoryDepth() >= 2 Then
+        GetWeeklyReportClassificationPath = GetWeeklyReportClassificationPath & _
+                                            " > " & majorText
     End If
-
-    If GetWeeklyReportCategoryDepth() >= 3 And Len(middleText) > 0 Then
+    If GetWeeklyReportCategoryDepth() >= 3 Then
         GetWeeklyReportClassificationPath = GetWeeklyReportClassificationPath & _
                                             " > " & middleText
     End If
+End Function
+
+Public Function GetWeeklyReportCategoryBullet(ByVal categoryLevel As Long) As String
+    Dim ws As Worksheet
+    Dim bulletText As String
+    Dim valueCell As String
+
+    Select Case categoryLevel
+        Case 1: valueCell = WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL
+        Case 2: valueCell = WEEKLY_REPORT_BULLET_MAJOR_VALUE_CELL
+        Case 3: valueCell = WEEKLY_REPORT_BULLET_MIDDLE_VALUE_CELL
+        Case Else: valueCell = WEEKLY_REPORT_BULLET_MINOR_VALUE_CELL
+    End Select
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    If Not ws Is Nothing Then bulletText = Trim$(CStr(ws.Range(valueCell).Value2))
+    On Error GoTo 0
+
+    If Len(bulletText) = 0 Then
+        Select Case categoryLevel
+            Case 1: bulletText = ChrW(&H2022)
+            Case 2: bulletText = "-"
+            Case 3: bulletText = ChrW(&HB7)
+            Case Else: bulletText = ChrW(&H25E6)
+        End Select
+    End If
+    GetWeeklyReportCategoryBullet = bulletText
+End Function
+
+Public Function GetWeeklyReportShowCategoryOwnerFlag( _
+                    ByVal categoryLevel As Long) As Boolean
+    Dim valueCell As String
+
+    Select Case categoryLevel
+        Case 1: valueCell = WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL
+        Case 2: valueCell = WEEKLY_REPORT_OWNER_MAJOR_VALUE_CELL
+        Case 3: valueCell = WEEKLY_REPORT_OWNER_MIDDLE_VALUE_CELL
+        Case Else: valueCell = WEEKLY_REPORT_OWNER_MINOR_VALUE_CELL
+    End Select
+    GetWeeklyReportShowCategoryOwnerFlag = GetWeeklyReportOwnerFlag(valueCell)
 End Function
 
 Public Function GetWeeklyReportModuleBullet() As String
