@@ -301,10 +301,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Set outputCurrentLevelPages = New Collection
     Set outputPlannedItemPages = New Collection
 
-    If overflowMode = WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE Then
-        currentPageCapacity = GetWeeklyReportCurrentPageCapacity(presentation.Slides(1))
-        planPageCapacity = GetWeeklyReportPlanPageCapacity(presentation.Slides(1))
-    End If
+    currentPageCapacity = GetWeeklyReportCurrentPageCapacity(presentation.Slides(1))
+    planPageCapacity = GetWeeklyReportPlanPageCapacity(presentation.Slides(1))
 
     For modulePageIndex = 1 To pageModuleGroups.Count
         Set pageModuleGroup = pageModuleGroups(modulePageIndex)
@@ -352,7 +350,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         FillWeeklyReportPlanArea _
             slide, _
             plannedItems, _
-            (overflowMode = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND)
+            False
     Next pageIndex
 
     presentation.SaveAs outputPath, PPT_SAVE_AS_OPEN_XML_PRESENTATION
@@ -891,8 +889,10 @@ End Function
 
 Private Function GetWeeklyReportCurrentPageCapacity(ByVal slide As Object) As Long
     Dim tableShape As Object
-    Dim taskSlotCount As Long
-    Dim dateSlotCount As Long
+    Dim taskShape As Object
+    Dim taskTextRange As Object
+    Dim lineHeight As Double
+    Dim availableHeight As Double
 
     Set tableShape = FindFirstTableShape(slide)
     If tableShape Is Nothing Then
@@ -900,12 +900,14 @@ Private Function GetWeeklyReportCurrentPageCapacity(ByVal slide As Object) As Lo
                   "PPT에서 업무 현황 표를 찾을 수 없습니다."
     End If
 
-    taskSlotCount = tableShape.Table.Cell(2, 2).Shape.TextFrame.TextRange.Paragraphs.Count
-    dateSlotCount = tableShape.Table.Cell(2, 3).Shape.TextFrame.TextRange.Paragraphs.Count
-    GetWeeklyReportCurrentPageCapacity = taskSlotCount
-    If dateSlotCount < GetWeeklyReportCurrentPageCapacity Then
-        GetWeeklyReportCurrentPageCapacity = dateSlotCount
-    End If
+    Set taskShape = tableShape.Table.Cell(2, 2).Shape
+    Set taskTextRange = taskShape.TextFrame.TextRange
+    lineHeight = taskTextRange.Paragraphs(1).BoundHeight
+    If lineHeight <= 0 Then lineHeight = taskTextRange.Font.Size * 1.25
+    If lineHeight <= 0 Then lineHeight = 14
+    availableHeight = taskShape.Height - taskShape.TextFrame.MarginTop - _
+                      taskShape.TextFrame.MarginBottom
+    GetWeeklyReportCurrentPageCapacity = CLng(Fix(availableHeight / lineHeight))
     If GetWeeklyReportCurrentPageCapacity < 1 Then GetWeeklyReportCurrentPageCapacity = 1
 End Function
 
@@ -971,14 +973,6 @@ Private Sub AppendWeeklyOutputPages(ByVal currentItems As Collection, _
     Dim pageCount As Long
     Dim pageIndex As Long
 
-    If overflowMode = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND Then
-        outputCurrentItemPages.Add currentItems
-        outputCurrentDatePages.Add currentDates
-        outputCurrentLevelPages.Add currentLevels
-        outputPlannedItemPages.Add plannedItems
-        Exit Sub
-    End If
-
     SplitWeeklyCurrentItems _
         currentItems, currentDates, currentLevels, currentPageCapacity, _
         currentItemPages, currentDatePages, currentLevelPages
@@ -1023,6 +1017,8 @@ Private Sub SplitWeeklyCurrentItems(ByVal items As Collection, _
     Dim pageLevels As Collection
     Dim sourceIndex As Long
     Dim levelValue As Long
+    Dim usedLineCount As Long
+    Dim itemLineCount As Long
 
     Set itemPages = New Collection
     Set datePages = New Collection
@@ -1044,11 +1040,15 @@ Private Sub SplitWeeklyCurrentItems(ByVal items As Collection, _
         Set pageItems = New Collection
         Set pageDates = New Collection
         Set pageLevels = New Collection
+        usedLineCount = 0
 
-        Do While sourceIndex <= items.Count And pageItems.Count < pageCapacity
+        Do While sourceIndex <= items.Count
             levelValue = CLng(levels(sourceIndex))
+            itemLineCount = EstimateWeeklyWrappedLineCount(CStr(items(sourceIndex)), 32)
+            If pageItems.Count > 0 And _
+               usedLineCount + itemLineCount > pageCapacity Then Exit Do
             If levelValue = 0 And _
-               pageItems.Count = pageCapacity - 1 And _
+               usedLineCount >= pageCapacity - 1 And _
                sourceIndex < items.Count And _
                pageItems.Count > 0 Then
                 Exit Do
@@ -1057,7 +1057,9 @@ Private Sub SplitWeeklyCurrentItems(ByVal items As Collection, _
             pageItems.Add CStr(items(sourceIndex))
             pageDates.Add CStr(dates(sourceIndex))
             pageLevels.Add levelValue
+            usedLineCount = usedLineCount + itemLineCount
             sourceIndex = sourceIndex + 1
+            If usedLineCount >= pageCapacity Then Exit Do
         Loop
 
         itemPages.Add pageItems
@@ -1117,6 +1119,8 @@ Private Function SplitWeeklyPlanItemText(ByVal itemText As String, _
     Dim chunkText As String
     Dim lineIndex As Long
     Dim chunkLineCount As Long
+    Dim nextLineCount As Long
+    Dim chunkHasDetail As Boolean
 
     Set result = New Collection
     If pageCapacity < 1 Then pageCapacity = 1
@@ -1127,17 +1131,31 @@ Private Function SplitWeeklyPlanItemText(ByVal itemText As String, _
     Do While lineIndex <= UBound(lines)
         chunkText = ""
         chunkLineCount = 0
+        chunkHasDetail = False
 
         If lineIndex > LBound(lines) And pageCapacity > 1 Then
             chunkText = firstLine
-            chunkLineCount = 1
+            chunkLineCount = EstimateWeeklyWrappedLineCount(firstLine, 42)
         End If
 
-        Do While lineIndex <= UBound(lines) And chunkLineCount < pageCapacity
+        Do While lineIndex <= UBound(lines)
+            nextLineCount = EstimateWeeklyWrappedLineCount( _
+                                CStr(lines(lineIndex)), 42)
+            If Len(chunkText) > 0 And _
+               chunkLineCount + nextLineCount > pageCapacity Then
+                If chunkHasDetail Then
+                    Exit Do
+                Else
+                    chunkText = ""
+                    chunkLineCount = 0
+                End If
+            End If
             If Len(chunkText) > 0 Then chunkText = chunkText & ChrW(11)
             chunkText = chunkText & CStr(lines(lineIndex))
-            chunkLineCount = chunkLineCount + 1
+            chunkLineCount = chunkLineCount + nextLineCount
+            chunkHasDetail = True
             lineIndex = lineIndex + 1
+            If chunkLineCount >= pageCapacity Then Exit Do
         Loop
 
         result.Add chunkText
@@ -1147,7 +1165,22 @@ Private Function SplitWeeklyPlanItemText(ByVal itemText As String, _
 End Function
 
 Private Function CountWeeklyPlanItemLines(ByVal itemText As String) As Long
-    CountWeeklyPlanItemLines = UBound(Split(itemText, ChrW(11))) + 1
+    Dim lines As Variant
+    Dim lineItem As Variant
+
+    lines = Split(itemText, ChrW(11))
+    For Each lineItem In lines
+        CountWeeklyPlanItemLines = CountWeeklyPlanItemLines + _
+                                   EstimateWeeklyWrappedLineCount(CStr(lineItem), 42)
+    Next lineItem
+End Function
+
+Private Function EstimateWeeklyWrappedLineCount(ByVal textValue As String, _
+                                                ByVal charactersPerLine As Long) As Long
+    If charactersPerLine < 1 Then charactersPerLine = 1
+    EstimateWeeklyWrappedLineCount = _
+        (Len(textValue) + charactersPerLine - 1) \ charactersPerLine
+    If EstimateWeeklyWrappedLineCount < 1 Then EstimateWeeklyWrappedLineCount = 1
 End Function
 
 Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
