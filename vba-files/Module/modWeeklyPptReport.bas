@@ -34,6 +34,7 @@ Public Sub 주간보고PPT_버튼_생성()
 
     Set ws = ActiveSheet
     If ws.Name = CONFIG_SHEET_NAME Or _
+       ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
        ws.Name = WEEKLY_PPT_TEMPLATE_SHEET_NAME Then
         MsgBox "업무 시트에서 실행하세요.", vbExclamation
         Exit Sub
@@ -163,6 +164,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
     Dim taskText As String
     Dim moduleText As String
     Dim programText As String
+    Dim pageGroupingText As String
     Dim ownerText As String
     Dim hierarchyPath As Variant
     Dim showModuleOwnerNames As Boolean
@@ -242,6 +244,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
             programText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_MINOR_CATEGORY).Value2))
             ownerText = CleanWeeklyReportTaskText(CStr(ws.Cells(r, COL_OWNER).Value2))
             moduleText = GetWeeklyReportClassificationPath(ws, r)
+            pageGroupingText = GetWeeklyReportPageGroupingPath(ws, r)
             If Len(programText) = 0 Then programText = WEEKLY_UNASSIGNED_PROGRAM
 
             If Len(taskText) > 0 And Not HasChildTask(ws, r, lastRow) Then
@@ -252,7 +255,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                             moduleText, _
                             taskText, 2, GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty), _
                             BuildInProgressEndDateText(ws.Cells(r, COL_PLAN_END).Value), _
-                            False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText)
+                            False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText, pageGroupingText)
 
                     Case UCase$(REPORT_STATUS_COMPLETED)
                         If IsCompletedInReportWeek(ws, r, currentWeekStart, currentWeekEnd) Then
@@ -260,7 +263,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                                 moduleText, _
                                 taskText, 1, GetWeeklySortDate(ws.Cells(r, COL_ACTUAL_END).Value, ws.Cells(r, COL_PLAN_END).Value), _
                                 BuildCompletedEndDateText(ws, r), _
-                                False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText)
+                                False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText, pageGroupingText)
                         End If
 
                     Case UCase$(REPORT_STATUS_PLANNED)
@@ -268,7 +271,7 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
                             AddSortedWeeklyRow plannedRows, Array( _
                                 moduleText, _
                                 taskText, 3, GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty), "", _
-                                False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText)
+                                False, GetTaskLevel(ws, r), ownerText, r, hierarchyPath, programText, pageGroupingText)
                         End If
                 End Select
             End If
@@ -308,8 +311,10 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
         Set pageModuleGroup = pageModuleGroups(modulePageIndex)
         Set pageCurrentRows = New Collection
         Set pagePlannedRows = New Collection
-        CopyWeeklyRowsForModuleGroup currentRows, pageModuleGroup, pageCurrentRows
-        CopyWeeklyRowsForModuleGroup plannedRows, pageModuleGroup, pagePlannedRows
+        CopyWeeklyRowsForModuleGroup currentRows, pageModuleGroup, pageCurrentRows, _
+            (pageMode = WEEKLY_REPORT_PAGE_MODE_MODULE)
+        CopyWeeklyRowsForModuleGroup plannedRows, pageModuleGroup, pagePlannedRows, _
+            (pageMode = WEEKLY_REPORT_PAGE_MODE_MODULE)
 
         Set currentItems = New Collection
         Set currentDates = New Collection
@@ -479,6 +484,7 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
     Dim categoryParts As Variant
     Dim categoryIndex As Long
     Dim groupByProgram As Boolean
+    Dim previousCategoryParts As Variant
 
     groupByProgram = GetWeeklyReportShowCategoryFlag(4)
 
@@ -496,7 +502,9 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
     For Each moduleName In moduleNames
         categoryParts = Split(CStr(moduleName), " > ")
         For categoryIndex = LBound(categoryParts) To UBound(categoryParts)
-            If GetWeeklyReportShowCategoryFlag(categoryIndex + 1) Then
+            If GetWeeklyReportShowCategoryFlag(categoryIndex + 1) And _
+               ShouldAppendWeeklyCategory(categoryParts, previousCategoryParts, _
+                                          categoryIndex) Then
                 items.Add AppendWeeklyOwnerText( _
                               CStr(categoryParts(categoryIndex)), _
                               GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
@@ -526,8 +534,32 @@ Private Sub BuildWeeklyGroupedCurrentItems(ByVal rows As Collection, _
                 rows, items, dates, levels, CStr(moduleName), _
                 "", False, categoryDepth, showTaskOwnerNames, taskOwnerLevel
         End If
+        previousCategoryParts = categoryParts
     Next moduleName
 End Sub
+
+Private Function ShouldAppendWeeklyCategory(ByVal currentParts As Variant, _
+                                            ByVal previousParts As Variant, _
+                                            ByVal categoryIndex As Long) As Boolean
+    Dim compareIndex As Long
+
+    If GetWeeklyReportRepeatTreeFlag(categoryIndex + 1) Then
+        ShouldAppendWeeklyCategory = True
+        Exit Function
+    End If
+    If Not IsArray(previousParts) Then
+        ShouldAppendWeeklyCategory = True
+        Exit Function
+    End If
+    For compareIndex = LBound(currentParts) To categoryIndex
+        If compareIndex > UBound(previousParts) Or _
+           StrComp(CStr(currentParts(compareIndex)), _
+                   CStr(previousParts(compareIndex)), vbTextCompare) <> 0 Then
+            ShouldAppendWeeklyCategory = True
+            Exit Function
+        End If
+    Next compareIndex
+End Function
 
 Private Sub AppendWeeklyCurrentRowsForGroup(ByVal rows As Collection, _
                                             ByVal items As Collection, _
@@ -651,6 +683,8 @@ Private Sub AppendWeeklyCurrentHierarchyPath(ByVal items As Collection, _
                      (showTaskLevel And GetWeeklyReportShowTaskLevelOwnerFlag())
 
     commonDepth = GetCommonWeeklyHierarchyDepth(previousPath, currentPath)
+    If GetWeeklyReportRepeatTreeFlag(5) Or _
+       GetWeeklyReportRepeatTreeFlag(6) Then commonDepth = 0
 
     For depth = commonDepth To UBound(currentPath)
         pathToken = CStr(currentPath(depth))
@@ -727,8 +761,10 @@ Private Function BuildWeeklyPageModuleGroups(ByVal currentRows As Collection, _
     End If
 
     Set moduleNames = New Collection
-    CollectWeeklyModuleNames currentRows, moduleNames
-    CollectWeeklyModuleNames plannedRows, moduleNames
+    CollectWeeklyModuleNames currentRows, moduleNames, _
+        (pageMode = WEEKLY_REPORT_PAGE_MODE_MODULE)
+    CollectWeeklyModuleNames plannedRows, moduleNames, _
+        (pageMode = WEEKLY_REPORT_PAGE_MODE_MODULE)
 
     If pageMode = WEEKLY_REPORT_PAGE_MODE_MODULE Then
         For Each moduleName In moduleNames
@@ -740,11 +776,11 @@ Private Function BuildWeeklyPageModuleGroups(ByVal currentRows As Collection, _
     Else
         If customPageAssignments Is Nothing Then
             Err.Raise vbObjectError + 7530, "BuildWeeklyPageModuleGroups", _
-                      "커스텀 페이지 모드에서는 config 시트에 페이지 번호와 분류 경로를 한 건 이상 설정해야 합니다."
+                      "커스텀 페이지 모드에서는 config_주간보고 시트에 페이지 번호와 분류 항목을 한 건 이상 설정해야 합니다."
         End If
         If customPageAssignments.Count = 0 Then
             Err.Raise vbObjectError + 7530, "BuildWeeklyPageModuleGroups", _
-                      "커스텀 페이지 모드에서는 config 시트에 페이지 번호와 분류 경로를 한 건 이상 설정해야 합니다."
+                      "커스텀 페이지 모드에서는 config_주간보고 시트에 페이지 번호와 분류 항목을 한 건 이상 설정해야 합니다."
         End If
 
         Set pageGroupsByNumber = CreateObject("Scripting.Dictionary")
@@ -791,7 +827,8 @@ Private Function BuildWeeklyPageModuleGroups(ByVal currentRows As Collection, _
 End Function
 
 Private Sub CollectWeeklyModuleNames(ByVal rows As Collection, _
-                                     ByVal moduleNames As Collection)
+                                     ByVal moduleNames As Collection, _
+                                     ByVal usePageGrouping As Boolean)
     Dim moduleSeen As Object
     Dim existingName As Variant
     Dim rowItem As Variant
@@ -804,7 +841,11 @@ Private Sub CollectWeeklyModuleNames(ByVal rows As Collection, _
     Next existingName
 
     For Each rowItem In rows
-        moduleName = GetWeeklyRowModuleName(rowItem)
+        If usePageGrouping Then
+            moduleName = GetWeeklyRowPageGroupingName(rowItem)
+        Else
+            moduleName = GetWeeklyRowModuleName(rowItem)
+        End If
         If Not moduleSeen.Exists(moduleName) Then
             moduleSeen.Add moduleName, True
             moduleNames.Add moduleName
@@ -814,12 +855,17 @@ End Sub
 
 Private Sub CopyWeeklyRowsForModuleGroup(ByVal sourceRows As Collection, _
                                          ByVal moduleGroup As Object, _
-                                         ByVal destinationRows As Collection)
+                                         ByVal destinationRows As Collection, _
+                                         ByVal usePageGrouping As Boolean)
     Dim rowItem As Variant
     Dim moduleName As String
 
     For Each rowItem In sourceRows
-        moduleName = GetWeeklyRowModuleName(rowItem)
+        If usePageGrouping Then
+            moduleName = GetWeeklyRowPageGroupingName(rowItem)
+        Else
+            moduleName = GetWeeklyRowModuleName(rowItem)
+        End If
         If moduleGroup.Count = 0 Or moduleGroup.Exists(moduleName) Then
             destinationRows.Add rowItem
         End If
@@ -1133,7 +1179,11 @@ Private Function SplitWeeklyPlanItemText(ByVal itemText As String, _
         chunkLineCount = 0
         chunkHasDetail = False
 
-        If lineIndex > LBound(lines) And pageCapacity > 1 Then
+        If lineIndex > LBound(lines) And pageCapacity > 1 And _
+           (GetWeeklyReportRepeatTreeFlag(1) Or _
+            GetWeeklyReportRepeatTreeFlag(2) Or _
+            GetWeeklyReportRepeatTreeFlag(3) Or _
+            GetWeeklyReportRepeatTreeFlag(4)) Then
             chunkText = firstLine
             chunkLineCount = EstimateWeeklyWrappedLineCount(firstLine, 42)
         End If
@@ -1175,6 +1225,13 @@ Private Function CountWeeklyPlanItemLines(ByVal itemText As String) As Long
     Next lineItem
 End Function
 
+Private Function GetWeeklyRowPageGroupingName(ByVal rowItem As Variant) As String
+    If UBound(rowItem) >= 11 Then _
+        GetWeeklyRowPageGroupingName = Trim$(CStr(rowItem(11)))
+    If Len(GetWeeklyRowPageGroupingName) = 0 Then _
+        GetWeeklyRowPageGroupingName = GetWeeklyRowModuleName(rowItem)
+End Function
+
 Private Function EstimateWeeklyWrappedLineCount(ByVal textValue As String, _
                                                 ByVal charactersPerLine As Long) As Long
     If charactersPerLine < 1 Then charactersPerLine = 1
@@ -1201,7 +1258,9 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
     Dim categoryIndex As Long
     Dim categoryText As String
     Dim groupByProgram As Boolean
+    Dim previousCategoryParts As Variant
 
+    ResetWeeklyReportNumbering
     groupByProgram = GetWeeklyReportShowCategoryFlag(4)
 
     Set moduleNames = New Collection
@@ -1219,7 +1278,9 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
         blockText = ""
         categoryParts = Split(CStr(moduleName), " > ")
         For categoryIndex = LBound(categoryParts) To UBound(categoryParts)
-            If GetWeeklyReportShowCategoryFlag(categoryIndex + 1) Then
+            If GetWeeklyReportShowCategoryFlag(categoryIndex + 1) And _
+               ShouldAppendWeeklyCategory(categoryParts, previousCategoryParts, _
+                                          categoryIndex) Then
                 categoryText = AppendWeeklyOwnerText( _
                                    CStr(categoryParts(categoryIndex)), _
                                    GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
@@ -1263,6 +1324,7 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
         End If
 
         If Len(blockText) > 0 Then items.Add blockText
+        previousCategoryParts = categoryParts
     Next moduleName
 End Sub
 
@@ -1327,6 +1389,8 @@ Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
                      (showTaskLevel And GetWeeklyReportShowTaskLevelOwnerFlag())
 
     commonDepth = GetCommonWeeklyHierarchyDepth(previousPath, currentPath)
+    If GetWeeklyReportRepeatTreeFlag(5) Or _
+       GetWeeklyReportRepeatTreeFlag(6) Then commonDepth = 0
 
     For depth = commonDepth To UBound(currentPath)
         pathToken = CStr(currentPath(depth))
@@ -1548,6 +1612,7 @@ Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
     Dim categoryLevel As Long
     Dim taskLevel As Long
 
+    ResetWeeklyReportNumbering
     Set tableShape = FindFirstTableShape(slide)
     If tableShape Is Nothing Then
         Err.Raise vbObjectError + 7520, "FillWeeklyReportCurrentTable", _

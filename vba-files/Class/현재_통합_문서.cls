@@ -31,23 +31,25 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
 
     If Not TypeOf Sh Is Worksheet Then Exit Sub
 
-    If Sh.Name = CONFIG_SHEET_NAME Then
-        If Not Intersect(Target, Sh.Range(TASK_MAX_LENGTH_VALUE_RANGE)) Is Nothing Then
+    If Sh.Name = CONFIG_SHEET_NAME Or _
+       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
+        If Sh.Name = CONFIG_SHEET_NAME And _
+           Not Intersect(Target, Sh.Range(TASK_MAX_LENGTH_VALUE_RANGE)) Is Nothing Then
             Application.enableEvents = False
             RefreshTaskTextLengthValidation
         ElseIf Not Intersect( _
                        Target, _
-                       Sh.Range(WEEKLY_REPORT_CUSTOM_MODULE_COLUMN & _
-                                CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
-                                WEEKLY_REPORT_CUSTOM_MODULE_COLUMN & _
-                                CStr(WEEKLY_REPORT_CUSTOM_END_ROW))) Is Nothing Then
+                       Sh.Range(WR_CUSTOM_PATH_COLUMN & _
+                                CStr(WR_CUSTOM_START_ROW) & ":" & _
+                                WR_CUSTOM_PATH_COLUMN & _
+                                CStr(WR_CUSTOM_END_ROW))) Is Nothing Then
             Application.enableEvents = False
             duplicateModule = GetDuplicateWeeklyReportCustomModule(Sh)
             If Len(duplicateModule) > 0 Then
                 Application.Undo
-                MsgBox "이미 선택한 분류 경로는 다시 선택할 수 없습니다: " & duplicateModule, _
+                MsgBox "이미 선택한 분류 항목은 다시 선택할 수 없습니다: " & duplicateModule, _
                        vbExclamation, _
-                       "커스텀 분류 경로 중복"
+                       "커스텀 분류 항목 중복"
             End If
             RefreshWeeklyReportModuleDropdown
         End If
