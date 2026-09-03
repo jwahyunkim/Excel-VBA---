@@ -533,6 +533,7 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
     Dim rowNum As Long
     Dim sourceOle As OLEObject
     Dim sourceHasProgramColumn As Boolean
+    Dim sourceHasFourLevelClassification As Boolean
 
     sourceLastRow = GetMigrationLastRow(sourceSheet)
     targetLastRow = GetMigrationLastRow(targetSheet)
@@ -541,10 +542,16 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
     If clearLastRow < DATA_START_ROW Then clearLastRow = DATA_START_ROW
 
     UnprotectTaskSheet targetSheet
+    SetupDataHeaders targetSheet
     DeleteTargetPptObjects targetSheet
     ClearTargetPptIcons targetSheet, clearLastRow
+    sourceHasFourLevelClassification = _
+        (Trim$(CStr(sourceSheet.Range("D" & HEADER_ROW).Value2)) = "타입" And _
+         Trim$(CStr(sourceSheet.Range("E" & HEADER_ROW).Value2)) = "대분류" And _
+         Trim$(CStr(sourceSheet.Range("F" & HEADER_ROW).Value2)) = "중분류" And _
+         Trim$(CStr(sourceSheet.Range("G" & HEADER_ROW).Value2)) = "소분류")
     sourceHasProgramColumn = _
-        (Trim$(CStr(sourceSheet.Cells(HEADER_ROW, COL_PROGRAM).Value2)) = "프로그램")
+        (Trim$(CStr(sourceSheet.Range("E" & HEADER_ROW).Value2)) = "프로그램")
 
     targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
                       COL_PROGRESS & clearLastRow).ClearContents
@@ -552,7 +559,7 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
                       COL_WEEKLY_REPORT & clearLastRow).ClearContents
 
     If sourceLastRow >= DATA_START_ROW Then
-        If sourceHasProgramColumn Then
+        If sourceHasFourLevelClassification Then
             targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
                               COL_PROGRESS & sourceLastRow).Value2 = _
                 sourceSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
@@ -562,10 +569,34 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
                               COL_WEEKLY_REPORT & sourceLastRow).Value2 = _
                 sourceSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
                                   COL_WEEKLY_REPORT & sourceLastRow).Value2
+        ElseIf sourceHasProgramColumn Then
+            targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
+                              COL_LEVEL & sourceLastRow).Value2 = _
+                sourceSheet.Range("C" & DATA_START_ROW & ":C" & sourceLastRow).Value2
+
+            targetSheet.Range(COL_MAJOR_CATEGORY & DATA_START_ROW & ":" & _
+                              COL_MAJOR_CATEGORY & sourceLastRow).Value2 = _
+                sourceSheet.Range("D" & DATA_START_ROW & ":D" & sourceLastRow).Value2
+
+            targetSheet.Range(COL_MINOR_CATEGORY & DATA_START_ROW & ":" & _
+                              COL_MINOR_CATEGORY & sourceLastRow).Value2 = _
+                sourceSheet.Range("E" & DATA_START_ROW & ":E" & sourceLastRow).Value2
+
+            targetSheet.Range(COL_TASK & DATA_START_ROW & ":" & _
+                              COL_PROGRESS & sourceLastRow).Value2 = _
+                sourceSheet.Range("F" & DATA_START_ROW & ":M" & sourceLastRow).Value2
+
+            targetSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
+                              COL_WEEKLY_REPORT & sourceLastRow).Value2 = _
+                sourceSheet.Range("O" & DATA_START_ROW & ":Q" & sourceLastRow).Value2
         Else
             targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
-                              COL_MODULE & sourceLastRow).Value2 = _
-                sourceSheet.Range("C" & DATA_START_ROW & ":D" & sourceLastRow).Value2
+                              COL_LEVEL & sourceLastRow).Value2 = _
+                sourceSheet.Range("C" & DATA_START_ROW & ":C" & sourceLastRow).Value2
+
+            targetSheet.Range(COL_MAJOR_CATEGORY & DATA_START_ROW & ":" & _
+                              COL_MAJOR_CATEGORY & sourceLastRow).Value2 = _
+                sourceSheet.Range("D" & DATA_START_ROW & ":D" & sourceLastRow).Value2
 
             targetSheet.Range(COL_TASK & DATA_START_ROW & ":" & _
                               COL_PROGRESS & sourceLastRow).Value2 = _
