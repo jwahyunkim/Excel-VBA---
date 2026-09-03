@@ -873,8 +873,8 @@ Private Sub CopyWeeklyRowsForModuleGroup(ByVal sourceRows As Collection, _
 End Sub
 
 Private Function GetWeeklyRowModuleName(ByVal rowItem As Variant) As String
-    GetWeeklyRowModuleName = Trim$(CStr(rowItem(0)))
-    If Len(GetWeeklyRowModuleName) = 0 Then
+    GetWeeklyRowModuleName = CStr(rowItem(0))
+    If Len(Trim$(GetWeeklyRowModuleName)) = 0 Then
         GetWeeklyRowModuleName = WEEKLY_UNASSIGNED_MODULE
     End If
 End Function
