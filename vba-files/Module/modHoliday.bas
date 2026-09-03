@@ -548,6 +548,7 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Range("A2").Value = "PPT에 항목 표시"
     ws.Range("A3").Value = "담당자 이름 표시"
     ws.Range("A4").Value = "같은 트리 반복 표시"
+    ws.Range("A5").Value = "완료 예상일 표시"
 
     ws.Range("A6").Value = "PPT 페이지 설정"
     ws.Range("A7").Value = "페이지 구성 방식"
@@ -569,11 +570,16 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Range("I2").Value = "분류 항목"
 
     If isNewSheet Then
-        ws.Range("B2:G4").Value = "N"
+        ws.Range("B2:G5").Value = "N"
         ws.Range(WR_DISPLAY_TYPE_CELL).Value = "Y"
         ws.Range(WR_DISPLAY_MAJOR_CELL).Value = "Y"
         ws.Range(WR_DISPLAY_TASK_CELL).Value = "Y"
         ws.Range("B3:G3").Value = "Y"
+        ws.Range(WR_DATE_TASK_CELL & ":" & WR_DATE_LEVEL_CELL).Value = "Y"
+    End If
+    If Application.WorksheetFunction.CountA(ws.Range("B5:G5")) = 0 Then
+        ws.Range("B5:G5").Value = "N"
+        ws.Range(WR_DATE_TASK_CELL & ":" & WR_DATE_LEVEL_CELL).Value = "Y"
     End If
 
     If Trim$(CStr(ws.Range(WR_PAGE_MODE_CELL).Value2)) = "" Then _
@@ -600,12 +606,12 @@ Public Sub EnsureWeeklyReportConfigSheet()
     Next i
 
     On Error Resume Next
-    ws.Range("B2:G4").Validation.Delete
+    ws.Range("B2:G5").Validation.Delete
     ws.Range("B7:B9").Validation.Delete
     ws.Range("E8:F14").Validation.Delete
     ws.Range("H3:H197").Validation.Delete
     On Error GoTo 0
-    ws.Range("B2:G4").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
+    ws.Range("B2:G5").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
     ws.Range(WR_PAGE_MODE_CELL).Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
         WEEKLY_REPORT_PAGE_MODE_ALL & "," & WEEKLY_REPORT_PAGE_MODE_MODULE & "," & WEEKLY_REPORT_PAGE_MODE_CUSTOM
     ws.Range(WR_PAGE_GROUP_CELL).Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
@@ -629,14 +635,14 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Columns("J").Hidden = True
     ws.Rows("1:17").RowHeight = 24
     ws.Rows("15:212").RowHeight = 21
-    ws.Range("A1:G4").Borders.LineStyle = xlContinuous
+    ws.Range("A1:G5").Borders.LineStyle = xlContinuous
     ws.Range("A6:B9").Borders.LineStyle = xlContinuous
     ws.Range("D6:F14").Borders.LineStyle = xlContinuous
     ws.Range("H1:I197").Borders.LineStyle = xlContinuous
     ws.Range("A1:G1,A6:B6,D6:F7,H1:I2").Font.Bold = True
     ws.Range("A1:G1").Interior.Color = RGB(237, 125, 49)
     ws.Range("A6:B6,D6:F7,H1:I2").Interior.Color = RGB(252, 228, 214)
-    ws.Range("A4:G4").Interior.Color = RGB(255, 242, 204)
+    ws.Range("A4:G5").Interior.Color = RGB(255, 242, 204)
     ws.Range("A1:I212").VerticalAlignment = xlCenter
     ws.Range("A1:I14").WrapText = False
 End Sub
@@ -667,7 +673,8 @@ End Function
 
 Private Function GetWeeklyReportConfiguredBullet(ByVal ws As Worksheet, _
                                                  ByVal bulletIndex As Long, _
-                                                 ByVal levelNumber As Long) As String
+                                                 ByVal levelNumber As Long, _
+                                                 ByRef isConfigured As Boolean) As String
     Dim displayMode As String
     Dim itemNumber As Long
 
@@ -676,6 +683,7 @@ Private Function GetWeeklyReportConfiguredBullet(ByVal ws As Worksheet, _
     itemNumber = GetNextWeeklyReportNumber(bulletIndex)
     displayMode = Trim$(CStr(ws.Range(WR_BULLET_MODE_FIRST_CELL). _
                                       Offset(bulletIndex - 1, 0).Value2))
+    isConfigured = (Len(displayMode) > 0)
     Select Case displayMode
         Case "번호 매기기", "레벨 번호"
             GetWeeklyReportConfiguredBullet = CStr(itemNumber) & "."
@@ -828,6 +836,7 @@ End Function
 Public Function GetWeeklyReportLevelBullet(ByVal taskLevel As Long) As String
     Dim ws As Worksheet
     Dim bulletText As String
+    Dim isConfigured As Boolean
 
     If taskLevel < 1 Then taskLevel = 1
     If taskLevel > 3 Then taskLevel = 3
@@ -836,10 +845,11 @@ Public Function GetWeeklyReportLevelBullet(ByVal taskLevel As Long) As String
     Set ws = GetWeeklyReportConfigSheet()
     On Error GoTo 0
     If Not ws Is Nothing Then
-        bulletText = GetWeeklyReportConfiguredBullet(ws, taskLevel + 4, taskLevel)
+        bulletText = GetWeeklyReportConfiguredBullet( _
+                         ws, taskLevel + 4, taskLevel, isConfigured)
     End If
 
-    If Len(bulletText) = 0 Then
+    If Not isConfigured Then
         Select Case taskLevel
             Case 1: bulletText = ChrW(&H2022)
             Case 2: bulletText = "-"
@@ -941,6 +951,30 @@ Public Function GetWeeklyReportShowTaskLevelFlag() As Boolean
                                            WEEKLY_REPORT_DISPLAY_TASK_LEVEL_VALUE_CELL, False)
 End Function
 
+Public Function GetWeeklyReportShowExpectedDateFlag( _
+                    ByVal displayLevel As Long) As Boolean
+    Dim valueCell As String
+
+    Select Case displayLevel
+        Case 1: valueCell = WR_DATE_TYPE_CELL
+        Case 2: valueCell = WR_DATE_MAJOR_CELL
+        Case 3: valueCell = WR_DATE_MIDDLE_CELL
+        Case 4: valueCell = WR_DATE_MINOR_CELL
+        Case 5: valueCell = WR_DATE_TASK_CELL
+        Case Else: valueCell = WR_DATE_LEVEL_CELL
+    End Select
+    GetWeeklyReportShowExpectedDateFlag = _
+        GetWeeklyReportDisplayFlag(valueCell, displayLevel >= 5)
+End Function
+
+Public Function GetWeeklyReportShowTaskExpectedDateFlag() As Boolean
+    GetWeeklyReportShowTaskExpectedDateFlag = _
+        (GetWeeklyReportShowTaskNameFlag() And _
+         GetWeeklyReportShowExpectedDateFlag(5)) Or _
+        (GetWeeklyReportShowTaskLevelFlag() And _
+         GetWeeklyReportShowExpectedDateFlag(6))
+End Function
+
 Public Function GetWeeklyReportShowTaskLevelOwnerFlag() As Boolean
     GetWeeklyReportShowTaskLevelOwnerFlag = GetWeeklyReportOwnerFlag( _
                                                 WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL)
@@ -1004,6 +1038,7 @@ Public Function GetWeeklyReportCategoryBullet(ByVal categoryLevel As Long) As St
     Dim ws As Worksheet
     Dim bulletText As String
     Dim valueCell As String
+    Dim isConfigured As Boolean
 
     Select Case categoryLevel
         Case 1: valueCell = WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL
@@ -1015,10 +1050,11 @@ Public Function GetWeeklyReportCategoryBullet(ByVal categoryLevel As Long) As St
     On Error Resume Next
     Set ws = GetWeeklyReportConfigSheet()
     If Not ws Is Nothing Then _
-        bulletText = GetWeeklyReportConfiguredBullet(ws, categoryLevel, categoryLevel)
+        bulletText = GetWeeklyReportConfiguredBullet( _
+                         ws, categoryLevel, categoryLevel, isConfigured)
     On Error GoTo 0
 
-    If Len(bulletText) = 0 Then
+    If Not isConfigured Then
         Select Case categoryLevel
             Case 1: bulletText = ChrW(&H2022)
             Case 2: bulletText = "-"
@@ -1045,30 +1081,32 @@ End Function
 Public Function GetWeeklyReportModuleBullet() As String
     Dim ws As Worksheet
     Dim bulletText As String
+    Dim isConfigured As Boolean
 
     On Error Resume Next
     Set ws = GetWeeklyReportConfigSheet()
     On Error GoTo 0
     If Not ws Is Nothing Then
-        bulletText = GetWeeklyReportConfiguredBullet(ws, 2, 2)
+        bulletText = GetWeeklyReportConfiguredBullet(ws, 2, 2, isConfigured)
     End If
 
-    If Len(bulletText) = 0 Then bulletText = ChrW(&H2022)
+    If Not isConfigured Then bulletText = ChrW(&H2022)
     GetWeeklyReportModuleBullet = bulletText
 End Function
 
 Public Function GetWeeklyReportProgramBullet() As String
     Dim ws As Worksheet
     Dim bulletText As String
+    Dim isConfigured As Boolean
 
     On Error Resume Next
     Set ws = GetWeeklyReportConfigSheet()
     On Error GoTo 0
     If Not ws Is Nothing Then
-        bulletText = GetWeeklyReportConfiguredBullet(ws, 4, 4)
+        bulletText = GetWeeklyReportConfiguredBullet(ws, 4, 4, isConfigured)
     End If
 
-    If Len(bulletText) = 0 Then bulletText = "-"
+    If Not isConfigured Then bulletText = "-"
     GetWeeklyReportProgramBullet = bulletText
 End Function
 
