@@ -9,8 +9,10 @@ Public Sub SetupDataHeaders(ws As Worksheet)
 
     ws.Cells(HEADER_ROW, COL_NO).Value = "No."
     ws.Cells(HEADER_ROW, COL_LEVEL).Value = "Level"
-    ws.Cells(HEADER_ROW, COL_MODULE).Value = "모듈"
-    ws.Cells(HEADER_ROW, COL_PROGRAM).Value = "프로그램"
+    ws.Cells(HEADER_ROW, COL_TYPE).Value = "타입"
+    ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value = "대분류"
+    ws.Cells(HEADER_ROW, COL_MIDDLE_CATEGORY).Value = "중분류"
+    ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value = "소분류"
     ws.Cells(HEADER_ROW, COL_TASK).Value = "내용"
     ws.Cells(HEADER_ROW, COL_OWNER).Value = "담당"
     ws.Cells(HEADER_ROW, COL_NOTE).Value = "비고"
@@ -78,26 +80,43 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
         ws.Columns(COL_NO).Insert Shift:=xlToRight
     End If
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MODULE).Value)) <> "모듈" Then
-        ws.Columns(COL_MODULE).Insert Shift:=xlToRight
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_TYPE).Value)) <> "타입" Then
+        ws.Columns(COL_TYPE).Insert Shift:=xlToRight
     End If
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_PROGRAM).Value)) <> "프로그램" Then
-        ws.Columns(COL_PROGRAM).Insert Shift:=xlToRight
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value)) <> "대분류" Then
+        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value)) = "모듈" Then
+            ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value = "대분류"
+        Else
+            ws.Columns(COL_MAJOR_CATEGORY).Insert Shift:=xlToRight
+        End If
+    End If
+
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MIDDLE_CATEGORY).Value)) <> "중분류" Then
+        ws.Columns(COL_MIDDLE_CATEGORY).Insert Shift:=xlToRight
+    End If
+
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value)) <> "소분류" Then
+        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value)) = "프로그램" Then
+            ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value = "소분류"
+        Else
+            ws.Columns(COL_MINOR_CATEGORY).Insert Shift:=xlToRight
+        End If
     End If
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_OWNER).Value)) <> "담당" Then
         ws.Columns(COL_OWNER).Insert Shift:=xlToRight
     End If
 
-    ' A newly inserted module column can inherit Level validation from its left.
+    ' Newly inserted classification columns can inherit validation from adjacent cells.
     On Error Resume Next
-    ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & ws.Rows.Count).Validation.Delete
+    ws.Range(COL_TYPE & DATA_START_ROW & ":" & _
+             COL_MINOR_CATEGORY & ws.Rows.Count).Validation.Delete
     On Error GoTo 0
 
     ' Remove the retired development-report column from existing workbooks.
-    If Trim$(CStr(ws.Cells(HEADER_ROW, 17).Value)) = "개발진행" Then
-        ws.Columns(17).Delete Shift:=xlToLeft
+    If Trim$(CStr(ws.Range(COL_WEEKLY_REPORT & HEADER_ROW).Value)) = "개발진행" Then
+        ws.Columns(COL_WEEKLY_REPORT).Delete Shift:=xlToLeft
     End If
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" Then
@@ -933,8 +952,10 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_NO).ColumnWidth = 6
     ws.Columns(COL_LEVEL).ColumnWidth = 7
     ws.Columns(COL_TASK).WrapText = False
-    ws.Columns(COL_MODULE).ColumnWidth = 14
-    ws.Columns(COL_PROGRAM).ColumnWidth = 14
+    ws.Columns(COL_TYPE).ColumnWidth = 12
+    ws.Columns(COL_MAJOR_CATEGORY).ColumnWidth = 14
+    ws.Columns(COL_MIDDLE_CATEGORY).ColumnWidth = 14
+    ws.Columns(COL_MINOR_CATEGORY).ColumnWidth = 14
     ws.Columns(COL_TASK).AutoFit
     ws.Columns(COL_OWNER).ColumnWidth = 12
     ws.Columns(COL_NOTE).ColumnWidth = 4.5
@@ -969,14 +990,14 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
     Dim r As Long
     Dim changedArea As Range
     Dim issueMessages As String
-    Dim changedModuleOrLevel As Boolean
+    Dim changedClassificationOrLevel As Boolean
 
     If ws Is Nothing Or Target Is Nothing Then Exit Sub
     If ws.Name = CONFIG_SHEET_NAME Then Exit Sub
 
     Set watchedRange = Union( _
         ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
-        ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & ws.Rows.Count), _
+        ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_MINOR_CATEGORY & ws.Rows.Count), _
         ws.Range(COL_TASK & DATA_START_ROW & ":" & COL_TASK & ws.Rows.Count), _
         ws.Range(COL_OWNER & DATA_START_ROW & ":" & COL_OWNER & ws.Rows.Count))
     Set changedRange = Intersect(Target, watchedRange)
@@ -990,11 +1011,12 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
     Next changedArea
 
     For r = DATA_START_ROW To lastRow
-        changedModuleOrLevel = _
+        changedClassificationOrLevel = _
             Not Intersect(changedRange, ws.Cells(r, COL_LEVEL)) Is Nothing Or _
-            Not Intersect(changedRange, ws.Cells(r, COL_MODULE)) Is Nothing
+            Not Intersect(changedRange, ws.Range(COL_TYPE & r & ":" & _
+                                                 COL_MINOR_CATEGORY & r)) Is Nothing
 
-        If changedModuleOrLevel Then
+        If changedClassificationOrLevel Then
             EnforceTaskModuleFromParent ws, r, issueMessages
             PropagateTaskModuleToDescendants ws, r, lastRow
         End If
@@ -1003,11 +1025,11 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
     SynchronizeTaskHierarchyOwners ws, lastRow
 
     If Len(issueMessages) > 0 Then
-        MsgBox "모듈 계층 정합성을 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
+        MsgBox "분류 계층 정합성을 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
                issueMessages & vbCrLf & _
-               "하위 작업의 모듈은 가장 가까운 부모 모듈과 같아야 합니다.", _
+               "하위 작업의 네 분류 값은 가장 가까운 부모 작업과 같아야 합니다.", _
                vbExclamation, _
-               "모듈 정합성 오류"
+               "분류 정합성 오류"
     End If
 End Sub
 
@@ -1030,10 +1052,10 @@ Public Sub SynchronizeTaskHierarchyModules(ByVal ws As Worksheet, _
     SynchronizeTaskHierarchyOwners ws, lastRow
 
     If showIssueMessage And Len(issueMessages) > 0 Then
-        MsgBox "기존 모듈 계층 오류를 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
+        MsgBox "기존 분류 계층 오류를 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
                issueMessages, _
                vbExclamation, _
-               "모듈 정합성 오류"
+               "분류 정합성 오류"
     End If
 End Sub
 
@@ -1182,10 +1204,10 @@ Private Sub EnforceTaskModuleFromParent(ByVal ws As Worksheet, _
                                         ByRef issueMessages As String)
     Dim taskLevel As Long
     Dim parentRow As Long
-    Dim parentModule As String
-    Dim childModule As String
     Dim parentTask As String
     Dim childTask As String
+    Dim parentValues As Variant
+    Dim childValues As Variant
 
     taskLevel = GetTaskLevel(ws, rowNum)
     If taskLevel <= 1 Then Exit Sub
@@ -1194,7 +1216,7 @@ Private Sub EnforceTaskModuleFromParent(ByVal ws As Worksheet, _
     childTask = Trim$(CStr(ws.Cells(rowNum, COL_TASK).Value2))
 
     If parentRow = 0 Then
-        ws.Cells(rowNum, COL_MODULE).ClearContents
+        ws.Range(COL_TYPE & rowNum & ":" & COL_MINOR_CATEGORY & rowNum).ClearContents
         AppendModuleConsistencyIssue issueMessages, rowNum, childTask, _
             "Level " & taskLevel & "이지만 위쪽에 부모 작업이 없습니다. " & _
             "부모 작업을 먼저 만들거나 Level을 1로 변경하세요."
@@ -1202,47 +1224,51 @@ Private Sub EnforceTaskModuleFromParent(ByVal ws As Worksheet, _
     End If
 
     parentTask = Trim$(CStr(ws.Cells(parentRow, COL_TASK).Value2))
-    parentModule = Trim$(CStr(ws.Cells(parentRow, COL_MODULE).Value2))
-    childModule = Trim$(CStr(ws.Cells(rowNum, COL_MODULE).Value2))
+    parentValues = ws.Range(COL_TYPE & parentRow & ":" & _
+                            COL_MINOR_CATEGORY & parentRow).Value2
+    childValues = ws.Range(COL_TYPE & rowNum & ":" & _
+                           COL_MINOR_CATEGORY & rowNum).Value2
 
-    If Len(parentModule) = 0 Then
-        ws.Cells(rowNum, COL_MODULE).ClearContents
+    If Not ClassificationValuesEqual(parentValues, childValues) Then
+        ws.Range(COL_TYPE & rowNum & ":" & _
+                 COL_MINOR_CATEGORY & rowNum).Value2 = parentValues
         AppendModuleConsistencyIssue issueMessages, rowNum, childTask, _
-            "부모 작업 '" & parentTask & "'(행 " & parentRow & ")의 모듈이 비어 있습니다. " & _
-            "부모 모듈을 먼저 입력하세요."
-    ElseIf Len(childModule) = 0 Then
-        ws.Cells(rowNum, COL_MODULE).Value = parentModule
-    ElseIf StrComp(childModule, parentModule, vbTextCompare) <> 0 Then
-        ws.Cells(rowNum, COL_MODULE).Value = parentModule
-        AppendModuleConsistencyIssue issueMessages, rowNum, childTask, _
-            "입력한 모듈 '" & childModule & "'이 부모 작업 '" & parentTask & _
-            "'(행 " & parentRow & ")의 모듈 '" & parentModule & "'과 다릅니다. " & _
-            "부모 모듈로 되돌렸습니다."
+            "입력한 분류가 부모 작업 '" & parentTask & "'(행 " & parentRow & _
+            ")과 달라 부모의 타입/대분류/중분류/소분류로 맞췄습니다."
     End If
 End Sub
+
+Private Function ClassificationValuesEqual(ByVal leftValues As Variant, _
+                                             ByVal rightValues As Variant) As Boolean
+    Dim i As Long
+
+    For i = 1 To 4
+        If StrComp(Trim$(CStr(leftValues(1, i))), _
+                   Trim$(CStr(rightValues(1, i))), vbTextCompare) <> 0 Then Exit Function
+    Next i
+    ClassificationValuesEqual = True
+End Function
 
 Private Sub PropagateTaskModuleToDescendants(ByVal ws As Worksheet, _
                                              ByVal rowNum As Long, _
                                              ByVal lastRow As Long)
     Dim parentLevel As Long
     Dim subtreeEndRow As Long
-    Dim moduleText As String
+    Dim classificationValues As Variant
     Dim r As Long
 
     parentLevel = GetTaskLevel(ws, rowNum)
     subtreeEndRow = GetTaskSubtreeEndRow(ws, rowNum, lastRow)
     If subtreeEndRow <= rowNum Then Exit Sub
 
-    moduleText = Trim$(CStr(ws.Cells(rowNum, COL_MODULE).Value2))
+    classificationValues = ws.Range(COL_TYPE & rowNum & ":" & _
+                                    COL_MINOR_CATEGORY & rowNum).Value2
     For r = rowNum + 1 To subtreeEndRow
         If GetTaskLevel(ws, r) > parentLevel And _
            (HasTaskContent(ws, r) Or _
             Len(Trim$(CStr(ws.Cells(r, COL_LEVEL).Value2))) > 0) Then
-            If Len(moduleText) = 0 Then
-                ws.Cells(r, COL_MODULE).ClearContents
-            Else
-                ws.Cells(r, COL_MODULE).Value = moduleText
-            End If
+            ws.Range(COL_TYPE & r & ":" & _
+                     COL_MINOR_CATEGORY & r).Value2 = classificationValues
         End If
     Next r
 End Sub
@@ -1259,7 +1285,7 @@ End Sub
 Public Sub ApplyTaskInputValidation(ws As Worksheet)
     Dim lastSheetRow As Long
     Dim rngDate As Range
-    Dim rngModule As Range
+    Dim rngClassification As Range
     Dim rngLevel As Range
     Dim rngProgress As Range
     Dim rngManualProgress As Range
@@ -1267,9 +1293,10 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     
     lastSheetRow = ws.Rows.Count
 
-    Set rngModule = ws.Range(COL_MODULE & DATA_START_ROW & ":" & COL_MODULE & lastSheetRow)
+    Set rngClassification = ws.Range(COL_TYPE & DATA_START_ROW & ":" & _
+                                     COL_MINOR_CATEGORY & lastSheetRow)
     On Error Resume Next
-    rngModule.Validation.Delete
+    rngClassification.Validation.Delete
     On Error GoTo 0
 
     ApplyTaskTextLengthValidation ws
