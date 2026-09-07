@@ -222,7 +222,8 @@ Public Sub 버튼_생성_선택()
         "초기화", _
         "항목 숨김", _
         "개체삽입", _
-        "주간 PPT")
+        "주간 PPT", _
+        "일별 현황")
 
     setupSheet.Range("A2").Value = "버튼"
     setupSheet.Range("B2").Value = "순서"
@@ -295,8 +296,8 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     Dim setupSheet As Worksheet
     Dim targetSheet As Worksheet
     Dim targetSheetName As String
-    Dim selectedIndexes(1 To 7) As Long
-    Dim selectedOrders(1 To 7) As Long
+    Dim selectedIndexes(1 To 8) As Long
+    Dim selectedOrders(1 To 8) As Long
     Dim selectedCount As Long
     Dim optionIndex As Long
     Dim optionOrder As Long
@@ -310,7 +311,7 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     targetSheetName = CStr(setupSheet.Range("Z1").Value2)
     Set targetSheet = ThisWorkbook.Worksheets(targetSheetName)
 
-    For optionIndex = 1 To 7
+    For optionIndex = 1 To 8
         If IsSetupOptionChecked(setupSheet, optionIndex) Then
             optionOrder = GetSetupOptionOrder(setupSheet, optionIndex)
             If optionOrder < 1 Then
@@ -400,6 +401,8 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
             CreateVersionButton ws, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", buttonOrder, 72
         Case 7
             CreateVersionButton ws, "btnWeeklyPptReport", "주간 PPT", "주간보고PPT_생성", buttonOrder, 72
+        Case 8
+            CreateVersionButton ws, "btnDailyProgressReport", "일별 현황", "일별진행현황_생성", buttonOrder, 72
     End Select
 End Sub
 
@@ -435,7 +438,7 @@ Private Sub DeleteManagedButtons(ByVal ws As Worksheet)
         "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
         "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
         "btnPersonalDevReport", "btnTeamDevReport", "btnModuleDevReport", _
-        "btnWeeklyPptReport", _
+        "btnWeeklyPptReport", "btnDailyProgressReport", _
         "btnLegacyImport", "btnButtonImport", "btnDevProgressReport")
 
     On Error Resume Next
@@ -872,6 +875,7 @@ End Function
 Private Function IsTaskSheet(ByVal ws As Worksheet) As Boolean
     IsTaskSheet = (StrComp(ws.Name, CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
                    StrComp(ws.Name, "WeeklyPptTemplate", vbTextCompare) <> 0 And _
+                   StrComp(ws.Name, "_일별진행현황템플릿", vbTextCompare) <> 0 And _
                    StrComp(ws.Name, BUTTON_SETUP_SHEET_NAME, vbTextCompare) <> 0)
 End Function
 
