@@ -584,12 +584,15 @@ Private Sub AppendWeeklyCurrentRowsForGroup(ByVal rows As Collection, _
     Dim currentPath As Variant
     Dim previousPath As Variant
     Dim hierarchyOwners As Object
+    Dim hierarchyDates As Object
     Dim rowItem As Variant
     Dim sourceRow As Long
     Dim maxSourceRow As Long
 
     Set hierarchyOwners = BuildWeeklyHierarchyOwnerMap( _
                               rows, moduleName, programName, filterByProgram)
+    Set hierarchyDates = BuildWeeklyHierarchyDateMap( _
+                             rows, moduleName, programName, filterByProgram)
     previousPath = Empty
     maxSourceRow = GetWeeklyMaxSourceRow( _
                        rows, moduleName, programName, filterByProgram)
@@ -602,7 +605,7 @@ Private Sub AppendWeeklyCurrentRowsForGroup(ByVal rows As Collection, _
                 currentPath = rowItem(9)
                 AppendWeeklyCurrentHierarchyPath _
                     items, dates, levels, currentPath, previousPath, _
-                    CStr(rowItem(4)), hierarchyOwners, showTaskOwnerNames, _
+                    hierarchyDates, hierarchyOwners, showTaskOwnerNames, _
                     taskOwnerLevel, levelOffset
                 previousPath = currentPath
                 Exit For
@@ -651,6 +654,44 @@ Private Function BuildWeeklyHierarchyOwnerMap(ByVal rows As Collection, _
     Set BuildWeeklyHierarchyOwnerMap = hierarchyOwners
 End Function
 
+Private Function BuildWeeklyHierarchyDateMap(ByVal rows As Collection, _
+                                             ByVal moduleName As String, _
+                                             ByVal programName As String, _
+                                             ByVal filterByProgram As Boolean) As Object
+    Dim hierarchyDates As Object
+    Dim rowItem As Variant
+    Dim itemPath As Variant
+    Dim pathToken As String
+    Dim dateValue As Variant
+    Dim depth As Long
+
+    Set hierarchyDates = CreateObject("Scripting.Dictionary")
+    hierarchyDates.CompareMode = vbTextCompare
+
+    For Each rowItem In rows
+        If WeeklyRowMatchesGroup( _
+               rowItem, moduleName, programName, filterByProgram) And _
+           Len(CStr(rowItem(4))) > 0 Then
+            itemPath = rowItem(9)
+            For depth = LBound(itemPath) To UBound(itemPath)
+                pathToken = CStr(itemPath(depth))
+                If Not hierarchyDates.Exists(pathToken) Then
+                    hierarchyDates.Add pathToken, _
+                        Array(CDbl(rowItem(3)), CStr(rowItem(4)))
+                Else
+                    dateValue = hierarchyDates(pathToken)
+                    If CDbl(rowItem(3)) > CDbl(dateValue(0)) Then
+                        hierarchyDates(pathToken) = _
+                            Array(CDbl(rowItem(3)), CStr(rowItem(4)))
+                    End If
+                End If
+            Next depth
+        End If
+    Next rowItem
+
+    Set BuildWeeklyHierarchyDateMap = hierarchyDates
+End Function
+
 Private Function GetWeeklyMaxSourceRow(ByVal rows As Collection, _
                                        ByVal moduleName As String, _
                                        ByVal programName As String, _
@@ -672,7 +713,7 @@ Private Sub AppendWeeklyCurrentHierarchyPath(ByVal items As Collection, _
                                              ByVal levels As Collection, _
                                              ByVal currentPath As Variant, _
                                              ByVal previousPath As Variant, _
-                                             ByVal leafDateText As String, _
+                                             ByVal hierarchyDates As Object, _
                                              ByVal hierarchyOwners As Object, _
                                              ByVal showTaskOwnerNames As Boolean, _
                                              ByVal taskOwnerLevel As Long, _
@@ -710,8 +751,10 @@ Private Sub AppendWeeklyCurrentHierarchyPath(ByVal items As Collection, _
         End If
 
         dateText = ""
-        If depth = UBound(currentPath) And _
-           GetWeeklyReportShowTaskExpectedDateFlag() Then dateText = leafDateText
+        If GetWeeklyReportShowTaskExpectedDateFlag(depth + 1) And _
+           hierarchyDates.Exists(pathToken) Then
+            dateText = CStr(hierarchyDates(pathToken)(1))
+        End If
 
         items.Add displayText
         dates.Add dateText

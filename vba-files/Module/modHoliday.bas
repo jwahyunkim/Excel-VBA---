@@ -575,11 +575,13 @@ Public Sub EnsureWeeklyReportConfigSheet()
         ws.Range(WR_DISPLAY_MAJOR_CELL).Value = "Y"
         ws.Range(WR_DISPLAY_TASK_CELL).Value = "Y"
         ws.Range("B3:G3").Value = "Y"
-        ws.Range(WR_DATE_TASK_CELL & ":" & WR_DATE_LEVEL_CELL).Value = "Y"
+        ws.Range(WR_DATE_TASK_CELL).Value = "Y"
+        ws.Range(WR_DATE_LEVEL_CELL).Value = "전체"
     End If
     If Application.WorksheetFunction.CountA(ws.Range("B5:G5")) = 0 Then
         ws.Range("B5:G5").Value = "N"
-        ws.Range(WR_DATE_TASK_CELL & ":" & WR_DATE_LEVEL_CELL).Value = "Y"
+        ws.Range(WR_DATE_TASK_CELL).Value = "Y"
+        ws.Range(WR_DATE_LEVEL_CELL).Value = "전체"
     End If
 
     If Trim$(CStr(ws.Range(WR_PAGE_MODE_CELL).Value2)) = "" Then _
@@ -611,7 +613,10 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Range("E8:F14").Validation.Delete
     ws.Range("H3:H197").Validation.Delete
     On Error GoTo 0
-    ws.Range("B2:G5").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
+    ws.Range("B2:G4").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
+    ws.Range("B5:F5").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
+    ws.Range("G5").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
+        "전체,Level 1까지,Level 2까지,Level 3까지"
     ws.Range(WR_PAGE_MODE_CELL).Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
         WEEKLY_REPORT_PAGE_MODE_ALL & "," & WEEKLY_REPORT_PAGE_MODE_MODULE & "," & WEEKLY_REPORT_PAGE_MODE_CUSTOM
     ws.Range(WR_PAGE_GROUP_CELL).Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
@@ -960,19 +965,35 @@ Public Function GetWeeklyReportShowExpectedDateFlag( _
         Case 2: valueCell = WR_DATE_MAJOR_CELL
         Case 3: valueCell = WR_DATE_MIDDLE_CELL
         Case 4: valueCell = WR_DATE_MINOR_CELL
-        Case 5: valueCell = WR_DATE_TASK_CELL
-        Case Else: valueCell = WR_DATE_LEVEL_CELL
+        Case Else: valueCell = WR_DATE_TASK_CELL
     End Select
     GetWeeklyReportShowExpectedDateFlag = _
         GetWeeklyReportDisplayFlag(valueCell, displayLevel >= 5)
 End Function
 
-Public Function GetWeeklyReportShowTaskExpectedDateFlag() As Boolean
-    GetWeeklyReportShowTaskExpectedDateFlag = _
-        (GetWeeklyReportShowTaskNameFlag() And _
-         GetWeeklyReportShowExpectedDateFlag(5)) Or _
-        (GetWeeklyReportShowTaskLevelFlag() And _
-         GetWeeklyReportShowExpectedDateFlag(6))
+Public Function GetWeeklyReportShowTaskExpectedDateFlag( _
+                    ByVal taskLevel As Long) As Boolean
+    Dim ws As Worksheet
+    Dim levelSetting As String
+    Dim maxLevel As Long
+
+    If Not GetWeeklyReportShowExpectedDateFlag(5) Then Exit Function
+    On Error Resume Next
+    Set ws = GetWeeklyReportConfigSheet()
+    On Error GoTo 0
+    If ws Is Nothing Then
+        GetWeeklyReportShowTaskExpectedDateFlag = True
+        Exit Function
+    End If
+
+    levelSetting = Trim$(CStr(ws.Range(WR_DATE_LEVEL_CELL).Value2))
+    Select Case levelSetting
+        Case "Level 1까지": maxLevel = 1
+        Case "Level 2까지": maxLevel = 2
+        Case "Level 3까지": maxLevel = 3
+        Case Else: maxLevel = 32767
+    End Select
+    GetWeeklyReportShowTaskExpectedDateFlag = (taskLevel <= maxLevel)
 End Function
 
 Public Function GetWeeklyReportShowTaskLevelOwnerFlag() As Boolean
