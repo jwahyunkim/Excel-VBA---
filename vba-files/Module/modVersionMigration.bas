@@ -8,7 +8,7 @@ Private Const TEMP_PPT_OLE_PREFIX As String = "tmpGanttPptOle_"
 Private Const BUTTON_SETUP_SHEET_NAME As String = "_버튼생성"
 Private Const DAILY_HISTORY_SHEET_NAME As String = "_일별진척률이력"
 Private Const DAILY_HISTORY_DATA_START_ROW As Long = 2
-Private Const DAILY_HISTORY_LAST_COLUMN As Long = 11
+Private Const DAILY_HISTORY_LAST_COLUMN As Long = 13
 
 Public Sub 데이터_가져오기()
     Dim targetBook As Workbook
@@ -88,6 +88,7 @@ Public Sub 데이터_가져오기()
     Application.Calculation = xlCalculationManual
 
     importedHistoryRowCount = ImportDailyProgressHistory(sourceBook, targetBook)
+    ImportDailyReportConfig sourceBook, targetBook
 
     For Each sourceSheet In sourceBook.Worksheets
         If IsTaskSheet(sourceSheet) Then
@@ -231,7 +232,7 @@ Public Sub 버튼_생성_선택()
         "개체삽입", _
         "주간 PPT", _
         "일별 현황", _
-        "이력 초기화")
+        "이력 보기")
 
     setupSheet.Range("A2").Value = "버튼"
     setupSheet.Range("B2").Value = "순서"
@@ -412,7 +413,10 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 8
             CreateVersionButton ws, "btnDailyProgressReport", "일별 현황", "일별진행현황_생성", buttonOrder, 72
         Case 9
-            CreateVersionButton ws, "btnDailyProgressHistoryReset", "이력 초기화", "일별진척률_이력초기화", buttonOrder, 72
+            On Error Resume Next
+            ws.Shapes("btnDailyProgressHistoryReset").Delete
+            On Error GoTo 0
+            CreateVersionButton ws, "btnDailyProgressHistoryView", "이력 보기", "일별진척률_이력보기", buttonOrder, 72
     End Select
 End Sub
 
@@ -448,7 +452,8 @@ Private Sub DeleteManagedButtons(ByVal ws As Worksheet)
         "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
         "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
         "btnPersonalDevReport", "btnTeamDevReport", "btnModuleDevReport", _
-        "btnWeeklyPptReport", "btnDailyProgressReport", "btnDailyProgressHistoryReset", _
+        "btnWeeklyPptReport", "btnDailyProgressReport", _
+        "btnDailyProgressHistoryView", "btnDailyProgressHistoryReset", _
         "btnLegacyImport", "btnButtonImport", "btnDevProgressReport")
 
     On Error Resume Next
@@ -544,7 +549,8 @@ Public Function GetNextVersionButtonOrder(ByVal ws As Worksheet) As Long
     buttonNames = Array( _
         "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
         "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
-        "btnWeeklyPptReport", "btnDailyProgressReport", "btnDailyProgressHistoryReset")
+        "btnWeeklyPptReport", "btnDailyProgressReport", _
+        "btnDailyProgressHistoryView", "btnDailyProgressHistoryReset")
 
     For Each buttonName In buttonNames
         If VersionShapeExistsOnSheet(ws, CStr(buttonName)) Then
@@ -920,6 +926,7 @@ Private Function ImportDailyProgressHistory(ByVal sourceBook As Workbook, _
     Dim targetWs As Worksheet
     Dim sourceLastRow As Long
     Dim targetLastRow As Long
+    Dim sourceColumnCount As Long
 
     Set sourceWs = GetWorksheet(sourceBook, DAILY_HISTORY_SHEET_NAME)
     Set targetWs = GetWorksheet(targetBook, DAILY_HISTORY_SHEET_NAME)
@@ -938,38 +945,51 @@ Private Function ImportDailyProgressHistory(ByVal sourceBook As Workbook, _
     End If
 
     If Not sourceWs Is Nothing Then
+        sourceColumnCount = 11
+        If Trim$(CStr(sourceWs.Cells(1, 13).Value2)) = "원본시트" Then _
+            sourceColumnCount = DAILY_HISTORY_LAST_COLUMN
         sourceLastRow = sourceWs.Cells(sourceWs.Rows.Count, 1).End(xlUp).Row
         If sourceLastRow >= DAILY_HISTORY_DATA_START_ROW Then
             targetWs.Range( _
                 targetWs.Cells(DAILY_HISTORY_DATA_START_ROW, 1), _
-                targetWs.Cells(sourceLastRow, DAILY_HISTORY_LAST_COLUMN)).Value2 = _
+                targetWs.Cells(sourceLastRow, sourceColumnCount)).Value2 = _
                 sourceWs.Range( _
                     sourceWs.Cells(DAILY_HISTORY_DATA_START_ROW, 1), _
-                    sourceWs.Cells(sourceLastRow, DAILY_HISTORY_LAST_COLUMN)).Value2
+                    sourceWs.Cells(sourceLastRow, sourceColumnCount)).Value2
+            If sourceColumnCount = 11 Then
+                targetWs.Cells(1, 9).Value = "담당자"
+                targetWs.Cells(1, 10).Value = "저장시각"
+                targetWs.Cells(1, 11).Value = "원본시트"
+            End If
             ImportDailyProgressHistory = sourceLastRow - DAILY_HISTORY_DATA_START_ROW + 1
         End If
     End If
 
-    targetWs.Cells(1, 1).Value = "기록일"
-    targetWs.Cells(1, 2).Value = "업무키"
-    targetWs.Cells(1, 3).Value = "진척률"
-    targetWs.Cells(1, 4).Value = "상태"
-    targetWs.Cells(1, 5).Value = "Type"
-    targetWs.Cells(1, 6).Value = "대분류"
-    targetWs.Cells(1, 7).Value = "중분류"
-    targetWs.Cells(1, 8).Value = "소분류"
-    targetWs.Cells(1, 9).Value = "담당자"
-    targetWs.Cells(1, 10).Value = "저장시각"
-    targetWs.Cells(1, 11).Value = "원본시트"
+    NormalizeDailyProgressHistoryLayout targetWs
     targetWs.Rows(1).Font.Bold = True
     targetWs.Columns(1).NumberFormat = "yyyy-mm-dd"
     targetWs.Columns(3).NumberFormat = "0%"
-    targetWs.Columns(10).NumberFormat = "yyyy-mm-dd hh:mm"
+    targetWs.Columns(12).NumberFormat = "yyyy-mm-dd hh:mm:ss"
     targetWs.Visible = xlSheetVeryHidden
 End Function
 
+Private Sub ImportDailyReportConfig(ByVal sourceBook As Workbook, _
+                                    ByVal targetBook As Workbook)
+    Dim sourceWs As Worksheet
+    Dim targetWs As Worksheet
+
+    Set sourceWs = GetWorksheet(sourceBook, DAILY_REPORT_CONFIG_SHEET_NAME)
+    If sourceWs Is Nothing Then Exit Sub
+    Set targetWs = GetWorksheet(targetBook, DAILY_REPORT_CONFIG_SHEET_NAME)
+    If targetWs Is Nothing Then Exit Sub
+
+    targetWs.Range("B2:G2").Value2 = sourceWs.Range("B2:G2").Value2
+End Sub
+
 Private Function IsTaskSheet(ByVal ws As Worksheet) As Boolean
     IsTaskSheet = (StrComp(ws.Name, CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
+                   StrComp(ws.Name, WEEKLY_REPORT_CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
+                   StrComp(ws.Name, DAILY_REPORT_CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
                    StrComp(ws.Name, "WeeklyPptTemplate", vbTextCompare) <> 0 And _
                    StrComp(ws.Name, "_일별진행현황템플릿", vbTextCompare) <> 0 And _
                    StrComp(ws.Name, DAILY_HISTORY_SHEET_NAME, vbTextCompare) <> 0 And _

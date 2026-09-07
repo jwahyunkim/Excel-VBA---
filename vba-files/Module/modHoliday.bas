@@ -508,10 +508,137 @@ Public Sub EnsureConfigSheet()
     rngWeeklyCustomPageNumbers.Validation.ErrorMessage = "페이지 번호는 1~1000 사이 정수여야 합니다."
 
     EnsureWeeklyReportConfigSheet
+    EnsureDailyReportConfigSheet
     RefreshWeeklyReportModuleDropdown
     ws.Range("O1:X203").Clear
     ws.Range("AA1:AA203").Clear
 End Sub
+
+Public Sub EnsureDailyReportConfigSheet()
+    Dim ws As Worksheet
+    Dim isNewSheet As Boolean
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(DAILY_REPORT_CONFIG_SHEET_NAME)
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Worksheets.Add( _
+                     After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.Name = DAILY_REPORT_CONFIG_SHEET_NAME
+        isNewSheet = True
+    End If
+
+    ws.Range("A1").Value = "일일현황 표시 설정"
+    ws.Range("B1").Value = "타입"
+    ws.Range("C1").Value = "대분류"
+    ws.Range("D1").Value = "중분류"
+    ws.Range("E1").Value = "소분류"
+    ws.Range("F1").Value = "업무명"
+    ws.Range("G1").Value = "업무 레벨"
+    ws.Range("A2").Value = "진척률 표시"
+
+    If isNewSheet Or Application.WorksheetFunction.CountA(ws.Range("B2:G2")) = 0 Then
+        ws.Range("B2:E2").Value = "N"
+        ws.Range(DR_PROGRESS_TASK_CELL).Value = "Y"
+        ws.Range(DR_PROGRESS_LEVEL_CELL).Value = "전체"
+    End If
+
+    On Error Resume Next
+    ws.Range("B2:F2").Validation.Delete
+    ws.Range(DR_PROGRESS_LEVEL_CELL).Validation.Delete
+    On Error GoTo 0
+
+    With ws.Range("B2:F2").Validation
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+             Operator:=xlBetween, Formula1:="Y,N"
+        .IgnoreBlank = False
+        .InCellDropdown = True
+        .InputTitle = "진척률 표시"
+        .InputMessage = "해당 항목에 진척률을 표시하려면 Y, 숨기려면 N을 선택하세요."
+        .ErrorTitle = "설정값 오류"
+        .ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
+    End With
+
+    With ws.Range(DR_PROGRESS_LEVEL_CELL).Validation
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+             Operator:=xlBetween, _
+             Formula1:="전체,Level 1까지,Level 2까지,Level 3까지"
+        .IgnoreBlank = False
+        .InCellDropdown = True
+        .InputTitle = "업무 레벨"
+        .InputMessage = "진척률을 표시할 업무의 최대 Level을 선택하세요."
+        .ErrorTitle = "설정값 오류"
+        .ErrorMessage = "목록에 있는 업무 레벨만 선택할 수 있습니다."
+    End With
+
+    ws.Tab.Color = RGB(91, 155, 213)
+    ws.Cells.Font.Name = "맑은 고딕"
+    ws.Cells.Font.Size = 10
+    ws.Columns("A").ColumnWidth = 24
+    ws.Columns("B:G").ColumnWidth = 16
+    ws.Rows("1:2").RowHeight = 24
+    ws.Range("A1:G2").Borders.LineStyle = xlContinuous
+    ws.Range("A1:G1").Font.Bold = True
+    ws.Range("A1:G1").Interior.Color = RGB(91, 155, 213)
+    ws.Range("A1:G2").VerticalAlignment = xlCenter
+End Sub
+
+Public Function GetDailyReportShowCategoryProgressFlag( _
+                    ByVal categoryLevel As Long) As Boolean
+    Dim valueCell As String
+
+    Select Case categoryLevel
+        Case 1: valueCell = DR_PROGRESS_TYPE_CELL
+        Case 2: valueCell = DR_PROGRESS_MAJOR_CELL
+        Case 3: valueCell = DR_PROGRESS_MIDDLE_CELL
+        Case 4: valueCell = DR_PROGRESS_MINOR_CELL
+        Case Else: Exit Function
+    End Select
+    GetDailyReportShowCategoryProgressFlag = GetDailyReportConfigFlag(valueCell, False)
+End Function
+
+Public Function GetDailyReportShowTaskProgressFlag( _
+                    ByVal taskLevel As Long) As Boolean
+    Dim ws As Worksheet
+    Dim levelSetting As String
+    Dim maxLevel As Long
+
+    If Not GetDailyReportConfigFlag(DR_PROGRESS_TASK_CELL, True) Then Exit Function
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(DAILY_REPORT_CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then
+        GetDailyReportShowTaskProgressFlag = True
+        Exit Function
+    End If
+
+    levelSetting = Trim$(CStr(ws.Range(DR_PROGRESS_LEVEL_CELL).Value2))
+    Select Case levelSetting
+        Case "Level 1까지": maxLevel = 1
+        Case "Level 2까지": maxLevel = 2
+        Case "Level 3까지": maxLevel = 3
+        Case Else: maxLevel = 32767
+    End Select
+    GetDailyReportShowTaskProgressFlag = (taskLevel <= maxLevel)
+End Function
+
+Private Function GetDailyReportConfigFlag(ByVal valueCell As String, _
+                                          ByVal defaultValue As Boolean) As Boolean
+    Dim ws As Worksheet
+    Dim settingValue As String
+
+    GetDailyReportConfigFlag = defaultValue
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(DAILY_REPORT_CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    settingValue = UCase$(Trim$(CStr(ws.Range(valueCell).Value2)))
+    If settingValue = "Y" Then GetDailyReportConfigFlag = True
+    If settingValue = "N" Then GetDailyReportConfigFlag = False
+End Function
 
 Private Function GetWeeklyReportConfigSheet() As Worksheet
     On Error Resume Next

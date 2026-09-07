@@ -11,11 +11,16 @@ Private Const DAILY_FILE_FORMAT_XLSX As Long = 51
 Private Const DAILY_HISTORY_SHEET_NAME As String = "_일별진척률이력"
 Private Const DAILY_HISTORY_HEADER_ROW As Long = 1
 Private Const DAILY_HISTORY_DATA_START_ROW As Long = 2
-Private Const DAILY_HISTORY_SOURCE_SHEET_COLUMN As Long = 11
+Private Const DAILY_HISTORY_TASK_COLUMN As Long = 9
+Private Const DAILY_HISTORY_TASK_LEVEL_COLUMN As Long = 10
+Private Const DAILY_HISTORY_OWNER_COLUMN As Long = 11
+Private Const DAILY_HISTORY_SAVED_AT_COLUMN As Long = 12
+Private Const DAILY_HISTORY_SOURCE_SHEET_COLUMN As Long = 13
 Private Const DAILY_HISTORY_KEY_SEPARATOR As Long = 29
 
 Private mDailyProgressHistory As Object
 Private mDailyProgressCache As Object
+Private mDailyProgressNodeRows As Object
 
 Public Sub 일별진행현황_생성버튼_생성()
     Dim ws As Worksheet
@@ -45,7 +50,7 @@ EH:
            Err.Description, vbExclamation
 End Sub
 
-Public Sub 일별진척률_이력초기화버튼_생성(Optional ByVal showCompletionMessage As Boolean = True)
+Public Sub 일별진척률_이력보기버튼_생성(Optional ByVal showCompletionMessage As Boolean = True)
     Dim ws As Worksheet
     Dim lastRow As Long
     Dim buttonOrder As Long
@@ -57,26 +62,50 @@ Public Sub 일별진척률_이력초기화버튼_생성(Optional ByVal showCompl
 
     buttonOrder = GetNextVersionButtonOrder(ws)
     On Error Resume Next
-    Set existingButton = ws.Shapes("btnDailyProgressHistoryReset")
+    Set existingButton = ws.Shapes("btnDailyProgressHistoryView")
+    If existingButton Is Nothing Then _
+        Set existingButton = ws.Shapes("btnDailyProgressHistoryReset")
     On Error GoTo EH
     If Not existingButton Is Nothing Then
         buttonOrder = CLng((existingButton.Left - ws.Range("B2").Left) / 80) + 1
     End If
 
     UnprotectTaskSheet ws
-    CreateVersionButton ws, "btnDailyProgressHistoryReset", "이력 초기화", _
-                        "일별진척률_이력초기화", buttonOrder, 72
+    On Error Resume Next
+    ws.Shapes("btnDailyProgressHistoryReset").Delete
+    On Error GoTo EH
+    CreateVersionButton ws, "btnDailyProgressHistoryView", "이력 보기", _
+                        "일별진척률_이력보기", buttonOrder, 72
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
     ApplyCalculatedColumnsProtection ws, lastRow
-    If showCompletionMessage Then MsgBox "버튼 생성 완료: 이력 초기화", vbInformation
+    If showCompletionMessage Then MsgBox "버튼 생성 완료: 이력 보기", vbInformation
     Exit Sub
 EH:
     If showCompletionMessage Then
-        MsgBox "이력 초기화 버튼 생성 오류: " & Err.Description, vbExclamation
+        MsgBox "이력 보기 버튼 생성 오류: " & Err.Description, vbExclamation
     Else
-        Err.Raise Err.Number, "일별진척률_이력초기화버튼_생성", Err.Description
+        Err.Raise Err.Number, "일별진척률_이력보기버튼_생성", Err.Description
     End If
+End Sub
+
+Public Sub 일별진척률_이력초기화버튼_생성(Optional ByVal showCompletionMessage As Boolean = True)
+    일별진척률_이력보기버튼_생성 showCompletionMessage
+End Sub
+
+Public Sub 일별진척률_이력보기()
+    Dim historyWs As Worksheet
+
+    On Error GoTo EH
+    Set historyWs = GetDailyHistorySheet()
+    historyWs.Visible = xlSheetVisible
+    historyWs.Activate
+    historyWs.Range("A1").Select
+    Exit Sub
+
+EH:
+    MsgBox "일별 진척률 이력 시트로 이동하는 중 오류가 발생했습니다." & vbCrLf & _
+           "원인: " & Err.Description, vbExclamation
 End Sub
 
 Public Sub 일별진척률_이력초기화(Optional ByVal interactive As Boolean = True)
@@ -218,6 +247,7 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
         End If
         Exit Sub
     End If
+    BuildDailyProgressNodes sourceWs, lastRow
 
     errorStage = "보고 기간 계산"
     If Not GetDailyReportDateRange(sourceWs, lastRow, firstReportDate, lastReportDate) Then
@@ -247,6 +277,7 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
 
     errorStage = "휴일 및 표시 기간 설정 로드"
     EnsureConfigSheet
+    EnsureDailyReportConfigSheet
     LoadHolidaySettings holidayDict, workdayDict
     hasDisplayDateRange = TryGetDisplayDateRange(displayStartDate, displayEndDate)
     errorStage = "진척률 이력 로드"
@@ -395,6 +426,133 @@ Private Sub BuildDailyReportGroups(ByVal ws As Worksheet, _
     RemoveDailyEmptyGroups groupRows, groupOrder
 End Sub
 
+Private Sub BuildDailyProgressNodes(ByVal ws As Worksheet, ByVal lastRow As Long)
+    Dim rowNum As Long
+    Dim taskLevel As Long
+    Dim categoryLevel As Long
+    Dim nodeKey As String
+
+    Set mDailyProgressNodeRows = CreateObject("Scripting.Dictionary")
+
+    For rowNum = DATA_START_ROW To lastRow
+        If Len(Trim$(CStr(ws.Cells(rowNum, COL_TASK).Value2))) > 0 Then
+            taskLevel = GetTaskLevel(ws, rowNum)
+            nodeKey = BuildDailyTaskNodeKey(ws, rowNum)
+            AddDailyProgressNodeRow nodeKey, rowNum
+
+            If taskLevel = 1 Then
+                For categoryLevel = 1 To 4
+                    nodeKey = BuildDailyCategoryNodeKey(ws, rowNum, categoryLevel)
+                    AddDailyProgressNodeRow nodeKey, rowNum
+                Next categoryLevel
+            End If
+        End If
+    Next rowNum
+End Sub
+
+Private Sub AddDailyProgressNodeRow(ByVal nodeKey As String, ByVal rowNum As Long)
+    Dim rows As Collection
+
+    If Len(nodeKey) = 0 Then Exit Sub
+    If Not mDailyProgressNodeRows.Exists(nodeKey) Then
+        Set rows = New Collection
+        mDailyProgressNodeRows.Add nodeKey, rows
+    Else
+        Set rows = mDailyProgressNodeRows(nodeKey)
+    End If
+    rows.Add rowNum
+End Sub
+
+Private Function BuildDailyCategoryNodeKey(ByVal ws As Worksheet, _
+                                           ByVal rowNum As Long, _
+                                           ByVal categoryLevel As Long) As String
+    Dim values(1 To 4) As String
+    Dim i As Long
+
+    values(1) = Trim$(CStr(ws.Cells(rowNum, COL_TYPE).Value2))
+    values(2) = Trim$(CStr(ws.Cells(rowNum, COL_MAJOR_CATEGORY).Value2))
+    values(3) = Trim$(CStr(ws.Cells(rowNum, COL_MIDDLE_CATEGORY).Value2))
+    values(4) = Trim$(CStr(ws.Cells(rowNum, COL_MINOR_CATEGORY).Value2))
+
+    BuildDailyCategoryNodeKey = "CATEGORY" & ChrW(30) & CStr(categoryLevel)
+    For i = 1 To categoryLevel
+        BuildDailyCategoryNodeKey = BuildDailyCategoryNodeKey & ChrW(30) & values(i)
+    Next i
+End Function
+
+Private Function BuildDailyTaskNodeKey(ByVal ws As Worksheet, _
+                                       ByVal rowNum As Long) As String
+    Dim taskNames(1 To 3) As String
+    Dim taskLevel As Long
+    Dim requiredLevel As Long
+    Dim scanRow As Long
+    Dim scanLevel As Long
+    Dim i As Long
+
+    taskLevel = GetTaskLevel(ws, rowNum)
+    If taskLevel < 1 Then taskLevel = 1
+    If taskLevel > 3 Then taskLevel = 3
+    taskNames(taskLevel) = Trim$(CStr(ws.Cells(rowNum, COL_TASK).Value2))
+
+    requiredLevel = taskLevel - 1
+    For scanRow = rowNum - 1 To DATA_START_ROW Step -1
+        If requiredLevel = 0 Then Exit For
+        If Len(Trim$(CStr(ws.Cells(scanRow, COL_TASK).Value2))) > 0 Then
+            scanLevel = GetTaskLevel(ws, scanRow)
+            If scanLevel = requiredLevel Then
+                taskNames(requiredLevel) = Trim$(CStr(ws.Cells(scanRow, COL_TASK).Value2))
+                requiredLevel = requiredLevel - 1
+            End If
+        End If
+    Next scanRow
+
+    BuildDailyTaskNodeKey = "TASK" & ChrW(30) & _
+        BuildDailyGroupKey( _
+            CStr(ws.Cells(rowNum, COL_TYPE).Value2), _
+            CStr(ws.Cells(rowNum, COL_MAJOR_CATEGORY).Value2), _
+            CStr(ws.Cells(rowNum, COL_MIDDLE_CATEGORY).Value2), _
+            CStr(ws.Cells(rowNum, COL_MINOR_CATEGORY).Value2), _
+            CStr(ws.Cells(rowNum, COL_OWNER).Value2))
+    For i = 1 To taskLevel
+        BuildDailyTaskNodeKey = BuildDailyTaskNodeKey & ChrW(30) & taskNames(i)
+    Next i
+End Function
+
+Private Function GetDailyNodeCurrentProgress(ByVal ws As Worksheet, _
+                                             ByVal nodeKey As String) As Double
+    Dim rows As Collection
+    Dim rowNum As Variant
+    Dim weight As Double
+    Dim totalWeight As Double
+    Dim weightedProgress As Double
+
+    If mDailyProgressNodeRows Is Nothing Then Exit Function
+    If Not mDailyProgressNodeRows.Exists(nodeKey) Then Exit Function
+    Set rows = mDailyProgressNodeRows(nodeKey)
+
+    For Each rowNum In rows
+        weight = GetDailyProgressWeight(ws, CLng(rowNum))
+        weightedProgress = weightedProgress + _
+                           GetTaskProgressValue(ws, CLng(rowNum)) * weight
+        totalWeight = totalWeight + weight
+    Next rowNum
+    If totalWeight > 0 Then GetDailyNodeCurrentProgress = weightedProgress / totalWeight
+End Function
+
+Private Function GetDailyProgressWeight(ByVal ws As Worksheet, _
+                                        ByVal rowNum As Long) As Double
+    Dim planDays As Variant
+
+    planDays = ws.Cells(rowNum, COL_PLAN_DAYS).Value
+    If IsNumeric(planDays) Then
+        If CDbl(planDays) > 0 Then
+            GetDailyProgressWeight = CDbl(planDays)
+            Exit Function
+        End If
+    End If
+    GetDailyProgressWeight = 1
+End Function
+
 Private Sub RemoveDailyEmptyGroups(ByVal groupRows As Object, _
                                    ByVal groupOrder As Collection)
     Dim groupIndex As Long
@@ -421,6 +579,7 @@ Private Sub SaveDailyProgressHistory(ByVal ws As Worksheet, _
     Dim rows As Collection
     Dim sourceRow As Long
     Dim targetRow As Long
+    Dim nodeKey As Variant
 
     Set historyWs = GetDailyHistorySheet()
     For groupIndex = 1 To groupOrder.Count
@@ -443,19 +602,75 @@ Private Sub SaveDailyProgressHistory(ByVal ws As Worksheet, _
             historyWs.Cells(targetRow, 6).Value = ws.Cells(sourceRow, COL_MAJOR_CATEGORY).Value2
             historyWs.Cells(targetRow, 7).Value = ws.Cells(sourceRow, COL_MIDDLE_CATEGORY).Value2
             historyWs.Cells(targetRow, 8).Value = ws.Cells(sourceRow, COL_MINOR_CATEGORY).Value2
-            historyWs.Cells(targetRow, 9).Value = ws.Cells(sourceRow, COL_OWNER).Value2
-            historyWs.Cells(targetRow, 10).Value = Now
+            historyWs.Cells(targetRow, DAILY_HISTORY_TASK_COLUMN).ClearContents
+            historyWs.Cells(targetRow, DAILY_HISTORY_TASK_LEVEL_COLUMN).ClearContents
+            historyWs.Cells(targetRow, DAILY_HISTORY_OWNER_COLUMN).Value = _
+                ws.Cells(sourceRow, COL_OWNER).Value2
+            historyWs.Cells(targetRow, DAILY_HISTORY_SAVED_AT_COLUMN).Value = Now
             historyWs.Cells(targetRow, DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value = ws.Name
             RemoveDuplicateDailyHistoryRows historyWs, ws.Name, groupKey, _
                                             snapshotDate, targetRow
         End If
     Next groupIndex
 
+    If Not mDailyProgressNodeRows Is Nothing Then
+        For Each nodeKey In mDailyProgressNodeRows.Keys
+            Set rows = mDailyProgressNodeRows(CStr(nodeKey))
+            If rows.Count > 0 Then
+                sourceRow = CLng(rows(1))
+                SaveDailyProgressHistoryValue historyWs, ws, CStr(nodeKey), _
+                    snapshotDate, sourceRow, _
+                    GetDailyNodeCurrentProgress(ws, CStr(nodeKey))
+            End If
+        Next nodeKey
+    End If
+
     historyWs.Columns(1).NumberFormat = "yyyy-mm-dd"
     historyWs.Columns(3).NumberFormat = "0%"
-    historyWs.Columns(10).NumberFormat = "yyyy-mm-dd hh:mm"
+    historyWs.Columns(DAILY_HISTORY_SAVED_AT_COLUMN).NumberFormat = _
+        "yyyy-mm-dd hh:mm:ss"
     Set mDailyProgressHistory = Nothing
     Set mDailyProgressCache = Nothing
+End Sub
+
+Private Sub SaveDailyProgressHistoryValue(ByVal historyWs As Worksheet, _
+                                          ByVal ws As Worksheet, _
+                                          ByVal historyKey As String, _
+                                          ByVal snapshotDate As Date, _
+                                          ByVal sourceRow As Long, _
+                                          ByVal progressValue As Double)
+    Dim targetRow As Long
+
+    targetRow = FindDailyHistoryRow(historyWs, ws.Name, historyKey, snapshotDate)
+    If targetRow = 0 Then
+        targetRow = historyWs.Cells(historyWs.Rows.Count, 1).End(xlUp).Row + 1
+        If targetRow < DAILY_HISTORY_DATA_START_ROW Then _
+            targetRow = DAILY_HISTORY_DATA_START_ROW
+    End If
+
+    historyWs.Cells(targetRow, 1).Value = DateValue(snapshotDate)
+    historyWs.Cells(targetRow, 2).Value = historyKey
+    historyWs.Cells(targetRow, 3).Value = progressValue
+    historyWs.Cells(targetRow, 4).Value = CStr(ws.Cells(sourceRow, COL_STATUS).Value)
+    historyWs.Cells(targetRow, 5).Value = ws.Cells(sourceRow, COL_TYPE).Value2
+    historyWs.Cells(targetRow, 6).Value = ws.Cells(sourceRow, COL_MAJOR_CATEGORY).Value2
+    historyWs.Cells(targetRow, 7).Value = ws.Cells(sourceRow, COL_MIDDLE_CATEGORY).Value2
+    historyWs.Cells(targetRow, 8).Value = ws.Cells(sourceRow, COL_MINOR_CATEGORY).Value2
+    If Left$(historyKey, Len("TASK" & ChrW(30))) = "TASK" & ChrW(30) Then
+        historyWs.Cells(targetRow, DAILY_HISTORY_TASK_COLUMN).Value = _
+            ws.Cells(sourceRow, COL_TASK).Value2
+        historyWs.Cells(targetRow, DAILY_HISTORY_TASK_LEVEL_COLUMN).Value = _
+            "Level " & CStr(GetTaskLevel(ws, sourceRow))
+    Else
+        historyWs.Cells(targetRow, DAILY_HISTORY_TASK_COLUMN).ClearContents
+        historyWs.Cells(targetRow, DAILY_HISTORY_TASK_LEVEL_COLUMN).ClearContents
+    End If
+    historyWs.Cells(targetRow, DAILY_HISTORY_OWNER_COLUMN).Value = _
+        ws.Cells(sourceRow, COL_OWNER).Value2
+    historyWs.Cells(targetRow, DAILY_HISTORY_SAVED_AT_COLUMN).Value = Now
+    historyWs.Cells(targetRow, DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value = ws.Name
+    RemoveDuplicateDailyHistoryRows historyWs, ws.Name, historyKey, _
+                                    snapshotDate, targetRow
 End Sub
 
 Private Function FindDailyHistoryRow(ByVal historyWs As Worksheet, _
@@ -509,6 +724,103 @@ Private Sub RemoveDuplicateDailyHistoryRows(ByVal historyWs As Worksheet, _
     Next rowNum
 End Sub
 
+Public Sub NormalizeDailyProgressHistoryLayout(ByVal historyWs As Worksheet)
+    Dim lastRow As Long
+    Dim rowNum As Long
+    Dim historyKey As String
+    Dim keyParts As Variant
+    Dim taskLevel As Long
+
+    If historyWs Is Nothing Then Exit Sub
+    lastRow = historyWs.Cells(historyWs.Rows.Count, 1).End(xlUp).Row
+
+    If Trim$(CStr(historyWs.Cells(1, 9).Value2)) = "담당자" And _
+       Trim$(CStr(historyWs.Cells(1, 11).Value2)) = "원본시트" Then
+        If lastRow >= DAILY_HISTORY_DATA_START_ROW Then
+            historyWs.Range(historyWs.Cells(DAILY_HISTORY_DATA_START_ROW, 13), _
+                            historyWs.Cells(lastRow, 13)).Value2 = _
+                historyWs.Range(historyWs.Cells(DAILY_HISTORY_DATA_START_ROW, 11), _
+                                historyWs.Cells(lastRow, 11)).Value2
+            historyWs.Range(historyWs.Cells(DAILY_HISTORY_DATA_START_ROW, 12), _
+                            historyWs.Cells(lastRow, 12)).Value2 = _
+                historyWs.Range(historyWs.Cells(DAILY_HISTORY_DATA_START_ROW, 10), _
+                                historyWs.Cells(lastRow, 10)).Value2
+            historyWs.Range(historyWs.Cells(DAILY_HISTORY_DATA_START_ROW, 11), _
+                            historyWs.Cells(lastRow, 11)).Value2 = _
+                historyWs.Range(historyWs.Cells(DAILY_HISTORY_DATA_START_ROW, 9), _
+                                historyWs.Cells(lastRow, 9)).Value2
+            historyWs.Range(historyWs.Cells(DAILY_HISTORY_DATA_START_ROW, 9), _
+                            historyWs.Cells(lastRow, 10)).ClearContents
+        End If
+    End If
+
+    For rowNum = DAILY_HISTORY_DATA_START_ROW To lastRow
+        If Len(Trim$(CStr(historyWs.Cells(rowNum, DAILY_HISTORY_TASK_COLUMN).Value2))) = 0 Then
+            historyKey = CStr(historyWs.Cells(rowNum, 2).Value2)
+            keyParts = Split(historyKey, ChrW(30))
+            If IsArray(keyParts) Then
+                If UBound(keyParts) >= 6 And CStr(keyParts(0)) = "TASK" Then
+                    historyWs.Cells(rowNum, DAILY_HISTORY_TASK_COLUMN).Value = _
+                        CStr(keyParts(UBound(keyParts)))
+                    taskLevel = UBound(keyParts) - 5
+                    historyWs.Cells(rowNum, DAILY_HISTORY_TASK_LEVEL_COLUMN).Value = _
+                        "Level " & CStr(taskLevel)
+                ElseIf UBound(keyParts) = 4 Then
+                    PopulateLegacyDailyHistoryTask historyWs, rowNum, keyParts
+                End If
+            End If
+        End If
+    Next rowNum
+
+    historyWs.Cells(1, 1).Value = "기록일"
+    historyWs.Cells(1, 2).Value = "업무키"
+    historyWs.Cells(1, 3).Value = "진척률"
+    historyWs.Cells(1, 4).Value = "상태"
+    historyWs.Cells(1, 5).Value = "Type"
+    historyWs.Cells(1, 6).Value = "대분류"
+    historyWs.Cells(1, 7).Value = "중분류"
+    historyWs.Cells(1, 8).Value = "소분류"
+    historyWs.Cells(1, DAILY_HISTORY_TASK_COLUMN).Value = "업무명"
+    historyWs.Cells(1, DAILY_HISTORY_TASK_LEVEL_COLUMN).Value = "업무 레벨"
+    historyWs.Cells(1, DAILY_HISTORY_OWNER_COLUMN).Value = "담당자"
+    historyWs.Cells(1, DAILY_HISTORY_SAVED_AT_COLUMN).Value = "저장시각"
+    historyWs.Cells(1, DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value = "원본시트"
+    historyWs.Columns(DAILY_HISTORY_SAVED_AT_COLUMN).NumberFormat = _
+        "yyyy-mm-dd hh:mm:ss"
+End Sub
+
+Private Sub PopulateLegacyDailyHistoryTask(ByVal historyWs As Worksheet, _
+                                           ByVal historyRow As Long, _
+                                           ByVal keyParts As Variant)
+    Dim taskWs As Worksheet
+    Dim sourceSheetName As String
+    Dim lastTaskRow As Long
+    Dim taskRow As Long
+
+    sourceSheetName = Trim$(CStr( _
+        historyWs.Cells(historyRow, DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value2))
+    If Len(sourceSheetName) = 0 Then Exit Sub
+    On Error Resume Next
+    Set taskWs = ThisWorkbook.Worksheets(sourceSheetName)
+    On Error GoTo 0
+    If taskWs Is Nothing Then Exit Sub
+
+    lastTaskRow = GetLastDataRow(taskWs)
+    For taskRow = DATA_START_ROW To lastTaskRow
+        If GetTaskLevel(taskWs, taskRow) = 1 And _
+           Trim$(CStr(taskWs.Cells(taskRow, COL_TYPE).Value2)) = CStr(keyParts(0)) And _
+           Trim$(CStr(taskWs.Cells(taskRow, COL_MAJOR_CATEGORY).Value2)) = CStr(keyParts(1)) And _
+           Trim$(CStr(taskWs.Cells(taskRow, COL_MIDDLE_CATEGORY).Value2)) = CStr(keyParts(2)) And _
+           Trim$(CStr(taskWs.Cells(taskRow, COL_MINOR_CATEGORY).Value2)) = CStr(keyParts(3)) And _
+           Trim$(CStr(taskWs.Cells(taskRow, COL_OWNER).Value2)) = CStr(keyParts(4)) Then
+            historyWs.Cells(historyRow, DAILY_HISTORY_TASK_COLUMN).Value = _
+                taskWs.Cells(taskRow, COL_TASK).Value2
+            historyWs.Cells(historyRow, DAILY_HISTORY_TASK_LEVEL_COLUMN).Value = "Level 1"
+            Exit For
+        End If
+    Next taskRow
+End Sub
+
 Private Function GetDailyHistorySheet() As Worksheet
     On Error Resume Next
     Set GetDailyHistorySheet = ThisWorkbook.Worksheets(DAILY_HISTORY_SHEET_NAME)
@@ -520,21 +832,60 @@ Private Function GetDailyHistorySheet() As Worksheet
         GetDailyHistorySheet.Name = DAILY_HISTORY_SHEET_NAME
     End If
 
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 1).Value = "기록일"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 2).Value = "업무키"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 3).Value = "진척률"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 4).Value = "상태"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 5).Value = "Type"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 6).Value = "대분류"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 7).Value = "중분류"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 8).Value = "소분류"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 9).Value = "담당자"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 10).Value = "저장시각"
-    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, _
-                               DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value = "원본시트"
+    NormalizeDailyProgressHistoryLayout GetDailyHistorySheet
     GetDailyHistorySheet.Rows(DAILY_HISTORY_HEADER_ROW).Font.Bold = True
+    GetDailyHistorySheet.Columns(1).ColumnWidth = 12
+    GetDailyHistorySheet.Columns(2).Hidden = True
+    GetDailyHistorySheet.Columns(3).ColumnWidth = 10
+    GetDailyHistorySheet.Columns("D:H").ColumnWidth = 16
+    GetDailyHistorySheet.Columns(DAILY_HISTORY_TASK_COLUMN).ColumnWidth = 32
+    GetDailyHistorySheet.Columns(DAILY_HISTORY_TASK_LEVEL_COLUMN).ColumnWidth = 12
+    GetDailyHistorySheet.Columns(DAILY_HISTORY_OWNER_COLUMN).ColumnWidth = 16
+    GetDailyHistorySheet.Columns(DAILY_HISTORY_SAVED_AT_COLUMN).ColumnWidth = 19
+    GetDailyHistorySheet.Columns(DAILY_HISTORY_SOURCE_SHEET_COLUMN).ColumnWidth = 16
+    If GetDailyHistorySheet.AutoFilterMode Then _
+        GetDailyHistorySheet.AutoFilterMode = False
+    GetDailyHistorySheet.Range("A1:M1").AutoFilter
+    EnsureDailyHistoryResetButton GetDailyHistorySheet
     GetDailyHistorySheet.Visible = xlSheetVeryHidden
 End Function
+
+Private Sub EnsureDailyHistoryResetButton(ByVal historyWs As Worksheet)
+    Dim resetButton As Shape
+    Dim anchorCell As Range
+
+    If historyWs Is Nothing Then Exit Sub
+    Set anchorCell = historyWs.Range("O1")
+
+    On Error Resume Next
+    historyWs.Shapes("btnDailyProgressHistoryReset").Delete
+    On Error GoTo 0
+
+    Set resetButton = historyWs.Shapes.AddShape( _
+        msoShapeRoundedRectangle, anchorCell.Left + 2, anchorCell.Top, 88, 24)
+    With resetButton
+        .Name = "btnDailyProgressHistoryReset"
+        .OnAction = "일별진척률_이력초기화"
+        .Placement = xlFreeFloating
+        .Fill.Visible = msoTrue
+        .Fill.ForeColor.RGB = RGB(212, 208, 200)
+        .Line.Visible = msoTrue
+        .Line.ForeColor.RGB = RGB(128, 128, 128)
+        .Shadow.Visible = msoFalse
+        With .TextFrame2
+            .VerticalAnchor = msoAnchorMiddle
+            .MarginLeft = 2
+            .MarginRight = 2
+            With .TextRange
+                .Characters.Text = "이력 초기화"
+                .ParagraphFormat.Alignment = msoAlignCenter
+                .Font.Name = "맑은 고딕"
+                .Font.Size = 9
+                .Font.Fill.ForeColor.RGB = RGB(0, 0, 0)
+            End With
+        End With
+    End With
+End Sub
 
 Private Sub LoadDailyProgressHistory()
     Dim historyWs As Worksheet
@@ -605,6 +956,81 @@ Private Function GetDailyProgressForDate(ByVal ws As Worksheet, _
     If IsEmpty(result) Then result = currentProgress
     mDailyProgressCache.Add cacheKey, result
     GetDailyProgressForDate = result
+End Function
+
+Private Function GetDailyNodeProgressForDate(ByVal ws As Worksheet, _
+                                             ByVal nodeKey As String, _
+                                             ByVal targetDate As Date, _
+                                             Optional ByVal legacyGroupKey As String = "") As Double
+    Dim currentProgress As Double
+    Dim cacheKey As String
+    Dim result As Variant
+
+    currentProgress = GetDailyNodeCurrentProgress(ws, nodeKey)
+    If CLng(DateValue(targetDate)) >= CLng(Date) Then
+        GetDailyNodeProgressForDate = currentProgress
+        Exit Function
+    End If
+
+    cacheKey = BuildDailyHistoryGroupKey(ws.Name, nodeKey) & _
+               ChrW(DAILY_HISTORY_KEY_SEPARATOR) & CStr(CLng(DateValue(targetDate)))
+    If mDailyProgressCache.Exists(cacheKey) Then
+        GetDailyNodeProgressForDate = CDbl(mDailyProgressCache(cacheKey))
+        Exit Function
+    End If
+
+    result = FindLatestDailyProgress(ws.Name, nodeKey, targetDate)
+    If IsEmpty(result) And Len(legacyGroupKey) > 0 Then
+        result = FindLatestDailyProgress(ws.Name, legacyGroupKey, targetDate)
+    End If
+    If IsEmpty(result) Then result = currentProgress
+    mDailyProgressCache.Add cacheKey, CDbl(result)
+    GetDailyNodeProgressForDate = CDbl(result)
+End Function
+
+Private Function ShouldDisplayDailyCompletedNode(ByVal ws As Worksheet, _
+                                                 ByVal nodeKey As String, _
+                                                 ByVal targetDate As Date, _
+                                                 ByVal progressValue As Double, _
+                                                 Optional ByVal legacyGroupKey As String = "", _
+                                                 Optional ByVal knownCompletionDate As Variant) As Boolean
+    Dim previousProgress As Variant
+    Dim recordedProgress As Variant
+
+    If progressValue < 0.999999 Then
+        ShouldDisplayDailyCompletedNode = True
+        Exit Function
+    End If
+
+    previousProgress = FindLatestDailyProgress( _
+                           ws.Name, nodeKey, DateAdd("d", -1, targetDate))
+    If IsEmpty(previousProgress) And Len(legacyGroupKey) > 0 Then
+        previousProgress = FindLatestDailyProgress( _
+                               ws.Name, legacyGroupKey, DateAdd("d", -1, targetDate))
+    End If
+    If Not IsEmpty(previousProgress) Then
+        ShouldDisplayDailyCompletedNode = (CDbl(previousProgress) < 0.999999)
+        Exit Function
+    End If
+
+    recordedProgress = FindLatestDailyProgress(ws.Name, nodeKey, targetDate)
+    If IsEmpty(recordedProgress) And Len(legacyGroupKey) > 0 Then
+        recordedProgress = FindLatestDailyProgress( _
+                               ws.Name, legacyGroupKey, targetDate)
+    End If
+    If Not IsEmpty(recordedProgress) Then
+        ShouldDisplayDailyCompletedNode = True
+        Exit Function
+    End If
+
+    If IsDate(knownCompletionDate) Then
+        ShouldDisplayDailyCompletedNode = _
+            (CLng(DateValue(targetDate)) = _
+             CLng(DateValue(CDate(knownCompletionDate))))
+    Else
+        ShouldDisplayDailyCompletedNode = _
+            (CLng(DateValue(targetDate)) = CLng(Date))
+    End If
 End Function
 
 Private Function FindLatestDailyProgress(ByVal sourceSheetName As String, _
@@ -856,8 +1282,7 @@ Private Sub PopulateDailyMonthSheet(ByVal outputWs As Worksheet, _
                 outputWs.Cells(targetRow, dateColumn).Value = _
                     BuildDailyCellText(sourceWs, rows, targetDate, _
                                        CStr(sourceWs.Cells(CLng(rows(1)), COL_OWNER).Value2), _
-                                       GetDailyProgressForDate(sourceWs, groupKey, _
-                                                               targetDate, rows))
+                                       groupKey)
             Next groupIndex
 
             dateColumn = dateColumn + 1
@@ -982,47 +1407,87 @@ Private Function BuildDailyCellText(ByVal ws As Worksheet, _
                                     ByVal rows As Collection, _
                                     ByVal targetDate As Date, _
                                     ByVal ownerText As String, _
-                                    ByVal progressValue As Variant) As String
+                                    ByVal groupKey As String) As String
     Dim rowNum As Variant
     Dim taskLevel As Long
     Dim taskText As String
     Dim lineText As String
     Dim bodyText As String
+    Dim headerText As String
     Dim level1Number As Long
     Dim progressText As String
+    Dim progressValue As Double
+    Dim categoryLevel As Long
+    Dim categoryName As String
+    Dim nodeKey As String
+    Dim legacyKey As String
+    Dim actualEndValue As Variant
+
+    If rows.Count = 0 Then Exit Function
 
     For Each rowNum In rows
         If IsDailyTaskOnDate(ws, CLng(rowNum), targetDate) Then
             taskText = Trim$(CStr(ws.Cells(CLng(rowNum), COL_TASK).Value2))
             taskLevel = GetTaskLevel(ws, CLng(rowNum))
+            nodeKey = BuildDailyTaskNodeKey(ws, CLng(rowNum))
+            legacyKey = ""
+            If taskLevel = 1 And CLng(rowNum) = CLng(rows(1)) Then _
+                legacyKey = groupKey
+            progressValue = GetDailyNodeProgressForDate( _
+                                ws, nodeKey, targetDate, legacyKey)
+            actualEndValue = ws.Cells(CLng(rowNum), COL_ACTUAL_END).Value
 
-            Select Case taskLevel
-                Case 1
-                    level1Number = level1Number + 1
-                    lineText = CStr(level1Number) & ". " & taskText
-                Case 2
-                    lineText = " - " & taskText
-                Case Else
-                    lineText = "  ㄴ " & taskText
-            End Select
+            If ShouldDisplayDailyCompletedNode( _
+                   ws, nodeKey, targetDate, progressValue, legacyKey, actualEndValue) Then
+                Select Case taskLevel
+                    Case 1
+                        level1Number = level1Number + 1
+                        lineText = CStr(level1Number) & ". " & taskText
+                    Case 2
+                        lineText = " - " & taskText
+                    Case Else
+                        lineText = "  ㄴ " & taskText
+                End Select
 
-            If Len(bodyText) > 0 Then bodyText = bodyText & vbLf
-            bodyText = bodyText & lineText
+                If GetDailyReportShowTaskProgressFlag(taskLevel) Then
+                    lineText = lineText & " (" & Format$(progressValue, "0%") & ")"
+                End If
+
+                If Len(bodyText) > 0 Then bodyText = bodyText & vbLf
+                bodyText = bodyText & lineText
+            End If
         End If
     Next rowNum
 
     If Len(bodyText) > 0 Then
-        If Not IsEmpty(progressValue) And IsNumeric(progressValue) Then
-            progressText = "진척률 " & Format$(CDbl(progressValue), "0%")
-        Else
-            progressText = "진척률 미기록"
-        End If
+        For categoryLevel = 1 To 4
+            If GetDailyReportShowCategoryProgressFlag(categoryLevel) Then
+                nodeKey = BuildDailyCategoryNodeKey(ws, CLng(rows(1)), categoryLevel)
+                legacyKey = ""
+                If categoryLevel = 4 Then legacyKey = groupKey
+                progressValue = GetDailyNodeProgressForDate( _
+                                    ws, nodeKey, targetDate, legacyKey)
+                If ShouldDisplayDailyCompletedNode( _
+                       ws, nodeKey, targetDate, progressValue, legacyKey) Then
+                    Select Case categoryLevel
+                        Case 1: categoryName = "타입"
+                        Case 2: categoryName = "대분류"
+                        Case 3: categoryName = "중분류"
+                        Case Else: categoryName = "소분류"
+                    End Select
+                    progressText = categoryName & " " & Format$(progressValue, "0%")
+                    If Len(headerText) > 0 Then headerText = headerText & vbLf
+                    headerText = headerText & progressText
+                End If
+            End If
+        Next categoryLevel
 
-        If Len(ownerText) > 0 Then
-            BuildDailyCellText = "(" & ownerText & ") " & progressText & _
-                                 vbLf & bodyText
+        If Len(headerText) > 0 And Len(ownerText) > 0 Then _
+            headerText = "(" & ownerText & ") " & headerText
+        If Len(headerText) > 0 Then
+            BuildDailyCellText = headerText & vbLf & bodyText
         Else
-            BuildDailyCellText = progressText & vbLf & bodyText
+            BuildDailyCellText = bodyText
         End If
     End If
 End Function
@@ -1165,7 +1630,8 @@ Private Function IsDailyReportTaskSheet(ByVal ws As Worksheet) As Boolean
          StrComp(ws.Name, DAILY_TEMPLATE_SHEET_NAME, vbTextCompare) <> 0 And _
          StrComp(ws.Name, DAILY_HISTORY_SHEET_NAME, vbTextCompare) <> 0 And _
          StrComp(ws.Name, "_버튼생성", vbTextCompare) <> 0 And _
-         StrComp(ws.Name, WEEKLY_REPORT_CONFIG_SHEET_NAME, vbTextCompare) <> 0)
+         StrComp(ws.Name, WEEKLY_REPORT_CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
+         StrComp(ws.Name, DAILY_REPORT_CONFIG_SHEET_NAME, vbTextCompare) <> 0)
 End Function
 
 Private Function GetDailyReportSourceSheet() As Worksheet

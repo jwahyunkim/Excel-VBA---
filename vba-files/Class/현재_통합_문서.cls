@@ -32,7 +32,8 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     If Not TypeOf Sh Is Worksheet Then Exit Sub
 
     If Sh.Name = CONFIG_SHEET_NAME Or _
-       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
+       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
+       Sh.Name = DAILY_REPORT_CONFIG_SHEET_NAME Then
         If Sh.Name = CONFIG_SHEET_NAME And _
            Not Intersect(Target, Sh.Range(TASK_MAX_LENGTH_VALUE_RANGE)) Is Nothing Then
             Application.enableEvents = False
@@ -96,7 +97,9 @@ Private Sub Workbook_SheetFollowHyperlink(ByVal Sh As Object, ByVal Target As Hy
 
     On Error GoTo SafeExit
 
-    If Sh.Name = CONFIG_SHEET_NAME Then Exit Sub
+    If Sh.Name = CONFIG_SHEET_NAME Or _
+       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
+       Sh.Name = DAILY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
 
     Set anchorCell = Target.Range
     If anchorCell Is Nothing Then Exit Sub
