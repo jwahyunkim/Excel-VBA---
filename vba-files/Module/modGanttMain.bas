@@ -2,6 +2,10 @@ Attribute VB_Name = "modGanttMain"
 Option Explicit
 
 Public Sub 칸트차트_생성()
+    RefreshGanttSheet
+End Sub
+
+Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = True)
     Dim ws As Worksheet
     Dim lastRow As Long
     Dim minDate As Date
@@ -12,12 +16,19 @@ Public Sub 칸트차트_생성()
     Dim workdayDict As Object
     Dim hasDisplayRange As Boolean
     Dim taskSheetWasProtected As Boolean
+    Dim previousScreenUpdating As Boolean
+    Dim previousEnableEvents As Boolean
+    Dim errorText As String
+
+    previousScreenUpdating = Application.ScreenUpdating
+    previousEnableEvents = Application.EnableEvents
 
     On Error GoTo EH
 
     Set ws = ActiveSheet
 
     If ws.Name = CONFIG_SHEET_NAME Then
+        If Not showCompletionMessage Then Err.Raise vbObjectError + 2120, , "config 시트에서는 실행할 수 없습니다."
         MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
@@ -36,11 +47,13 @@ Public Sub 칸트차트_생성()
 
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then
+        If Not showCompletionMessage Then Err.Raise vbObjectError + 2120, , "데이터가 없습니다."
         MsgBox "데이터가 없습니다.", vbExclamation
         Exit Sub
     End If
 
     If Not GetMinMaxDate(ws, lastRow, minDate, maxDate) Then
+        If Not showCompletionMessage Then Err.Raise vbObjectError + 2120, , "시작일/종료일 데이터가 없습니다."
         MsgBox "시작일/종료일 데이터가 없습니다.", vbExclamation
         Exit Sub
     End If
@@ -69,18 +82,23 @@ Public Sub 칸트차트_생성()
     ApplyDisplayTaskRowFilter ws, lastRow, chartStartDate, chartEndDate
     ApplyCalculatedColumnsProtection ws, lastRow
 
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
+    Application.EnableEvents = previousEnableEvents
+    Application.ScreenUpdating = previousScreenUpdating
     DoEvents
     AlignAllGanttPptArtifactsToNoteCells ws
 
-    MsgBox "칸트차트 생성 완료", vbInformation
+    If showCompletionMessage Then MsgBox "칸트차트 생성 완료", vbInformation
     Exit Sub
 
 EH:
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
-    MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
+    errorText = Err.Description
+    Application.EnableEvents = previousEnableEvents
+    Application.ScreenUpdating = previousScreenUpdating
+    If showCompletionMessage Then
+        MsgBox "오류가 발생했습니다: " & errorText, vbExclamation
+    Else
+        Err.Raise vbObjectError + 2121, "RefreshGanttSheet", errorText
+    End If
 End Sub
 
 Public Sub 칸트차트_새로고침()

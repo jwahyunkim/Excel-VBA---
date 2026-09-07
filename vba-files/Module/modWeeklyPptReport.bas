@@ -35,6 +35,7 @@ Public Sub 주간보고PPT_버튼_생성()
     Set ws = ActiveSheet
     If ws.Name = CONFIG_SHEET_NAME Or _
        ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
+       ws.Name = DAILY_REPORT_CONFIG_SHEET_NAME Or _
        ws.Name = WEEKLY_PPT_TEMPLATE_SHEET_NAME Then
         MsgBox "업무 시트에서 실행하세요.", vbExclamation
         Exit Sub
@@ -191,6 +192,8 @@ Public Function GenerateWeeklyPptReport(ByVal showCompletionMessage As Boolean) 
 
     Set ws = ActiveSheet
     If ws.Name = CONFIG_SHEET_NAME Or _
+       ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
+       ws.Name = DAILY_REPORT_CONFIG_SHEET_NAME Or _
        ws.Name = WEEKLY_PPT_TEMPLATE_SHEET_NAME Then
         Err.Raise vbObjectError + 7501, "GenerateWeeklyPptReport", "업무 시트에서 실행하세요."
     End If
