@@ -6,6 +6,9 @@ Private Const FILE_DIALOG_PICKER As Long = 3
 Private Const PPT_OLE_PREFIX As String = "oleGanttPpt_"
 Private Const TEMP_PPT_OLE_PREFIX As String = "tmpGanttPptOle_"
 Private Const BUTTON_SETUP_SHEET_NAME As String = "_버튼생성"
+Private Const DAILY_HISTORY_SHEET_NAME As String = "_일별진척률이력"
+Private Const DAILY_HISTORY_DATA_START_ROW As Long = 2
+Private Const DAILY_HISTORY_LAST_COLUMN As Long = 11
 
 Public Sub 데이터_가져오기()
     Dim targetBook As Workbook
@@ -19,6 +22,7 @@ Public Sub 데이터_가져오기()
     Dim refreshedSheetCount As Long
     Dim copiedObjectCount As Long
     Dim failedObjectCount As Long
+    Dim importedHistoryRowCount As Long
     Dim openedByMigration As Boolean
     Dim stateCaptured As Boolean
     Dim previousAutomationSecurity As Long
@@ -83,6 +87,8 @@ Public Sub 데이터_가져오기()
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
 
+    importedHistoryRowCount = ImportDailyProgressHistory(sourceBook, targetBook)
+
     For Each sourceSheet In sourceBook.Worksheets
         If IsTaskSheet(sourceSheet) Then
             Set targetSheet = GetWorksheet(targetBook, sourceSheet.Name)
@@ -111,6 +117,7 @@ Public Sub 데이터_가져오기()
     MsgBox "구버전 데이터 가져오기가 완료되었습니다." & vbCrLf & vbCrLf & _
            "가져온 시트: " & importedSheetCount & "개" & vbCrLf & _
            "차트 재생성 시트: " & refreshedSheetCount & "개" & vbCrLf & _
+           "일별 진척률 이력: " & importedHistoryRowCount & "건" & vbCrLf & _
            "복사한 PPT 개체: " & copiedObjectCount & "개" & vbCrLf & _
            "복사하지 못한 PPT 개체: " & failedObjectCount & "개", _
            IIf(failedObjectCount = 0, vbInformation, vbExclamation), _
@@ -223,7 +230,8 @@ Public Sub 버튼_생성_선택()
         "항목 숨김", _
         "개체삽입", _
         "주간 PPT", _
-        "일별 현황")
+        "일별 현황", _
+        "이력 초기화")
 
     setupSheet.Range("A2").Value = "버튼"
     setupSheet.Range("B2").Value = "순서"
@@ -296,8 +304,8 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     Dim setupSheet As Worksheet
     Dim targetSheet As Worksheet
     Dim targetSheetName As String
-    Dim selectedIndexes(1 To 8) As Long
-    Dim selectedOrders(1 To 8) As Long
+    Dim selectedIndexes(1 To 9) As Long
+    Dim selectedOrders(1 To 9) As Long
     Dim selectedCount As Long
     Dim optionIndex As Long
     Dim optionOrder As Long
@@ -311,7 +319,7 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     targetSheetName = CStr(setupSheet.Range("Z1").Value2)
     Set targetSheet = ThisWorkbook.Worksheets(targetSheetName)
 
-    For optionIndex = 1 To 8
+    For optionIndex = 1 To 9
         If IsSetupOptionChecked(setupSheet, optionIndex) Then
             optionOrder = GetSetupOptionOrder(setupSheet, optionIndex)
             If optionOrder < 1 Then
@@ -403,6 +411,8 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
             CreateVersionButton ws, "btnWeeklyPptReport", "주간 PPT", "주간보고PPT_생성", buttonOrder, 72
         Case 8
             CreateVersionButton ws, "btnDailyProgressReport", "일별 현황", "일별진행현황_생성", buttonOrder, 72
+        Case 9
+            CreateVersionButton ws, "btnDailyProgressHistoryReset", "이력 초기화", "일별진척률_이력초기화", buttonOrder, 72
     End Select
 End Sub
 
@@ -438,7 +448,7 @@ Private Sub DeleteManagedButtons(ByVal ws As Worksheet)
         "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
         "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
         "btnPersonalDevReport", "btnTeamDevReport", "btnModuleDevReport", _
-        "btnWeeklyPptReport", "btnDailyProgressReport", _
+        "btnWeeklyPptReport", "btnDailyProgressReport", "btnDailyProgressHistoryReset", _
         "btnLegacyImport", "btnButtonImport", "btnDevProgressReport")
 
     On Error Resume Next
@@ -472,12 +482,12 @@ Private Sub ConfigureSetupActionButton(ByVal button As Shape, _
     End With
 End Sub
 
-Private Sub CreateVersionButton(ByVal ws As Worksheet, _
-                                ByVal buttonName As String, _
-                                ByVal buttonCaption As String, _
-                                ByVal macroName As String, _
-                                ByVal buttonOrder As Long, _
-                                ByVal buttonWidth As Double)
+Public Sub CreateVersionButton(ByVal ws As Worksheet, _
+                               ByVal buttonName As String, _
+                               ByVal buttonCaption As String, _
+                               ByVal macroName As String, _
+                               ByVal buttonOrder As Long, _
+                               ByVal buttonWidth As Double)
     Dim button As Shape
     Dim anchorCell As Range
     Dim buttonLeft As Double
@@ -525,6 +535,38 @@ Private Sub CreateVersionButton(ByVal ws As Worksheet, _
         End With
     End With
 End Sub
+
+Public Function GetNextVersionButtonOrder(ByVal ws As Worksheet) As Long
+    Dim buttonNames As Variant
+    Dim buttonName As Variant
+    Dim buttonCount As Long
+
+    buttonNames = Array( _
+        "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
+        "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
+        "btnWeeklyPptReport", "btnDailyProgressReport", "btnDailyProgressHistoryReset")
+
+    For Each buttonName In buttonNames
+        If VersionShapeExistsOnSheet(ws, CStr(buttonName)) Then
+            buttonCount = buttonCount + 1
+        End If
+    Next buttonName
+
+    GetNextVersionButtonOrder = buttonCount + 1
+End Function
+
+Private Function VersionShapeExistsOnSheet(ByVal ws As Worksheet, _
+                                           ByVal shapeName As String) As Boolean
+    Dim targetShape As Shape
+
+    If ws Is Nothing Then Exit Function
+
+    On Error Resume Next
+    Set targetShape = ws.Shapes(shapeName)
+    On Error GoTo 0
+
+    VersionShapeExistsOnSheet = Not targetShape Is Nothing
+End Function
 
 Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
                             ByVal targetSheet As Worksheet, _
@@ -872,10 +914,65 @@ Private Function CountMatchingTaskSheets(ByVal sourceBook As Workbook, _
     Next sourceSheet
 End Function
 
+Private Function ImportDailyProgressHistory(ByVal sourceBook As Workbook, _
+                                            ByVal targetBook As Workbook) As Long
+    Dim sourceWs As Worksheet
+    Dim targetWs As Worksheet
+    Dim sourceLastRow As Long
+    Dim targetLastRow As Long
+
+    Set sourceWs = GetWorksheet(sourceBook, DAILY_HISTORY_SHEET_NAME)
+    Set targetWs = GetWorksheet(targetBook, DAILY_HISTORY_SHEET_NAME)
+
+    If targetWs Is Nothing Then
+        Set targetWs = targetBook.Worksheets.Add( _
+            After:=targetBook.Worksheets(targetBook.Worksheets.Count))
+        targetWs.Name = DAILY_HISTORY_SHEET_NAME
+    End If
+
+    targetLastRow = targetWs.Cells(targetWs.Rows.Count, 1).End(xlUp).Row
+    If targetLastRow >= DAILY_HISTORY_DATA_START_ROW Then
+        targetWs.Range( _
+            targetWs.Cells(DAILY_HISTORY_DATA_START_ROW, 1), _
+            targetWs.Cells(targetLastRow, DAILY_HISTORY_LAST_COLUMN)).ClearContents
+    End If
+
+    If Not sourceWs Is Nothing Then
+        sourceLastRow = sourceWs.Cells(sourceWs.Rows.Count, 1).End(xlUp).Row
+        If sourceLastRow >= DAILY_HISTORY_DATA_START_ROW Then
+            targetWs.Range( _
+                targetWs.Cells(DAILY_HISTORY_DATA_START_ROW, 1), _
+                targetWs.Cells(sourceLastRow, DAILY_HISTORY_LAST_COLUMN)).Value2 = _
+                sourceWs.Range( _
+                    sourceWs.Cells(DAILY_HISTORY_DATA_START_ROW, 1), _
+                    sourceWs.Cells(sourceLastRow, DAILY_HISTORY_LAST_COLUMN)).Value2
+            ImportDailyProgressHistory = sourceLastRow - DAILY_HISTORY_DATA_START_ROW + 1
+        End If
+    End If
+
+    targetWs.Cells(1, 1).Value = "기록일"
+    targetWs.Cells(1, 2).Value = "업무키"
+    targetWs.Cells(1, 3).Value = "진척률"
+    targetWs.Cells(1, 4).Value = "상태"
+    targetWs.Cells(1, 5).Value = "Type"
+    targetWs.Cells(1, 6).Value = "대분류"
+    targetWs.Cells(1, 7).Value = "중분류"
+    targetWs.Cells(1, 8).Value = "소분류"
+    targetWs.Cells(1, 9).Value = "담당자"
+    targetWs.Cells(1, 10).Value = "저장시각"
+    targetWs.Cells(1, 11).Value = "원본시트"
+    targetWs.Rows(1).Font.Bold = True
+    targetWs.Columns(1).NumberFormat = "yyyy-mm-dd"
+    targetWs.Columns(3).NumberFormat = "0%"
+    targetWs.Columns(10).NumberFormat = "yyyy-mm-dd hh:mm"
+    targetWs.Visible = xlSheetVeryHidden
+End Function
+
 Private Function IsTaskSheet(ByVal ws As Worksheet) As Boolean
     IsTaskSheet = (StrComp(ws.Name, CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
                    StrComp(ws.Name, "WeeklyPptTemplate", vbTextCompare) <> 0 And _
                    StrComp(ws.Name, "_일별진행현황템플릿", vbTextCompare) <> 0 And _
+                   StrComp(ws.Name, DAILY_HISTORY_SHEET_NAME, vbTextCompare) <> 0 And _
                    StrComp(ws.Name, BUTTON_SETUP_SHEET_NAME, vbTextCompare) <> 0)
 End Function
 

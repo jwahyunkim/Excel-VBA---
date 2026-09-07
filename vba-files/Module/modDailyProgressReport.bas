@@ -8,11 +8,17 @@ Private Const DAILY_DATA_START_ROW As Long = 5
 Private Const DAILY_FIRST_DATE_COLUMN As Long = 8
 Private Const DAILY_TEMPLATE_LAST_ROW As Long = 78
 Private Const DAILY_FILE_FORMAT_XLSX As Long = 51
+Private Const DAILY_HISTORY_SHEET_NAME As String = "_일별진척률이력"
+Private Const DAILY_HISTORY_HEADER_ROW As Long = 1
+Private Const DAILY_HISTORY_DATA_START_ROW As Long = 2
+Private Const DAILY_HISTORY_SOURCE_SHEET_COLUMN As Long = 11
+Private Const DAILY_HISTORY_KEY_SEPARATOR As Long = 29
 
-Public Sub 일별진행현황_생성버튼_생성(Optional ByVal showCompletionMessage As Boolean = True)
+Private mDailyProgressHistory As Object
+Private mDailyProgressCache As Object
+
+Public Sub 일별진행현황_생성버튼_생성()
     Dim ws As Worksheet
-    Dim button As Shape
-    Dim anchorCell As Range
     Dim lastRow As Long
 
     On Error GoTo EH
@@ -24,61 +30,102 @@ Public Sub 일별진행현황_생성버튼_생성(Optional ByVal showCompletionM
     End If
 
     UnprotectTaskSheet ws
-    Set anchorCell = ws.Range("B2")
-
-    On Error Resume Next
-    ws.Shapes("btnDailyProgressReport").Delete
-    On Error GoTo EH
-
-    Set button = ws.Shapes.AddShape( _
-        msoShapeRoundedRectangle, _
-        anchorCell.Left + (7 * 80), _
-        anchorCell.Top + anchorCell.Height - 22, _
-        72, _
-        22)
-
-    With button
-        .Name = "btnDailyProgressReport"
-        .OnAction = "일별진행현황_생성"
-        .Placement = xlFreeFloating
-        .Fill.Visible = msoTrue
-        .Fill.ForeColor.RGB = RGB(212, 208, 200)
-        .Fill.Transparency = 0
-        .Line.Visible = msoTrue
-        .Line.ForeColor.RGB = RGB(128, 128, 128)
-        .Line.Weight = 1
-        .Shadow.Visible = msoFalse
-        .Adjustments.Item(1) = 0.05
-
-        With .TextFrame2
-            .VerticalAnchor = msoAnchorMiddle
-            .MarginLeft = 2
-            .MarginRight = 2
-            .MarginTop = 1
-            .MarginBottom = 1
-            With .TextRange
-                .Characters.Text = "일별 현황"
-                .ParagraphFormat.Alignment = msoAlignCenter
-                .Font.Name = "맑은 고딕"
-                .Font.Size = 9
-                .Font.Bold = msoFalse
-                .Font.Fill.ForeColor.RGB = RGB(0, 0, 0)
-            End With
-        End With
-    End With
+    CreateVersionButton ws, "btnDailyProgressReport", "일별 현황", _
+                            "일별진행현황_생성", GetNextVersionButtonOrder(ws), 72
 
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
     ApplyCalculatedColumnsProtection ws, lastRow
 
-    If showCompletionMessage Then
-        MsgBox "버튼 생성 완료: 일별 현황", vbInformation
-    End If
+    MsgBox "버튼 생성 완료: 일별 현황", vbInformation
     Exit Sub
 
 EH:
     MsgBox "일별 현황 버튼을 생성하는 중 오류가 발생했습니다: " & _
            Err.Description, vbExclamation
+End Sub
+
+Public Sub 일별진척률_이력초기화버튼_생성(Optional ByVal showCompletionMessage As Boolean = True)
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim buttonOrder As Long
+    Dim existingButton As Shape
+
+    On Error GoTo EH
+    Set ws = GetDailyReportSourceSheet()
+    If ws Is Nothing Then Err.Raise vbObjectError + 2130, , "업무 시트에서 실행하세요."
+
+    buttonOrder = GetNextVersionButtonOrder(ws)
+    On Error Resume Next
+    Set existingButton = ws.Shapes("btnDailyProgressHistoryReset")
+    On Error GoTo EH
+    If Not existingButton Is Nothing Then
+        buttonOrder = CLng((existingButton.Left - ws.Range("B2").Left) / 80) + 1
+    End If
+
+    UnprotectTaskSheet ws
+    CreateVersionButton ws, "btnDailyProgressHistoryReset", "이력 초기화", _
+                        "일별진척률_이력초기화", buttonOrder, 72
+    lastRow = GetLastDataRow(ws)
+    If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
+    ApplyCalculatedColumnsProtection ws, lastRow
+    If showCompletionMessage Then MsgBox "버튼 생성 완료: 이력 초기화", vbInformation
+    Exit Sub
+EH:
+    If showCompletionMessage Then
+        MsgBox "이력 초기화 버튼 생성 오류: " & Err.Description, vbExclamation
+    Else
+        Err.Raise Err.Number, "일별진척률_이력초기화버튼_생성", Err.Description
+    End If
+End Sub
+
+Public Sub 일별진척률_이력초기화(Optional ByVal interactive As Boolean = True)
+    Dim historyWs As Worksheet
+    Dim lastRow As Long
+    Dim previousEnableEvents As Boolean
+    Dim errorText As String
+
+    previousEnableEvents = Application.EnableEvents
+    On Error GoTo EH
+    If ThisWorkbook.ReadOnly Then
+        Err.Raise vbObjectError + 2131, , "이력을 초기화하려면 통합문서를 읽기/쓰기 상태로 여세요."
+    End If
+    On Error Resume Next
+    Set historyWs = ThisWorkbook.Worksheets(DAILY_HISTORY_SHEET_NAME)
+    On Error GoTo EH
+    If historyWs Is Nothing Then
+        Set mDailyProgressHistory = Nothing
+        Set mDailyProgressCache = Nothing
+        If interactive Then MsgBox "초기화할 일별 진척률 이력이 없습니다.", vbInformation
+        Exit Sub
+    End If
+
+    If interactive Then
+        If MsgBox("이 통합문서의 모든 일별 진척률 이력을 초기화하고 저장하시겠습니까?" & vbCrLf & _
+                  "업무 데이터와 간트 진행률은 유지됩니다.", _
+                  vbQuestion Or vbYesNo Or vbDefaultButton2, "일별 진척률 이력 초기화") <> vbYes Then Exit Sub
+    End If
+
+    Application.EnableEvents = False
+    lastRow = historyWs.UsedRange.Row + historyWs.UsedRange.Rows.Count - 1
+    If lastRow >= DAILY_HISTORY_DATA_START_ROW Then
+        historyWs.Range(historyWs.Cells(DAILY_HISTORY_DATA_START_ROW, 1), _
+                        historyWs.Cells(lastRow, DAILY_HISTORY_SOURCE_SHEET_COLUMN)).ClearContents
+    End If
+    Set mDailyProgressHistory = Nothing
+    Set mDailyProgressCache = Nothing
+    ThisWorkbook.Save
+    Application.EnableEvents = previousEnableEvents
+    If interactive Then MsgBox "일별 진척률 이력을 초기화했습니다.", vbInformation
+    Exit Sub
+EH:
+    errorText = Err.Description
+    Application.EnableEvents = previousEnableEvents
+    If interactive Then
+        MsgBox "일별 진척률 이력 초기화 오류: " & errorText, vbExclamation
+    Else
+        Err.Raise vbObjectError + 2132, "일별진척률_이력초기화", errorText
+    End If
 End Sub
 
 Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
@@ -87,8 +134,8 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
     Dim templateWs As Worksheet
     Dim outputBook As Workbook
     Dim groupRows As Object
-    Dim groupValues As Object
     Dim groupOrder As Collection
+    Dim activeGroupOrder As Collection
     Dim holidayDict As Object
     Dim workdayDict As Object
     Dim firstReportDate As Date
@@ -102,10 +149,15 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
     Dim previousEnableEvents As Boolean
     Dim stateCaptured As Boolean
     Dim errorText As String
+    Dim displayStartDate As Date
+    Dim displayEndDate As Date
+    Dim hasDisplayDateRange As Boolean
+    Dim errorStage As String
 
     On Error GoTo EH
 
-    Set sourceWs = ActiveSheet
+    errorStage = "원본 업무 시트 확인"
+    Set sourceWs = GetDailyReportSourceSheet()
     If Not IsDailyReportTaskSheet(sourceWs) Then
         If showCompletionMessage Then
             MsgBox "업무 시트에서 실행하세요.", vbExclamation
@@ -115,6 +167,18 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
         Exit Sub
     End If
 
+    If ThisWorkbook.ReadOnly Then
+        If showCompletionMessage Then
+            MsgBox "일별 진척률 이력을 저장하려면 통합문서를 읽기/쓰기 상태로 여세요.", _
+                   vbExclamation
+        Else
+            Err.Raise vbObjectError + 2107, , _
+                      "통합문서가 읽기 전용이어서 일별 진척률 이력을 저장할 수 없습니다."
+        End If
+        Exit Sub
+    End If
+
+    errorStage = "일별 현황 템플릿 확인"
     Set templateWs = GetDailyTemplateSheet()
     If templateWs Is Nothing Then
         If showCompletionMessage Then
@@ -125,6 +189,12 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
         Exit Sub
     End If
 
+    errorStage = "간트 차트 새로고침"
+    sourceWs.Activate
+    RefreshGanttSheet False
+    sourceWs.Calculate
+
+    errorStage = "업무 데이터 확인"
     lastRow = GetLastDataRow(sourceWs)
     If lastRow < DATA_START_ROW Then
         If showCompletionMessage Then
@@ -136,10 +206,10 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
     End If
 
     Set groupRows = CreateObject("Scripting.Dictionary")
-    Set groupValues = CreateObject("Scripting.Dictionary")
     Set groupOrder = New Collection
 
-    BuildDailyReportGroups sourceWs, lastRow, groupRows, groupValues, groupOrder
+    errorStage = "업무 그룹 구성"
+    BuildDailyReportGroups sourceWs, lastRow, groupRows, groupOrder
     If groupOrder.Count = 0 Then
         If showCompletionMessage Then
             MsgBox "출력할 Level 1 업무가 없습니다.", vbExclamation
@@ -149,6 +219,7 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
         Exit Sub
     End If
 
+    errorStage = "보고 기간 계산"
     If Not GetDailyReportDateRange(sourceWs, lastRow, firstReportDate, lastReportDate) Then
         If showCompletionMessage Then
             MsgBox "실제 시작일이 입력된 업무가 없습니다.", vbExclamation
@@ -174,20 +245,40 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
     Application.ScreenUpdating = False
     Application.EnableEvents = False
 
+    errorStage = "휴일 및 표시 기간 설정 로드"
     EnsureConfigSheet
     LoadHolidaySettings holidayDict, workdayDict
+    hasDisplayDateRange = TryGetDisplayDateRange(displayStartDate, displayEndDate)
+    errorStage = "진척률 이력 로드"
+    LoadDailyProgressHistory
+
+    If hasDisplayDateRange Then
+        If displayStartDate > firstReportDate Then firstReportDate = displayStartDate
+        If displayEndDate < lastReportDate Then lastReportDate = displayEndDate
+    End If
+
+    If firstReportDate > lastReportDate Then
+        If showCompletionMessage Then MsgBox "config 시트의 표시 기간에 출력할 업무가 없습니다.", vbInformation
+        GoTo SafeExit
+    End If
 
     monthCursor = DateSerial(Year(firstReportDate), Month(firstReportDate), 1)
     Do While monthCursor <= DateSerial(Year(lastReportDate), Month(lastReportDate), 1)
+        errorStage = Format$(monthCursor, "yyyy-mm") & " 보고서 시트 생성"
         monthStart = monthCursor
         If firstReportDate > monthStart Then monthStart = firstReportDate
 
         monthEnd = DateSerial(Year(monthCursor), Month(monthCursor) + 1, 0)
         If lastReportDate < monthEnd Then monthEnd = lastReportDate
 
-        If HasWorkingDate(monthStart, monthEnd, holidayDict, workdayDict) Then
+        Set activeGroupOrder = GetDailyActiveGroupOrder( _
+            sourceWs, groupRows, groupOrder, monthStart, monthEnd, _
+            holidayDict, workdayDict)
+
+        If HasWorkingDate(monthStart, monthEnd, holidayDict, workdayDict) And _
+           activeGroupOrder.Count > 0 Then
             AddDailyReportMonthSheet templateWs, outputBook, sourceWs, _
-                groupRows, groupValues, groupOrder, monthStart, monthEnd, _
+                groupRows, activeGroupOrder, monthStart, monthEnd, _
                 holidayDict, workdayDict
         End If
 
@@ -203,9 +294,17 @@ Public Sub 일별진행현황_생성(Optional ByVal outputPath As String = "", _
         GoTo SafeExit
     End If
 
+    errorStage = "결과 파일 저장"
     outputBook.SaveAs Filename:=CStr(savePath), FileFormat:=DAILY_FILE_FORMAT_XLSX
     outputBook.Close SaveChanges:=False
     Set outputBook = Nothing
+
+    errorStage = "진척률 이력 저장"
+    SaveDailyProgressHistory sourceWs, groupRows, groupOrder, Date
+    errorStage = "원본 통합문서 저장"
+    ThisWorkbook.Save
+    ThisWorkbook.Activate
+    sourceWs.Activate
 
     RestoreDailyReportApplicationState previousScreenUpdating, previousEnableEvents
     stateCaptured = False
@@ -226,6 +325,7 @@ SafeExit:
 
 EH:
     errorText = Err.Description
+    If Len(errorStage) > 0 Then errorText = errorStage & ": " & errorText
     On Error Resume Next
     If Not outputBook Is Nothing Then outputBook.Close SaveChanges:=False
     On Error GoTo 0
@@ -243,14 +343,12 @@ End Sub
 Private Sub BuildDailyReportGroups(ByVal ws As Worksheet, _
                                    ByVal lastRow As Long, _
                                    ByVal groupRows As Object, _
-                                   ByVal groupValues As Object, _
                                    ByVal groupOrder As Collection)
     Dim rowNum As Long
     Dim taskLevel As Long
     Dim currentKey As String
     Dim groupKey As String
     Dim ownerText As String
-    Dim values As Variant
     Dim rows As Collection
 
     For rowNum = DATA_START_ROW To lastRow
@@ -269,13 +367,6 @@ Private Sub BuildDailyReportGroups(ByVal ws As Worksheet, _
             If Not groupRows.Exists(groupKey) Then
                 Set rows = New Collection
                 groupRows.Add groupKey, rows
-                values = Array( _
-                    Trim$(CStr(ws.Cells(rowNum, COL_TYPE).Value2)), _
-                    Trim$(CStr(ws.Cells(rowNum, COL_MAJOR_CATEGORY).Value2)), _
-                    Trim$(CStr(ws.Cells(rowNum, COL_MIDDLE_CATEGORY).Value2)), _
-                    Trim$(CStr(ws.Cells(rowNum, COL_MINOR_CATEGORY).Value2)), _
-                    ownerText)
-                groupValues.Add groupKey, values
                 groupOrder.Add groupKey
             End If
         ElseIf Len(currentKey) = 0 Then
@@ -291,13 +382,6 @@ Private Sub BuildDailyReportGroups(ByVal ws As Worksheet, _
             If Not groupRows.Exists(groupKey) Then
                 Set rows = New Collection
                 groupRows.Add groupKey, rows
-                values = Array( _
-                    Trim$(CStr(ws.Cells(rowNum, COL_TYPE).Value2)), _
-                    Trim$(CStr(ws.Cells(rowNum, COL_MAJOR_CATEGORY).Value2)), _
-                    Trim$(CStr(ws.Cells(rowNum, COL_MIDDLE_CATEGORY).Value2)), _
-                    Trim$(CStr(ws.Cells(rowNum, COL_MINOR_CATEGORY).Value2)), _
-                    ownerText)
-                groupValues.Add groupKey, values
                 groupOrder.Add groupKey
             End If
         End If
@@ -307,7 +391,261 @@ Private Sub BuildDailyReportGroups(ByVal ws As Worksheet, _
             rows.Add rowNum
         End If
     Next rowNum
+
+    RemoveDailyEmptyGroups groupRows, groupOrder
 End Sub
+
+Private Sub RemoveDailyEmptyGroups(ByVal groupRows As Object, _
+                                   ByVal groupOrder As Collection)
+    Dim groupIndex As Long
+    Dim groupKey As String
+    Dim rows As Collection
+
+    For groupIndex = groupOrder.Count To 1 Step -1
+        groupKey = CStr(groupOrder(groupIndex))
+        Set rows = groupRows(groupKey)
+        If rows.Count = 0 Then
+            groupRows.Remove groupKey
+            groupOrder.Remove groupIndex
+        End If
+    Next groupIndex
+End Sub
+
+Private Sub SaveDailyProgressHistory(ByVal ws As Worksheet, _
+                                     ByVal groupRows As Object, _
+                                     ByVal groupOrder As Collection, _
+                                     ByVal snapshotDate As Date)
+    Dim historyWs As Worksheet
+    Dim groupIndex As Long
+    Dim groupKey As String
+    Dim rows As Collection
+    Dim sourceRow As Long
+    Dim targetRow As Long
+
+    Set historyWs = GetDailyHistorySheet()
+    For groupIndex = 1 To groupOrder.Count
+        groupKey = CStr(groupOrder(groupIndex))
+        Set rows = groupRows(groupKey)
+        If rows.Count > 0 Then
+            sourceRow = CLng(rows(1))
+            targetRow = FindDailyHistoryRow(historyWs, ws.Name, groupKey, snapshotDate)
+            If targetRow = 0 Then
+                targetRow = historyWs.Cells(historyWs.Rows.Count, 1).End(xlUp).Row + 1
+                If targetRow < DAILY_HISTORY_DATA_START_ROW Then _
+                    targetRow = DAILY_HISTORY_DATA_START_ROW
+            End If
+
+            historyWs.Cells(targetRow, 1).Value = DateValue(snapshotDate)
+            historyWs.Cells(targetRow, 2).Value = groupKey
+            historyWs.Cells(targetRow, 3).Value = GetTaskProgressValue(ws, sourceRow)
+            historyWs.Cells(targetRow, 4).Value = CStr(ws.Cells(sourceRow, COL_STATUS).Value)
+            historyWs.Cells(targetRow, 5).Value = ws.Cells(sourceRow, COL_TYPE).Value2
+            historyWs.Cells(targetRow, 6).Value = ws.Cells(sourceRow, COL_MAJOR_CATEGORY).Value2
+            historyWs.Cells(targetRow, 7).Value = ws.Cells(sourceRow, COL_MIDDLE_CATEGORY).Value2
+            historyWs.Cells(targetRow, 8).Value = ws.Cells(sourceRow, COL_MINOR_CATEGORY).Value2
+            historyWs.Cells(targetRow, 9).Value = ws.Cells(sourceRow, COL_OWNER).Value2
+            historyWs.Cells(targetRow, 10).Value = Now
+            historyWs.Cells(targetRow, DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value = ws.Name
+            RemoveDuplicateDailyHistoryRows historyWs, ws.Name, groupKey, _
+                                            snapshotDate, targetRow
+        End If
+    Next groupIndex
+
+    historyWs.Columns(1).NumberFormat = "yyyy-mm-dd"
+    historyWs.Columns(3).NumberFormat = "0%"
+    historyWs.Columns(10).NumberFormat = "yyyy-mm-dd hh:mm"
+    Set mDailyProgressHistory = Nothing
+    Set mDailyProgressCache = Nothing
+End Sub
+
+Private Function FindDailyHistoryRow(ByVal historyWs As Worksheet, _
+                                     ByVal sourceSheetName As String, _
+                                     ByVal groupKey As String, _
+                                     ByVal snapshotDate As Date) As Long
+    Dim rowNum As Long
+    Dim lastRow As Long
+    Dim savedSheetName As String
+
+    lastRow = historyWs.Cells(historyWs.Rows.Count, 1).End(xlUp).Row
+    For rowNum = lastRow To DAILY_HISTORY_DATA_START_ROW Step -1
+        If IsDate(historyWs.Cells(rowNum, 1).Value) Then
+            savedSheetName = Trim$(CStr( _
+                historyWs.Cells(rowNum, DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value2))
+            If CLng(DateValue(historyWs.Cells(rowNum, 1).Value)) = _
+               CLng(DateValue(snapshotDate)) And _
+               CStr(historyWs.Cells(rowNum, 2).Value2) = groupKey And _
+               (Len(savedSheetName) = 0 Or _
+                StrComp(savedSheetName, sourceSheetName, vbTextCompare) = 0) Then
+                FindDailyHistoryRow = rowNum
+                Exit Function
+            End If
+        End If
+    Next rowNum
+End Function
+
+Private Sub RemoveDuplicateDailyHistoryRows(ByVal historyWs As Worksheet, _
+                                            ByVal sourceSheetName As String, _
+                                            ByVal groupKey As String, _
+                                            ByVal snapshotDate As Date, _
+                                            ByVal keepRow As Long)
+    Dim rowNum As Long
+    Dim lastRow As Long
+    Dim savedSheetName As String
+
+    lastRow = historyWs.Cells(historyWs.Rows.Count, 1).End(xlUp).Row
+    For rowNum = lastRow To DAILY_HISTORY_DATA_START_ROW Step -1
+        If rowNum <> keepRow And IsDate(historyWs.Cells(rowNum, 1).Value) Then
+            savedSheetName = Trim$(CStr( _
+                historyWs.Cells(rowNum, DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value2))
+            If CLng(DateValue(historyWs.Cells(rowNum, 1).Value)) = _
+               CLng(DateValue(snapshotDate)) And _
+               CStr(historyWs.Cells(rowNum, 2).Value2) = groupKey And _
+               (Len(savedSheetName) = 0 Or _
+                StrComp(savedSheetName, sourceSheetName, vbTextCompare) = 0) Then
+                historyWs.Rows(rowNum).Delete
+                If rowNum < keepRow Then keepRow = keepRow - 1
+            End If
+        End If
+    Next rowNum
+End Sub
+
+Private Function GetDailyHistorySheet() As Worksheet
+    On Error Resume Next
+    Set GetDailyHistorySheet = ThisWorkbook.Worksheets(DAILY_HISTORY_SHEET_NAME)
+    On Error GoTo 0
+
+    If GetDailyHistorySheet Is Nothing Then
+        Set GetDailyHistorySheet = ThisWorkbook.Worksheets.Add( _
+            After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        GetDailyHistorySheet.Name = DAILY_HISTORY_SHEET_NAME
+    End If
+
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 1).Value = "기록일"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 2).Value = "업무키"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 3).Value = "진척률"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 4).Value = "상태"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 5).Value = "Type"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 6).Value = "대분류"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 7).Value = "중분류"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 8).Value = "소분류"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 9).Value = "담당자"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, 10).Value = "저장시각"
+    GetDailyHistorySheet.Cells(DAILY_HISTORY_HEADER_ROW, _
+                               DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value = "원본시트"
+    GetDailyHistorySheet.Rows(DAILY_HISTORY_HEADER_ROW).Font.Bold = True
+    GetDailyHistorySheet.Visible = xlSheetVeryHidden
+End Function
+
+Private Sub LoadDailyProgressHistory()
+    Dim historyWs As Worksheet
+    Dim groupHistory As Object
+    Dim lastRow As Long
+    Dim rowNum As Long
+    Dim groupKey As String
+    Dim sourceSheetName As String
+    Dim historyGroupKey As String
+    Dim dateKey As String
+    Dim progressValue As Variant
+
+    Set mDailyProgressHistory = CreateObject("Scripting.Dictionary")
+    Set mDailyProgressCache = CreateObject("Scripting.Dictionary")
+    Set historyWs = GetDailyHistorySheet()
+    lastRow = historyWs.Cells(historyWs.Rows.Count, 1).End(xlUp).Row
+
+    For rowNum = DAILY_HISTORY_DATA_START_ROW To lastRow
+        groupKey = CStr(historyWs.Cells(rowNum, 2).Value2)
+        progressValue = historyWs.Cells(rowNum, 3).Value
+        If Len(groupKey) > 0 And IsDate(historyWs.Cells(rowNum, 1).Value) And _
+           IsNumeric(progressValue) Then
+            sourceSheetName = Trim$(CStr( _
+                historyWs.Cells(rowNum, DAILY_HISTORY_SOURCE_SHEET_COLUMN).Value2))
+            historyGroupKey = BuildDailyHistoryGroupKey(sourceSheetName, groupKey)
+            If Not mDailyProgressHistory.Exists(historyGroupKey) Then
+                Set groupHistory = CreateObject("Scripting.Dictionary")
+                mDailyProgressHistory.Add historyGroupKey, groupHistory
+            Else
+                Set groupHistory = mDailyProgressHistory(historyGroupKey)
+            End If
+
+            dateKey = CStr(CLng(DateValue(historyWs.Cells(rowNum, 1).Value)))
+            groupHistory(dateKey) = CDbl(progressValue)
+        End If
+    Next rowNum
+End Sub
+
+Private Function GetDailyProgressForDate(ByVal ws As Worksheet, _
+                                         ByVal groupKey As String, _
+                                         ByVal targetDate As Date, _
+                                         ByVal rows As Collection) As Variant
+    Dim currentProgress As Double
+    Dim cacheKey As String
+    Dim result As Variant
+
+    If rows.Count = 0 Then Exit Function
+
+    currentProgress = GetTaskProgressValue(ws, CLng(rows(1)))
+    If CLng(DateValue(targetDate)) = CLng(Date) Then
+        GetDailyProgressForDate = currentProgress
+        Exit Function
+    End If
+
+    If targetDate > Date Then
+        GetDailyProgressForDate = currentProgress
+        Exit Function
+    End If
+
+    cacheKey = BuildDailyHistoryGroupKey(ws.Name, groupKey) & _
+               ChrW(DAILY_HISTORY_KEY_SEPARATOR) & CStr(CLng(DateValue(targetDate)))
+    If mDailyProgressCache.Exists(cacheKey) Then
+        GetDailyProgressForDate = mDailyProgressCache(cacheKey)
+        Exit Function
+    End If
+
+    result = FindLatestDailyProgress(ws.Name, groupKey, targetDate)
+    If IsEmpty(result) Then result = currentProgress
+    mDailyProgressCache.Add cacheKey, result
+    GetDailyProgressForDate = result
+End Function
+
+Private Function FindLatestDailyProgress(ByVal sourceSheetName As String, _
+                                         ByVal groupKey As String, _
+                                         ByVal targetDate As Date) As Variant
+    Dim result As Variant
+
+    result = FindLatestDailyProgressInGroup( _
+        BuildDailyHistoryGroupKey(sourceSheetName, groupKey), targetDate)
+    If IsEmpty(result) Then
+        result = FindLatestDailyProgressInGroup( _
+            BuildDailyHistoryGroupKey("", groupKey), targetDate)
+    End If
+    FindLatestDailyProgress = result
+End Function
+
+Private Function FindLatestDailyProgressInGroup(ByVal historyGroupKey As String, _
+                                                ByVal targetDate As Date) As Variant
+    Dim groupHistory As Object
+    Dim itemDateKey As Variant
+    Dim itemDate As Long
+    Dim latestDate As Long
+
+    If mDailyProgressHistory Is Nothing Then LoadDailyProgressHistory
+    If Not mDailyProgressHistory.Exists(historyGroupKey) Then Exit Function
+
+    Set groupHistory = mDailyProgressHistory(historyGroupKey)
+    For Each itemDateKey In groupHistory.Keys
+        itemDate = CLng(itemDateKey)
+        If itemDate <= CLng(DateValue(targetDate)) And itemDate > latestDate Then
+            latestDate = itemDate
+            FindLatestDailyProgressInGroup = groupHistory(itemDateKey)
+        End If
+    Next itemDateKey
+End Function
+
+Private Function BuildDailyHistoryGroupKey(ByVal sourceSheetName As String, _
+                                           ByVal groupKey As String) As String
+    BuildDailyHistoryGroupKey = LCase$(Trim$(sourceSheetName)) & _
+                                ChrW(DAILY_HISTORY_KEY_SEPARATOR) & groupKey
+End Function
 
 Private Function BuildDailyGroupKey(ByVal typeText As String, _
                                     ByVal majorText As String, _
@@ -383,8 +721,7 @@ Private Sub AddDailyReportMonthSheet(ByVal templateWs As Worksheet, _
                                      ByRef outputBook As Workbook, _
                                      ByVal sourceWs As Worksheet, _
                                      ByVal groupRows As Object, _
-                                     ByVal groupValues As Object, _
-                                     ByVal groupOrder As Collection, _
+                                     ByVal activeGroupOrder As Collection, _
                                      ByVal monthStart As Date, _
                                      ByVal monthEnd As Date, _
                                      ByVal holidayDict As Object, _
@@ -412,8 +749,8 @@ Private Sub AddDailyReportMonthSheet(ByVal templateWs As Worksheet, _
 
     outputWs.Visible = xlSheetVisible
     outputWs.Name = GetDailyMonthSheetName(outputBook, monthStart)
-    PopulateDailyMonthSheet outputWs, sourceWs, groupRows, groupValues, _
-        groupOrder, monthStart, monthEnd, holidayDict, workdayDict
+    PopulateDailyMonthSheet outputWs, sourceWs, groupRows, activeGroupOrder, _
+        monthStart, monthEnd, holidayDict, workdayDict
     Exit Sub
 
 CopyFailed:
@@ -422,14 +759,14 @@ CopyFailed:
     On Error Resume Next
     templateWs.Visible = originalVisibility
     On Error GoTo 0
-    Err.Raise errorNumber, "AddDailyReportMonthSheet", errorDescription
+    Err.Raise vbObjectError + 2111, "AddDailyReportMonthSheet", _
+              "원본 오류 " & CStr(errorNumber) & ": " & errorDescription
 End Sub
 
 Private Sub PopulateDailyMonthSheet(ByVal outputWs As Worksheet, _
                                     ByVal sourceWs As Worksheet, _
                                     ByVal groupRows As Object, _
-                                    ByVal groupValues As Object, _
-                                    ByVal groupOrder As Collection, _
+                                    ByVal activeGroupOrder As Collection, _
                                     ByVal monthStart As Date, _
                                     ByVal monthEnd As Date, _
                                     ByVal holidayDict As Object, _
@@ -443,11 +780,17 @@ Private Sub PopulateDailyMonthSheet(ByVal outputWs As Worksheet, _
     Dim groupIndex As Long
     Dim targetDate As Date
     Dim groupKey As String
-    Dim values As Variant
     Dim rows As Collection
     Dim shapeIndex As Long
+    Dim groupSourceRow As Long
+    Dim populateStage As String
+    Dim errorNumber As Long
+    Dim errorDescription As String
 
-    groupCount = groupOrder.Count
+    On Error GoTo PopulateFailed
+
+    populateStage = "출력 영역 계산"
+    groupCount = activeGroupOrder.Count
     outputLastRow = DAILY_DATA_START_ROW + groupCount - 1
     clearLastRow = outputWs.UsedRange.Row + outputWs.UsedRange.Rows.Count - 1
     If clearLastRow < DAILY_TEMPLATE_LAST_ROW Then clearLastRow = DAILY_TEMPLATE_LAST_ROW
@@ -456,20 +799,25 @@ Private Sub PopulateDailyMonthSheet(ByVal outputWs As Worksheet, _
     lastUsedColumn = outputWs.UsedRange.Column + outputWs.UsedRange.Columns.Count - 1
     If lastUsedColumn < DAILY_FIRST_DATE_COLUMN Then lastUsedColumn = DAILY_FIRST_DATE_COLUMN
 
+    populateStage = "템플릿 병합 해제"
     On Error Resume Next
+    populateStage = "템플릿 데이터 초기화"
     outputWs.Range(outputWs.Cells(DAILY_DATA_START_ROW, 2), _
                    outputWs.Cells(clearLastRow, lastUsedColumn)).UnMerge
-    On Error GoTo 0
+    On Error GoTo PopulateFailed
 
     outputWs.Range(outputWs.Cells(DAILY_DATA_START_ROW, 2), _
                    outputWs.Cells(clearLastRow, lastUsedColumn)).ClearContents
 
+    populateStage = "템플릿 개체 제거"
     For shapeIndex = outputWs.Shapes.Count To 1 Step -1
         outputWs.Shapes(shapeIndex).Delete
     Next shapeIndex
 
+    populateStage = "행 서식 준비"
     PrepareDailyDataRowFormats outputWs, outputLastRow
 
+    populateStage = "제목 및 헤더 작성"
     outputWs.Range("B2").Value = DAILY_TITLE
     outputWs.Range("B4").Value = "Type"
     outputWs.Range("C4").Value = "대분류"
@@ -478,19 +826,22 @@ Private Sub PopulateDailyMonthSheet(ByVal outputWs As Worksheet, _
     outputWs.Range("F4").Value = "개발자_정"
     outputWs.Range("G4").Value = "개발자_부"
 
+    populateStage = "업무 그룹 작성"
     For groupIndex = 1 To groupCount
         targetRow = DAILY_DATA_START_ROW + groupIndex - 1
-        groupKey = CStr(groupOrder(groupIndex))
-        values = groupValues(groupKey)
+        groupKey = CStr(activeGroupOrder(groupIndex))
+        Set rows = groupRows(groupKey)
+        groupSourceRow = CLng(rows(1))
 
-        outputWs.Cells(targetRow, 2).Value = values(0)
-        outputWs.Cells(targetRow, 3).Value = values(1)
-        outputWs.Cells(targetRow, 4).Value = values(2)
-        outputWs.Cells(targetRow, 5).Value = values(3)
-        outputWs.Cells(targetRow, 6).Value = values(4)
+        outputWs.Cells(targetRow, 2).Value = sourceWs.Cells(groupSourceRow, COL_TYPE).Value2
+        outputWs.Cells(targetRow, 3).Value = sourceWs.Cells(groupSourceRow, COL_MAJOR_CATEGORY).Value2
+        outputWs.Cells(targetRow, 4).Value = sourceWs.Cells(groupSourceRow, COL_MIDDLE_CATEGORY).Value2
+        outputWs.Cells(targetRow, 5).Value = sourceWs.Cells(groupSourceRow, COL_MINOR_CATEGORY).Value2
+        outputWs.Cells(targetRow, 6).Value = sourceWs.Cells(groupSourceRow, COL_OWNER).Value2
         outputWs.Cells(targetRow, 7).ClearContents
     Next groupIndex
 
+    populateStage = "날짜별 업무 작성"
     dateColumn = DAILY_FIRST_DATE_COLUMN
     For targetDate = monthStart To monthEnd
         If IsWorkingDay(targetDate, holidayDict, workdayDict) Then
@@ -500,25 +851,87 @@ Private Sub PopulateDailyMonthSheet(ByVal outputWs As Worksheet, _
 
             For groupIndex = 1 To groupCount
                 targetRow = DAILY_DATA_START_ROW + groupIndex - 1
-                groupKey = CStr(groupOrder(groupIndex))
+                groupKey = CStr(activeGroupOrder(groupIndex))
                 Set rows = groupRows(groupKey)
-                values = groupValues(groupKey)
                 outputWs.Cells(targetRow, dateColumn).Value = _
-                    BuildDailyCellText(sourceWs, rows, targetDate, CStr(values(4)))
+                    BuildDailyCellText(sourceWs, rows, targetDate, _
+                                       CStr(sourceWs.Cells(CLng(rows(1)), COL_OWNER).Value2), _
+                                       GetDailyProgressForDate(sourceWs, groupKey, _
+                                                               targetDate, rows))
             Next groupIndex
 
             dateColumn = dateColumn + 1
         End If
     Next targetDate
 
+    populateStage = "미사용 날짜 열 정리"
     If dateColumn <= lastUsedColumn Then
+        If outputWs.AutoFilterMode Then outputWs.AutoFilterMode = False
         outputWs.Range(outputWs.Cells(DAILY_HEADER_ROW, dateColumn), _
                        outputWs.Cells(clearLastRow, lastUsedColumn)).ClearContents
+        outputWs.Range(outputWs.Cells(DAILY_HEADER_ROW, dateColumn), _
+                       outputWs.Cells(clearLastRow, lastUsedColumn)).ClearFormats
+        outputWs.Range(outputWs.Cells(1, dateColumn), _
+                       outputWs.Cells(1, lastUsedColumn)).EntireColumn.ColumnWidth = _
+            outputWs.StandardWidth
     End If
 
+    populateStage = "분류 셀 병합"
     MergeRepeatedDailyCategories outputWs, outputLastRow
+    populateStage = "출력 영역 서식 적용"
     FormatDailyOutputArea outputWs, outputLastRow, dateColumn - 1
+    populateStage = "미사용 템플릿 영역 정리"
+    ClearDailyUnusedTemplateArea outputWs, outputLastRow, clearLastRow, lastUsedColumn
+    Exit Sub
+
+PopulateFailed:
+    errorNumber = Err.Number
+    errorDescription = Err.Description
+    Err.Raise vbObjectError + 2110, "PopulateDailyMonthSheet", _
+              populateStage & " (원본 오류 " & CStr(errorNumber) & "): " & _
+              errorDescription
 End Sub
+
+Private Function GetDailyActiveGroupOrder(ByVal sourceWs As Worksheet, _
+                                          ByVal groupRows As Object, _
+                                          ByVal groupOrder As Collection, _
+                                          ByVal monthStart As Date, _
+                                          ByVal monthEnd As Date, _
+                                          ByVal holidayDict As Object, _
+                                          ByVal workdayDict As Object) As Collection
+    Dim activeGroups As Collection
+    Dim groupIndex As Long
+    Dim groupKey As String
+    Dim rows As Collection
+    Dim targetDate As Date
+    Dim rowNum As Variant
+    Dim groupIsActive As Boolean
+
+    Set activeGroups = New Collection
+
+    For groupIndex = 1 To groupOrder.Count
+        groupKey = CStr(groupOrder(groupIndex))
+        Set rows = groupRows(groupKey)
+        groupIsActive = False
+
+        For targetDate = monthStart To monthEnd
+            If IsWorkingDay(targetDate, holidayDict, workdayDict) Then
+                For Each rowNum In rows
+                    If IsDailyTaskOnDate(sourceWs, CLng(rowNum), targetDate) Then
+                        groupIsActive = True
+                        Exit For
+                    End If
+                Next rowNum
+            End If
+
+            If groupIsActive Then Exit For
+        Next targetDate
+
+        If groupIsActive Then activeGroups.Add groupKey
+    Next groupIndex
+
+    Set GetDailyActiveGroupOrder = activeGroups
+End Function
 
 Private Sub PrepareDailyDataRowFormats(ByVal ws As Worksheet, ByVal outputLastRow As Long)
     Dim rowNum As Long
@@ -546,16 +959,37 @@ Private Sub PrepareDailyDateColumn(ByVal ws As Worksheet, _
     End If
 End Sub
 
+Private Sub ClearDailyUnusedTemplateArea(ByVal ws As Worksheet, _
+                                         ByVal lastDataRow As Long, _
+                                         ByVal clearLastRow As Long, _
+                                         ByVal lastUsedColumn As Long)
+    Dim clearRange As Range
+
+    If clearLastRow <= lastDataRow Then Exit Sub
+
+    Set clearRange = ws.Range(ws.Cells(lastDataRow + 1, 2), _
+                              ws.Cells(clearLastRow, lastUsedColumn))
+    On Error Resume Next
+    clearRange.UnMerge
+    On Error GoTo 0
+    clearRange.ClearContents
+    clearRange.ClearFormats
+    ws.Rows((lastDataRow + 1) & ":" & clearLastRow).RowHeight = _
+        ws.StandardHeight
+End Sub
+
 Private Function BuildDailyCellText(ByVal ws As Worksheet, _
                                     ByVal rows As Collection, _
                                     ByVal targetDate As Date, _
-                                    ByVal ownerText As String) As String
+                                    ByVal ownerText As String, _
+                                    ByVal progressValue As Variant) As String
     Dim rowNum As Variant
     Dim taskLevel As Long
     Dim taskText As String
     Dim lineText As String
     Dim bodyText As String
     Dim level1Number As Long
+    Dim progressText As String
 
     For Each rowNum In rows
         If IsDailyTaskOnDate(ws, CLng(rowNum), targetDate) Then
@@ -578,10 +1012,17 @@ Private Function BuildDailyCellText(ByVal ws As Worksheet, _
     Next rowNum
 
     If Len(bodyText) > 0 Then
-        If Len(ownerText) > 0 Then
-            BuildDailyCellText = "(" & ownerText & ")" & vbLf & bodyText
+        If Not IsEmpty(progressValue) And IsNumeric(progressValue) Then
+            progressText = "진척률 " & Format$(CDbl(progressValue), "0%")
         Else
-            BuildDailyCellText = bodyText
+            progressText = "진척률 미기록"
+        End If
+
+        If Len(ownerText) > 0 Then
+            BuildDailyCellText = "(" & ownerText & ") " & progressText & _
+                                 vbLf & bodyText
+        Else
+            BuildDailyCellText = progressText & vbLf & bodyText
         End If
     End If
 End Function
@@ -722,8 +1163,21 @@ Private Function IsDailyReportTaskSheet(ByVal ws As Worksheet) As Boolean
         (StrComp(ws.Name, CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
          StrComp(ws.Name, "WeeklyPptTemplate", vbTextCompare) <> 0 And _
          StrComp(ws.Name, DAILY_TEMPLATE_SHEET_NAME, vbTextCompare) <> 0 And _
+         StrComp(ws.Name, DAILY_HISTORY_SHEET_NAME, vbTextCompare) <> 0 And _
          StrComp(ws.Name, "_버튼생성", vbTextCompare) <> 0 And _
          StrComp(ws.Name, WEEKLY_REPORT_CONFIG_SHEET_NAME, vbTextCompare) <> 0)
+End Function
+
+Private Function GetDailyReportSourceSheet() As Worksheet
+    Dim activeWs As Worksheet
+
+    If TypeName(ActiveSheet) <> "Worksheet" Then Exit Function
+    Set activeWs = ActiveSheet
+    If Not activeWs.Parent Is ThisWorkbook Then Exit Function
+    If Not IsDailyReportTaskSheet(activeWs) Then Exit Function
+    If GetLastDataRow(activeWs) < DATA_START_ROW Then Exit Function
+
+    Set GetDailyReportSourceSheet = activeWs
 End Function
 
 Private Sub RestoreDailyReportApplicationState(ByVal screenUpdating As Boolean, _
