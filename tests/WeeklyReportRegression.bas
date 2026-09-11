@@ -16,6 +16,7 @@ Public Function RunWeeklyReportRegression(ByVal outputPath As String) As String
     stage = "configure fixture"
     EnsureWeeklyReportConfigSheet
     Set ws = ThisWorkbook.Worksheets(WEEKLY_REPORT_CONFIG_SHEET_NAME)
+    ws.Range("G8:G14").ClearContents
     ws.Range("B2:G5").Value2 = "N"
     ws.Range("C2").Value2 = "Y"
     ws.Range("F2").Value2 = "Y"
@@ -46,26 +47,26 @@ Public Function RunWeeklyReportRegression(ByVal outputPath As String) As String
     EnsureWeeklyReportConfigSheet
     WeeklyRegressionEqual CStr(ws.Range("F9").Value2), "글머리 없음", "legacy mode normalization", checked
     ws.Calculate
-    WeeklyRegressionEqual CStr(ws.Range("G9").Value2), "대분류", "no bullet preview", checked
-    WeeklyRegressionEqual CStr(ws.Range("G10").Value2), "항목 숨김", "hidden middle preview", checked
-    WeeklyRegressionEqual CStr(ws.Range("G12").Value2), "ㅁ 업무명", "task preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H9").Value2), "대분류", "no bullet preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H10").Value2), "항목 숨김", "hidden middle preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H12").Value2), "    ㅁ 업무명", "task preview", checked
     For i = 8 To 14
-        WeeklyRegressionAssert ws.Cells(i, 7).HasFormula, "missing preview formula " & CStr(i), checked
+        WeeklyRegressionAssert ws.Cells(i, 8).HasFormula, "missing preview formula " & CStr(i), checked
     Next i
     ws.Range("D2:E2").Value2 = "Y"
     ws.Calculate
-    WeeklyRegressionEqual CStr(ws.Range("G10").Value2), "ㄷ 중분류", "visible middle preview", checked
-    WeeklyRegressionEqual CStr(ws.Range("G11").Value2), "ㄹ 소분류", "visible minor preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H10").Value2), "    ㄷ 중분류", "visible middle preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H11").Value2), "        ㄹ 소분류", "visible minor preview", checked
     ws.Range("F2").Value2 = "N"
     ws.Range("G2").Value2 = "Y"
     ws.Calculate
-    WeeklyRegressionEqual CStr(ws.Range("G12").Value2), "ㅁ Level 1", "level only preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H12").Value2), "            ㅁ Level 1", "level only preview", checked
     ws.Range("F2").Value2 = "Y"
     ws.Calculate
-    WeeklyRegressionEqual CStr(ws.Range("G12").Value2), "ㅁ Level 1 - 업무명", "name and level preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H12").Value2), "            ㅁ Level 1 - 업무명", "name and level preview", checked
     ws.Range("F2:G2").Value2 = "N"
     ws.Calculate
-    WeeklyRegressionEqual CStr(ws.Range("G12").Value2), "항목 숨김", "hidden task preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H12").Value2), "항목 숨김", "hidden task preview", checked
     ws.Range("F2").Value2 = "Y"
     snapshot = WeeklyRegressionConfigSnapshot(ws)
     EnsureWeeklyReportConfigSheet
@@ -106,13 +107,52 @@ Public Function RunWeeklyReportRegression(ByVal outputPath As String) As String
     WeeklyRegressionAssert InStr(CStr(FindTextShape(slide, "(개발 항목)").TextFrame.TextRange.Text), _
         "    ㄷ 중분류B") > 0, "rendered plan loses second block indent", checked
 
+    stage = "custom leading spaces and preservation"
+    ws.Range("G10:G14").Value = Application.Transpose(Array(2, 7, 10, 0, 1))
+    snapshot = WeeklyRegressionConfigSnapshot(ws)
+    EnsureWeeklyReportConfigSheet
+    EnsureWeeklyReportConfigSheet
+    WeeklyRegressionEqual WeeklyRegressionConfigSnapshot(ws), snapshot, "initialization preserves custom spaces", checked
+    ws.Calculate
+    WeeklyRegressionEqual CStr(ws.Range("H10").Value2), Space$(2) & "ㄷ 중분류", "custom middle preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H11").Value2), Space$(7) & "ㄹ 소분류", "custom minor preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H12").Value2), Space$(10) & "ㅁ 업무명", "custom task preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H13").Value2), "업무명", "zero spaces without bullet preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H14").Value2), " 업무명", "custom leaf preview", checked
+    WeeklyRegressionBuild rows, items, dates, levels, plans
+    expected = Array("REO", Space$(2) & "ㄷ 중분류A", Space$(7) & "ㄹ 소분류A", _
+        Space$(10) & "ㅁ 업무A", "하위A", " 상세A", _
+        Space$(10) & "ㅁ 업무B", "하위B", " 상세B")
+    planLines = Split(CStr(plans(1)), ChrW(11))
+    FillWeeklyReportCurrentTable slide, items, dates, levels, GetWeeklyReportVisibleCategoryCount()
+    FillWeeklyReportPlanArea slide, plans, False
+    For i = 0 To UBound(expected)
+        WeeklyRegressionEqual CStr(planLines(i)), CStr(expected(i)), "custom plan line " & CStr(i), checked
+        WeeklyRegressionEqual WeeklyRegressionParagraph(tableShape, i + 1), _
+            CStr(expected(i)), "custom current line " & CStr(i), checked
+    Next i
+    WeeklyRegressionAssert InStr(CStr(FindTextShape(slide, "(개발 항목)").TextFrame.TextRange.Text), _
+        Space$(2) & "ㄷ 중분류B") > 0, "custom rendered plan middle spaces", checked
+    ws.Range("G12").Value2 = 40
+    WeeklyRegressionEqual CStr(GetWeeklyReportIndentSpaces(5, 12)), "40", "maximum custom spaces", checked
+    ws.Range("G12").Value2 = -1
+    WeeklyRegressionEqual CStr(GetWeeklyReportIndentSpaces(5, 12)), "12", "negative spaces fallback", checked
+    ws.Range("G12").Value2 = 1.5
+    WeeklyRegressionEqual CStr(GetWeeklyReportIndentSpaces(5, 12)), "12", "fractional spaces fallback", checked
+    ws.Range("G12").Value2 = 41
+    WeeklyRegressionEqual CStr(GetWeeklyReportIndentSpaces(5, 12)), "12", "excessive spaces fallback", checked
+    ws.Range("G8:G14").ClearContents
+    ws.Calculate
+    WeeklyRegressionEqual CStr(GetWeeklyReportIndentSpaces(5, 12)), "12", "blank restores automatic spaces", checked
+    WeeklyRegressionEqual CStr(ws.Range("H12").Value2), Space$(12) & "ㅁ 업무명", "blank restores automatic preview", checked
+
     stage = "numbering and aliases"
     ws.Range("F12").Value2 = "레벨 번호"
     ResetWeeklyReportNumbering
     WeeklyRegressionEqual GetWeeklyReportLevelBullet(1), "1.", "legacy numbering first", checked
     WeeklyRegressionEqual GetWeeklyReportLevelBullet(1), "2.", "legacy numbering second", checked
     ws.Calculate
-    WeeklyRegressionEqual CStr(ws.Range("G12").Value2), "1. 업무명", "legacy numbering preview", checked
+    WeeklyRegressionEqual CStr(ws.Range("H12").Value2), "            1. 업무명", "legacy numbering preview", checked
     ws.Range("F12").Value2 = "번호 매기기"
     ResetWeeklyReportNumbering
     ws.Calculate
@@ -224,7 +264,7 @@ End Function
 
 Private Function WeeklyRegressionConfigSnapshot(ByVal ws As Worksheet) As String
     Dim cell As Range, result As String, value As String
-    For Each cell In ws.Range("B2:G5,B7:B9,E8:F14,H3:I3")
+    For Each cell In ws.Range("B2:G5,B7:B9,E8:G14,I3:J3")
         value = CStr(cell.Value2)
         result = result & CStr(Len(value)) & ":" & value & ";"
     Next cell

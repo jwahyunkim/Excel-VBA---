@@ -1344,7 +1344,8 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
                                    GetWeeklyReportShowCategoryOwnerFlag(categoryIndex + 1))
                 categoryText = FormatWeeklyReportLine( _
                                    GetWeeklyReportVisibleCategoryPosition(categoryIndex + 1) - 1, _
-                                   GetWeeklyReportCategoryBullet(categoryIndex + 1), categoryText)
+                                   GetWeeklyReportCategoryBullet(categoryIndex + 1), categoryText, _
+                                   categoryIndex + 1)
                 If Len(blockText) > 0 Then blockText = blockText & ChrW(11)
                 blockText = blockText & categoryText
             End If
@@ -1360,7 +1361,7 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
                                    CStr(programName), _
                                    GetWeeklyProgramOwnerText( _
                                        rows, CStr(moduleName), CStr(programName)), _
-                                   GetWeeklyReportShowCategoryOwnerFlag(4)))
+                                   GetWeeklyReportShowCategoryOwnerFlag(4)), 4)
                 If Len(blockText) = 0 Then
                     blockText = categoryText
                 Else
@@ -1459,7 +1460,7 @@ Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
         End If
 
         lineText = FormatWeeklyReportLine(depth + levelOffset, _
-                       GetWeeklyReportLevelBullet(depth + 1), displayText)
+                       GetWeeklyReportLevelBullet(depth + 1), displayText, depth + 5)
         If Len(blockText) = 0 Then
             blockText = lineText
         Else
@@ -1703,9 +1704,10 @@ End Sub
 
 Private Function FormatWeeklyReportLine(ByVal indentLevel As Long, _
                                         ByVal bulletText As String, _
-                                        ByVal displayText As String) As String
+                                        ByVal displayText As String, _
+                                        ByVal bulletIndex As Long) As String
     If indentLevel < 0 Then indentLevel = 0
-    FormatWeeklyReportLine = Space$(indentLevel * 4)
+    FormatWeeklyReportLine = Space$(GetWeeklyReportIndentSpaces(bulletIndex, indentLevel * 4))
     If Len(bulletText) > 0 Then _
         FormatWeeklyReportLine = FormatWeeklyReportLine & bulletText & " "
     FormatWeeklyReportLine = FormatWeeklyReportLine & displayText
@@ -1764,12 +1766,12 @@ Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
             categoryLevel = -levelValue
             displayText = FormatWeeklyReportLine( _
                               GetWeeklyReportVisibleCategoryPosition(categoryLevel) - 1, _
-                              GetWeeklyReportCategoryBullet(categoryLevel), displayText)
+                              GetWeeklyReportCategoryBullet(categoryLevel), displayText, categoryLevel)
         Else
             taskLevel = levelValue - categoryDepth
             If taskLevel < 1 Then taskLevel = 1
             displayText = FormatWeeklyReportLine(levelValue - 1, _
-                              GetWeeklyReportLevelBullet(taskLevel), displayText)
+                              GetWeeklyReportLevelBullet(taskLevel), displayText, taskLevel + 4)
         End If
         taskParagraph.ParagraphFormat.Bullet.Visible = False
 

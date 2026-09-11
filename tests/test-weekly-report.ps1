@@ -30,7 +30,7 @@ try {
     $reportExcel.AskToUpdateLinks = $false
     $reportExcel.AutomationSecurity = 1
     $reportBook = $reportExcel.Workbooks.Open($reportCopy, 0, $false)
-    foreach ($reportModule in @('modHoliday', 'modWeeklyPptReport')) {
+    foreach ($reportModule in @('modGanttConfig', 'modHoliday', 'modWeeklyPptReport')) {
         $reportSource = [IO.File]::ReadAllText((Join-Path $reportRoot ('vba-files/Module/' + $reportModule + '.bas')))
         $reportSource = $reportSource -replace '(?m)^Attribute VB_Name = .*\r?\n', ''
         if ($reportModule -eq 'modWeeklyPptReport') {
