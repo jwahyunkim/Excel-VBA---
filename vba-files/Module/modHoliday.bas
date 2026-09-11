@@ -651,6 +651,15 @@ Public Sub EnsureWeeklyReportConfigSheet()
     Dim ws As Worksheet
     Dim i As Long
     Dim isNewSheet As Boolean
+    Dim bulletRow As Long
+    Dim bulletMode As String
+    Dim bulletDefault As String
+    Dim previewMode As String
+    Dim previewBullet As String
+    Dim previewPrefix As String
+    Dim previewText As String
+    Dim taskNameVisible As String
+    Dim taskLevelVisible As String
 
     Set ws = GetWeeklyReportConfigSheet()
     If ws Is Nothing Then
@@ -682,10 +691,11 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Range("A8").Value = "페이지 분류 기준"
     ws.Range("A9").Value = "내용 초과 시 처리"
 
-    ws.Range("D6").Value = "글머리 표시 설정"
+    ws.Range("D6").Value = "글머리 모양 설정"
     ws.Range("D7").Value = "항목 단계"
     ws.Range("E7").Value = "기호"
-    ws.Range("F7").Value = "표시 방식"
+    ws.Range("F7").Value = "글머리 방식"
+    ws.Range("G7").Value = "PPT 표시 예시"
     ws.Range("D8:D14").Value = Application.Transpose( _
         Array("타입", "대분류", "중분류", "소분류", "업무 Level 1", "업무 Level 2", "업무 Level 3"))
 
@@ -718,21 +728,57 @@ Public Sub EnsureWeeklyReportConfigSheet()
     If Trim$(CStr(ws.Range(WR_OVERFLOW_CELL).Value2)) = "" Then _
         ws.Range(WR_OVERFLOW_CELL).Value = WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
 
+    taskNameVisible = "UPPER(TRIM($F$2))<>""N"""
+    taskLevelVisible = "UPPER(TRIM($G$2))=""Y"""
     For i = 0 To 6
+        Select Case i
+            Case 0, 4: bulletDefault = ChrW(&H2022)
+            Case 1, 5: bulletDefault = "-"
+            Case 2, 6: bulletDefault = ChrW(&HB7)
+            Case 3: bulletDefault = ChrW(&H25E6)
+        End Select
         If Len(Trim$(CStr(ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value2))) = 0 Then
-            Select Case i
-                Case 0: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&H2022)
-                Case 1: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = "-"
-                Case 2: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&HB7)
-                Case 3: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&H25E6)
-                Case 4: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&H2022)
-                Case 5: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = "-"
-                Case 6: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&HB7)
-            End Select
+            ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = bulletDefault
         End If
-        If Len(Trim$(CStr(ws.Range(WR_BULLET_MODE_FIRST_CELL).Offset(i, 0).Value2))) = 0 Then _
+        bulletMode = Trim$(CStr(ws.Range(WR_BULLET_MODE_FIRST_CELL).Offset(i, 0).Value2))
+        If Len(bulletMode) = 0 Then
             ws.Range(WR_BULLET_MODE_FIRST_CELL).Offset(i, 0).Value = "기호"
+        ElseIf bulletMode = "표시 안 함" Then
+            ws.Range(WR_BULLET_MODE_FIRST_CELL).Offset(i, 0).Value = "글머리 없음"
+        End If
+
+        ' Preview formulas do not call the bullet getter, which advances numbering.
+        bulletRow = ws.Range(WR_BULLET_VALUE_FIRST_CELL).Row + i
+        previewMode = "TRIM(F" & bulletRow & ")"
+        previewBullet = "IF(LEN(" & previewMode & ")=0,""" & bulletDefault & _
+                        """,TRIM(E" & bulletRow & "))"
+        previewPrefix = "IF(OR(" & previewMode & "=""번호 매기기""," & previewMode & _
+                        "=""레벨 번호""),""1. "",IF(OR(" & previewMode & _
+                        "=""글머리 없음""," & previewMode & "=""표시 안 함""),"""",IF(LEN(" & _
+                        previewBullet & ")=0,""""," & previewBullet & "&"" "")))"
+        If i < 4 Then
+            ws.Cells(bulletRow, 7).Formula = _
+                "=IF(UPPER(TRIM(" & ws.Range(WR_DISPLAY_TYPE_CELL).Offset(0, i).Address & _
+                "))<>""N""," & previewPrefix & "&D" & bulletRow & ",""항목 숨김"")"
+        Else
+            previewText = "IF(" & taskLevelVisible & ",""Level " & CStr(i - 3) & _
+                          """&IF(" & taskNameVisible & ","" - "",""""),"""")&" & _
+                          "IF(" & taskNameVisible & ",""업무명"","""")"
+            ws.Cells(bulletRow, 7).Formula = _
+                "=IF(OR(" & taskNameVisible & "," & taskLevelVisible & ")," & previewPrefix & _
+                "&" & previewText & ",""항목 숨김"")"
+        End If
     Next i
+
+    ws.Range("A11:C15").UnMerge
+    For i = 11 To 15
+        ws.Range("A" & i & ":C" & i).Merge
+    Next i
+    ws.Range("A11").Value = "표시 설정 적용 기준"
+    ws.Range("A12").Value = "항목 표시가 N이면 글머리를 설정해도 항목은 숨깁니다."
+    ws.Range("A13").Value = "글머리 없음은 기호만 없애고 항목은 표시합니다."
+    ws.Range("A14").Value = "업무 레벨은 'Level 1' 같은 이름표의 표시 여부입니다."
+    ws.Range("A15").Value = "중·소분류를 보려면 D2·E2를 Y로 설정하세요."
 
     On Error Resume Next
     ws.Range("B2:G5").Validation.Delete
@@ -741,6 +787,14 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Range("H3:H197").Validation.Delete
     On Error GoTo 0
     ws.Range("B2:G4").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
+    With ws.Range("B2:F2").Validation
+        .InputTitle = "PPT 항목 표시"
+        .InputMessage = "Y이면 항목을 표시하고 N이면 숨깁니다. 글머리 설정은 표시되는 항목에만 적용됩니다."
+    End With
+    With ws.Range(WR_DISPLAY_LEVEL_CELL).Validation
+        .InputTitle = "업무 레벨 이름표"
+        .InputMessage = "Y이면 업무 앞에 Level 1 같은 이름표를 붙입니다. N이어도 업무명과 하위 업무는 표시할 수 있습니다."
+    End With
     ws.Range("B5:F5").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
     ws.Range("G5").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
         "전체,Level 1까지,Level 2까지,Level 3까지"
@@ -753,7 +807,11 @@ Public Sub EnsureWeeklyReportConfigSheet()
         WEEKLY_REPORT_OVERFLOW_MODE_EXPAND & "," & WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
     ws.Range("E8:E14").Validation.Add xlValidateTextLength, xlValidAlertStop, xlBetween, "1", "5"
     ws.Range("F8:F14").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
-        "기호,번호 매기기,표시 안 함"
+        "기호,번호 매기기,글머리 없음"
+    With ws.Range("F8:F14").Validation
+        .InputTitle = "표시되는 항목의 글머리"
+        .InputMessage = "글머리 없음은 기호만 숨깁니다. 항목 자체의 표시 여부는 위 표에서 설정하세요."
+    End With
     ws.Range("H3:H197").Validation.Add xlValidateWholeNumber, xlValidAlertStop, xlBetween, "1", "1000"
 
     ws.Cells.Font.Name = "맑은 고딕"
@@ -762,21 +820,25 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Columns("B:C").ColumnWidth = 15
     ws.Columns("D").ColumnWidth = 25
     ws.Columns("E:G").ColumnWidth = 16
+    ws.Columns("G").ColumnWidth = 30
     ws.Columns("H").ColumnWidth = 14
     ws.Columns("I").ColumnWidth = 42
     ws.Columns("J").Hidden = True
     ws.Rows("1:17").RowHeight = 24
     ws.Rows("15:212").RowHeight = 21
+    ws.Rows("12:15").RowHeight = 32
     ws.Range("A1:G5").Borders.LineStyle = xlContinuous
     ws.Range("A6:B9").Borders.LineStyle = xlContinuous
-    ws.Range("D6:F14").Borders.LineStyle = xlContinuous
+    ws.Range("D6:G14").Borders.LineStyle = xlContinuous
     ws.Range("H1:I197").Borders.LineStyle = xlContinuous
-    ws.Range("A1:G1,A6:B6,D6:F7,H1:I2").Font.Bold = True
+    ws.Range("A1:G1,A6:B6,D6:G7,H1:I2,A11:C11").Font.Bold = True
     ws.Range("A1:G1").Interior.Color = RGB(237, 125, 49)
-    ws.Range("A6:B6,D6:F7,H1:I2").Interior.Color = RGB(252, 228, 214)
+    ws.Range("A6:B6,D6:G7,H1:I2,A11:C11").Interior.Color = RGB(252, 228, 214)
     ws.Range("A4:G5").Interior.Color = RGB(255, 242, 204)
     ws.Range("A1:I212").VerticalAlignment = xlCenter
     ws.Range("A1:I14").WrapText = False
+    ws.Range("A12:C15,G8:G14").WrapText = True
+    ws.Range("G8:G14").Interior.Color = RGB(242, 242, 242)
 End Sub
 
 Private Function GetWeeklyReportSettingCell(ByVal legacyCell As String) As String
@@ -819,7 +881,7 @@ Private Function GetWeeklyReportConfiguredBullet(ByVal ws As Worksheet, _
     Select Case displayMode
         Case "번호 매기기", "레벨 번호"
             GetWeeklyReportConfiguredBullet = CStr(itemNumber) & "."
-        Case "표시 안 함"
+        Case "글머리 없음", "표시 안 함"
             GetWeeklyReportConfiguredBullet = ""
         Case Else
             GetWeeklyReportConfiguredBullet = Trim$(CStr( _
