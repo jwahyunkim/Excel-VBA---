@@ -10,12 +10,14 @@
 npm run workflow
 ```
 
+Windows PowerShell에서 추가 옵션을 전달할 때는 구분자를 작은따옴표로 감싼 `'--'`를 사용합니다. `npm.ps1`이 따옴표 없는 구분자를 누락시키면 옵션이 스크립트 대신 npm에 전달될 수 있습니다. `npm.cmd run 명령 -- 옵션`으로 실행해도 됩니다.
+
 직접 실행할 때 사용하는 명령은 다음과 같습니다.
 
 | 작업 | 명령 |
 |---|---|
 | 새 버전 개발 시작 | `npm run version:start` |
-| 자식 작업 브랜치 생성 | `npm run branch:create -- feature/브랜치명` |
+| 자식 작업 브랜치 생성 | `npm run branch:create '--' feature/브랜치명` |
 | 현재 자식 브랜치 병합 | `npm run branch:merge` |
 | 개발 완료 및 자동 릴리즈 | `npm run version:release` |
 | 현재 버전 개발 취소 | `npm run version:cancel` |
@@ -77,9 +79,9 @@ npm run version:start
 단위를 명령에 바로 넣어도 됩니다.
 
 ```powershell
-npm run version:start -- patch
-npm run version:start -- minor
-npm run version:start -- major
+npm run version:start '--' patch
+npm run version:start '--' minor
+npm run version:start '--' major
 ```
 
 버전 숫자는 직접 수정하지 않습니다. 최신 원격 태그를 기준으로 자동 계산됩니다.
@@ -113,7 +115,7 @@ git push
 현재 `develop/v3.3.0`에서 작업 브랜치를 만듭니다.
 
 ```powershell
-npm run branch:create -- feature/report-export
+npm run branch:create '--' feature/report-export
 ```
 
 현재 브랜치가 부모로 자동 지정되고 기록됩니다.
@@ -154,7 +156,7 @@ npm run branch:merge
 필요한 경우 부모를 직접 지정할 수도 있습니다.
 
 ```powershell
-npm run branch:merge -- -SourceBranch feature/report-export -TargetBranch develop/v3.3.0
+npm run branch:merge '--' -SourceBranch feature/report-export -TargetBranch develop/v3.3.0
 ```
 
 ### 5. 개발 완료 및 자동 릴리즈
@@ -189,8 +191,8 @@ PR은 출발·대상 브랜치가 모두 일치하는 열린 PR만 재사용합�
 배포 명령에 사용자·기간·출력 경로를 직접 전달할 수 있습니다.
 
 ```powershell
-npm run release:build -- -ReleaseUser "홍길동" -UsageDays 30 -RenewalDays 7
-npm run release:validate -- -OutputPath "dist/업무 간트 v4.9.2_홍길동_배포_20260911.xlsm"
+npm run release:build '--' -ReleaseUser "홍길동" -UsageDays 30 -RenewalDays 7
+npm run release:validate '--' -OutputPath "dist/업무 간트 v4.9.2_홍길동_배포_20260911.xlsm"
 ```
 
 `release:validate`에서 경로를 생략하면 현재 설정의 개발본 이름과 기준일(기본: 오늘), 사용자에 해당하는 배포본을 검증합니다. 다른 날짜의 파일은 `-Value yyyy-MM-dd` 또는 `-OutputPath`로 지정합니다.
@@ -256,7 +258,7 @@ feature/report-export  권장
 기본 기준 브랜치는 `main`입니다. 다른 기준 브랜치에서 시작해야 한다면 다음처럼 지정할 수 있습니다.
 
 ```powershell
-npm run version:start -- minor -BaseBranch maintenance
+npm run version:start '--' minor -BaseBranch maintenance
 ```
 
 일반적인 릴리즈에서는 지정할 필요가 없습니다.
@@ -340,7 +342,7 @@ git tag --list --sort=-version:refname
 npm run version:start
 
 # 자식 작업 브랜치 생성
-npm run branch:create -- feature/report-export
+npm run branch:create '--' feature/report-export
 
 # 자식 브랜치를 develop로 병합
 npm run branch:merge
