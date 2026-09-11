@@ -22,6 +22,7 @@ $reportCopy = Join-Path $reportTemp 'weekly-report-test.xlsm'
 Copy-Item -LiteralPath $WorkbookPath -Destination $reportCopy
 $reportExcel = $null
 $reportBook = $null
+$reportPhase = 'Excel startup'
 try {
     $reportExcel = New-Object -ComObject Excel.Application
     $reportExcel.Visible = $false
@@ -29,8 +30,10 @@ try {
     $reportExcel.EnableEvents = $false
     $reportExcel.AskToUpdateLinks = $false
     $reportExcel.AutomationSecurity = 1
+    $reportPhase = 'open temporary workbook'
     $reportBook = $reportExcel.Workbooks.Open($reportCopy, 0, $false)
     foreach ($reportModule in @('modGanttConfig', 'modHoliday', 'modWeeklyPptReport')) {
+        $reportPhase = 'import ' + $reportModule
         $reportSource = [IO.File]::ReadAllText((Join-Path $reportRoot ('vba-files/Module/' + $reportModule + '.bas')))
         $reportSource = $reportSource -replace '(?m)^Attribute VB_Name = .*\r?\n', ''
         if ($reportModule -eq 'modWeeklyPptReport') {
@@ -43,18 +46,24 @@ try {
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($reportCode)
     }
     $reportOutput = Join-Path $OutputDirectory 'weekly-report-regression.pptx'
+    $reportPhase = 'run VBA regression'
     $reportResult = [string]$reportExcel.Run("'weekly-report-test.xlsm'!RunWeeklyReportRegression", $reportOutput)
+    if (-not $reportResult.StartsWith('PASS:')) { throw $reportResult }
     [IO.File]::WriteAllText((Join-Path $OutputDirectory 'result.txt'), $reportResult, [Text.UTF8Encoding]::new($false))
     Write-Output $reportResult
     Write-Output ('PPT: ' + $reportOutput)
 }
+catch {
+    Write-Error ('Regression failed during ' + $reportPhase + ': ' + $_.Exception.Message) -ErrorAction Continue
+    throw
+}
 finally {
     if ($null -ne $reportBook) {
-        $reportBook.Close($false)
+        try { $reportBook.Close($false) } catch { Write-Warning ('Test workbook cleanup: ' + $_.Exception.Message) }
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($reportBook)
     }
     if ($null -ne $reportExcel) {
-        $reportExcel.Quit()
+        try { $reportExcel.Quit() } catch { Write-Warning ('Test Excel cleanup: ' + $_.Exception.Message) }
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($reportExcel)
     }
     [GC]::Collect()

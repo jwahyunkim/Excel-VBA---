@@ -776,10 +776,7 @@ Public Sub EnsureWeeklyReportConfigSheet()
         previewMode = "TRIM(F" & bulletRow & ")"
         previewBullet = "IF(LEN(" & previewMode & ")=0,""" & bulletDefault & _
                         """,TRIM(E" & bulletRow & "))"
-        previewPrefix = "IF(OR(" & previewMode & "=""번호 매기기""," & previewMode & _
-                        "=""레벨 번호""),""1. "",IF(OR(" & previewMode & _
-                        "=""글머리 없음""," & previewMode & "=""표시 안 함""),"""",IF(LEN(" & _
-                        previewBullet & ")=0,""""," & previewBullet & "&"" "")))"
+        previewPrefix = GetWeeklyReportPreviewPrefixFormula(previewMode, previewBullet)
         If i < 4 Then
             previewCategoryCount = previewCategoryCount & "+IF(UPPER(TRIM(" & _
                 ws.Range(WR_DISPLAY_TYPE_CELL).Offset(0, i).Address & "))<>""N"",1,0)"
@@ -848,10 +845,10 @@ Public Sub EnsureWeeklyReportConfigSheet()
         WEEKLY_REPORT_OVERFLOW_MODE_EXPAND & "," & WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
     ws.Range("E8:E14").Validation.Add xlValidateTextLength, xlValidAlertStop, xlBetween, "1", "5"
     ws.Range("F8:F14").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
-        "기호,번호 매기기,글머리 없음"
+        "기호,번호 매기기,원 숫자 ①,괄호 숫자 (1),반괄호 숫자 1),원 알파벳 ⓐ,원 한글 자음 ㉠,글머리 없음"
     With ws.Range("F8:F14").Validation
         .InputTitle = "표시되는 항목의 글머리"
-        .InputMessage = "글머리 없음은 기호만 숨깁니다. 항목 자체의 표시 여부는 위 표에서 설정하세요."
+        .InputMessage = "번호·문자는 같은 단계에서 순서대로 매깁니다. 글머리 없음은 기호만 숨깁니다. 항목 표시 여부는 위 표에서 설정하세요."
     End With
     With ws.Range("G8:G14").Validation
         .Add xlValidateWholeNumber, xlValidAlertStop, xlBetween, "0", "40"
@@ -885,6 +882,7 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Columns("B:C").ColumnWidth = 15
     ws.Columns("D").ColumnWidth = 25
     ws.Columns("E:G").ColumnWidth = 16
+    ws.Columns("F").ColumnWidth = 26
     ws.Columns("H").ColumnWidth = 38
     ws.Columns("I").ColumnWidth = 14
     ws.Columns("J").ColumnWidth = 42
@@ -961,6 +959,7 @@ Private Function GetWeeklyReportConfiguredBullet(ByVal ws As Worksheet, _
                                                  ByRef isConfigured As Boolean) As String
     Dim displayMode As String
     Dim itemNumber As Long
+    Dim numberedBullet As String
 
     If bulletIndex < 1 Then bulletIndex = 1
     If bulletIndex > 7 Then bulletIndex = 7
@@ -968,9 +967,12 @@ Private Function GetWeeklyReportConfiguredBullet(ByVal ws As Worksheet, _
     displayMode = Trim$(CStr(ws.Range(WR_BULLET_MODE_FIRST_CELL). _
                                       Offset(bulletIndex - 1, 0).Value2))
     isConfigured = (Len(displayMode) > 0)
+    numberedBullet = FormatWeeklyReportNumber(displayMode, itemNumber)
+    If Len(numberedBullet) > 0 Then
+        GetWeeklyReportConfiguredBullet = numberedBullet
+        Exit Function
+    End If
     Select Case displayMode
-        Case "번호 매기기", "레벨 번호"
-            GetWeeklyReportConfiguredBullet = CStr(itemNumber) & "."
         Case "글머리 없음", "표시 안 함"
             GetWeeklyReportConfiguredBullet = ""
         Case Else
@@ -978,6 +980,76 @@ Private Function GetWeeklyReportConfiguredBullet(ByVal ws As Worksheet, _
                 ws.Range(WR_BULLET_VALUE_FIRST_CELL). _
                    Offset(bulletIndex - 1, 0).Value2))
     End Select
+End Function
+
+Public Function FormatWeeklyReportNumber(ByVal displayMode As String, _
+                                         ByVal itemNumber As Long) As String
+    If itemNumber < 1 Then itemNumber = 1
+
+    Select Case Trim$(displayMode)
+        Case "번호 매기기", "레벨 번호"
+            FormatWeeklyReportNumber = CStr(itemNumber) & "."
+        Case "원 숫자 ①"
+            Select Case itemNumber
+                Case 1 To 20
+                    FormatWeeklyReportNumber = ChrW(&H2460 + itemNumber - 1)
+                Case 21 To 35
+                    FormatWeeklyReportNumber = ChrW(&H3251 + itemNumber - 21)
+                Case 36 To 50
+                    FormatWeeklyReportNumber = ChrW(&H32B1 + itemNumber - 36)
+                Case Else
+                    FormatWeeklyReportNumber = "(" & CStr(itemNumber) & ")"
+            End Select
+        Case "괄호 숫자 (1)"
+            FormatWeeklyReportNumber = "(" & CStr(itemNumber) & ")"
+        Case "반괄호 숫자 1)"
+            FormatWeeklyReportNumber = CStr(itemNumber) & ")"
+        Case "원 알파벳 ⓐ"
+            If itemNumber <= 26 Then
+                FormatWeeklyReportNumber = ChrW(&H24D0 + itemNumber - 1)
+            Else
+                FormatWeeklyReportNumber = "(" & GetWeeklyReportLetterSequence( _
+                    itemNumber, "abcdefghijklmnopqrstuvwxyz") & ")"
+            End If
+        Case "원 한글 자음 ㉠"
+            If itemNumber <= 14 Then
+                FormatWeeklyReportNumber = ChrW(&H3260 + itemNumber - 1)
+            Else
+                FormatWeeklyReportNumber = "(" & GetWeeklyReportLetterSequence( _
+                    itemNumber, "ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ") & ")"
+            End If
+    End Select
+End Function
+
+Private Function GetWeeklyReportLetterSequence(ByVal itemNumber As Long, _
+                                               ByVal letters As String) As String
+    Dim letterCount As Long
+    Dim result As String
+
+    letterCount = Len(letters)
+    Do While itemNumber > 0
+        itemNumber = itemNumber - 1
+        result = Mid$(letters, (itemNumber Mod letterCount) + 1, 1) & result
+        itemNumber = itemNumber \ letterCount
+    Loop
+    GetWeeklyReportLetterSequence = result
+End Function
+
+Private Function GetWeeklyReportPreviewPrefixFormula(ByVal previewMode As String, _
+                                                      ByVal previewBullet As String) As String
+    Dim numberedMode As Variant
+    Dim result As String
+
+    result = "IF(OR(" & previewMode & "=""글머리 없음""," & previewMode & _
+             "=""표시 안 함""),"""",IF(LEN(" & previewBullet & _
+             ")=0,""""," & previewBullet & "&"" ""))"
+    For Each numberedMode In Array("번호 매기기", "레벨 번호", "원 숫자 ①", _
+                                   "괄호 숫자 (1)", "반괄호 숫자 1)", _
+                                   "원 알파벳 ⓐ", "원 한글 자음 ㉠")
+        result = "IF(" & previewMode & "=""" & CStr(numberedMode) & """,""" & _
+                 FormatWeeklyReportNumber(CStr(numberedMode), 1) & " ""," & result & ")"
+    Next numberedMode
+    GetWeeklyReportPreviewPrefixFormula = result
 End Function
 
 Public Sub ResetWeeklyReportNumbering()

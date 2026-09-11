@@ -11,6 +11,8 @@ Public Function RunWeeklyReportRegression(ByVal outputPath As String) As String
     Dim itemPages As New Collection, datePages As New Collection
     Dim levelPages As New Collection, planPages As New Collection
     Dim duplicatedSlides As Object
+    Dim numberModes As Variant, firstNumbers As Variant, secondNumbers As Variant
+    Dim modeIndex As Long
 
     On Error GoTo Failed
     stage = "configure fixture"
@@ -168,8 +170,49 @@ Public Function RunWeeklyReportRegression(ByVal outputPath As String) As String
     WeeklyRegressionEqual WeeklyRegressionParagraph(tableShape, 7), "            2. 업무B", "current second number", checked
     WeeklyRegressionEqual WeeklyRegressionParagraph(tableShape, 12), "            1. 업무C", "current new category numbering reset", checked
 
-    stage = "save symbol sample"
-    ws.Range("F12").Value2 = "기호"
+    stage = "additional numbering styles"
+    numberModes = Array("원 숫자 ①", "괄호 숫자 (1)", "반괄호 숫자 1)", "원 알파벳 ⓐ", "원 한글 자음 ㉠")
+    firstNumbers = Array("①", "(1)", "1)", "ⓐ", "㉠")
+    secondNumbers = Array("②", "(2)", "2)", "ⓑ", "㉡")
+    For modeIndex = 0 To UBound(numberModes)
+        ws.Range("F12").Value2 = CStr(numberModes(modeIndex))
+        EnsureWeeklyReportConfigSheet
+        WeeklyRegressionEqual CStr(ws.Range("F12").Value2), CStr(numberModes(modeIndex)), "number style preserved", checked
+        WeeklyRegressionAssert InStr(CStr(ws.Range("F12").Validation.Formula1), _
+            CStr(numberModes(modeIndex))) > 0, "number style dropdown option", checked
+        ResetWeeklyReportNumbering
+        ws.Calculate
+        WeeklyRegressionEqual CStr(ws.Range("H12").Value2), Space$(12) & CStr(firstNumbers(modeIndex)) & " 업무명", "number style preview", checked
+        WeeklyRegressionEqual GetWeeklyReportLevelBullet(1), CStr(firstNumbers(modeIndex)), "preview leaves first number", checked
+        WeeklyRegressionEqual GetWeeklyReportLevelBullet(1), CStr(secondNumbers(modeIndex)), "number style second item", checked
+        WeeklyRegressionBuild rows, items, dates, levels, plans
+        planLines = Split(CStr(plans(1)), ChrW(11))
+        WeeklyRegressionEqual CStr(planLines(3)), Space$(12) & CStr(firstNumbers(modeIndex)) & " 업무A", "styled plan first", checked
+        WeeklyRegressionEqual CStr(planLines(6)), Space$(12) & CStr(secondNumbers(modeIndex)) & " 업무B", "styled plan second", checked
+        planLines = Split(CStr(plans(2)), ChrW(11))
+        WeeklyRegressionEqual CStr(planLines(2)), Space$(12) & CStr(firstNumbers(modeIndex)) & " 업무C", "styled plan restart", checked
+        FillWeeklyReportCurrentTable slide, items, dates, levels, GetWeeklyReportVisibleCategoryCount()
+        WeeklyRegressionEqual WeeklyRegressionParagraph(tableShape, 4), Space$(12) & CStr(firstNumbers(modeIndex)) & " 업무A", "styled current first", checked
+        WeeklyRegressionEqual WeeklyRegressionParagraph(tableShape, 7), Space$(12) & CStr(secondNumbers(modeIndex)) & " 업무B", "styled current second", checked
+        WeeklyRegressionEqual WeeklyRegressionParagraph(tableShape, 12), Space$(12) & CStr(firstNumbers(modeIndex)) & " 업무C", "styled current restart", checked
+    Next modeIndex
+    ' VBA's Korean code page cannot store these glyphs as source literals.
+    WeeklyRegressionEqual CStr(AscW(FormatWeeklyReportNumber("원 숫자 ①", 20))), "9331", "circle number 20", checked
+    WeeklyRegressionEqual CStr(AscW(FormatWeeklyReportNumber("원 숫자 ①", 21))), "12881", "circle number 21", checked
+    WeeklyRegressionEqual CStr(AscW(FormatWeeklyReportNumber("원 숫자 ①", 35))), "12895", "circle number 35", checked
+    WeeklyRegressionEqual CStr(AscW(FormatWeeklyReportNumber("원 숫자 ①", 36))), "12977", "circle number 36", checked
+    WeeklyRegressionEqual CStr(AscW(FormatWeeklyReportNumber("원 숫자 ①", 50))), "12991", "circle number 50", checked
+    WeeklyRegressionEqual FormatWeeklyReportNumber("원 숫자 ①", 51), "(51)", "circle number overflow", checked
+    WeeklyRegressionEqual FormatWeeklyReportNumber("원 알파벳 ⓐ", 26), "ⓩ", "circle alphabet z", checked
+    WeeklyRegressionEqual FormatWeeklyReportNumber("원 알파벳 ⓐ", 27), "(aa)", "circle alphabet overflow", checked
+    WeeklyRegressionEqual FormatWeeklyReportNumber("원 한글 자음 ㉠", 14), "㉭", "circle Hangul last", checked
+    WeeklyRegressionEqual FormatWeeklyReportNumber("원 한글 자음 ㉠", 15), "(ㄱㄱ)", "circle Hangul overflow", checked
+    WeeklyRegressionEqual FormatWeeklyReportNumber("괄호 숫자 (1)", 101), "(101)", "parenthesized large number", checked
+    WeeklyRegressionEqual FormatWeeklyReportNumber("반괄호 숫자 1)", 101), "101)", "closing parenthesis large number", checked
+
+    stage = "save numbering sample"
+    ws.Range("F10:F14").Value = Application.Transpose( _
+        Array("원 숫자 ①", "원 한글 자음 ㉠", "원 알파벳 ⓐ", "괄호 숫자 (1)", "반괄호 숫자 1)"))
     WeeklyRegressionBuild rows, items, dates, levels, plans
     Set tableShape = Nothing
     Set slide = Nothing
@@ -217,7 +260,8 @@ Failed:
     If Not pptApp Is Nothing Then pptApp.Quit
     Set pptApp = Nothing
     On Error GoTo 0
-    Err.Raise errNumber, "RunWeeklyReportRegression: " & stage, errDescription
+    ' Return runtime failures so unattended Excel does not open a VBA error dialog.
+    RunWeeklyReportRegression = "FAIL: " & stage & " (" & CStr(errNumber) & "): " & errDescription
 End Function
 
 Private Function WeeklyRegressionRows() As Collection

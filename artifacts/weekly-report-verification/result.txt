@@ -1,1 +1,1 @@
-PASS: 101 assertions; D:\TGS\00.Source\업무리스트\REO\excel개발\artifacts\weekly-report-verification\weekly-report-regression.pptx
+PASS: 168 assertions; D:\TGS\00.Source\업무리스트\REO\excel개발\artifacts\weekly-report-verification\weekly-report-regression.pptx
