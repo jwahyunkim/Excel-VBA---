@@ -173,12 +173,34 @@ npm run version:release
 4. 보안 배포본 생성 및 임시 복사본 자동 검증
 5. 개발 원본, config, 배포본을 릴리즈 준비 커밋으로 반영
 6. `release/vA.B.C → main` PR 생성 및 일반 merge
-7. 임시 develop/release 브랜치 삭제
-8. `main`에 `vA.B.C` 태그 생성 및 푸시
+7. PR의 실제 병합 커밋에 `vA.B.C` 태그 생성 및 푸시 확인
+8. 병합된 임시 develop/release 브랜치 삭제
 
 이 자동 스테이징·커밋은 Codex가 임의로 실행하는 것이 아니라 사용자가 `npm run version:release` 또는 메뉴의 완료 항목을 선택했을 때 프로젝트 스크립트가 수행합니다.
 
-릴리즈 준비 도중 오류가 발생해 `release/vA.B.C` 브랜치에 남은 경우 오류를 수정한 뒤 같은 완료 명령을 다시 실행하면 중단된 배포 준비부터 자동으로 재개합니다.
+릴리즈 도중 오류가 발생하면 같은 `npm run version:release` 명령 또는 메뉴의 `[2]`를 다시 실행합니다. `develop/vA.B.C`와 `release/vA.B.C`에서는 개발 내용 병합 여부부터 확인합니다. 릴리즈 브랜치만 만들어진 상태에서도 개발 내용을 먼저 병합한 후 배포본을 생성합니다.
+
+진행 상태는 로컬 Git 설정(`workflow.release*`)에 기록됩니다. `main` 병합 후 태그 푸시가 실패해도 같은 저장소의 `main`에서 명령을 다시 실행하면 저장된 병합 커밋에 태그를 푸시하고 브랜치를 정리합니다. 기존 태그가 같은 커밋을 가리키면 재사용하며, 다른 커밋이면 중단합니다. 원격 태그가 확인되기 전에는 개발/릴리즈 브랜치를 유지합니다.
+
+PR은 출발·대상 브랜치가 모두 일치하는 열린 PR만 재사용합니다. 병합 대기 중에는 완료로 처리하지 않으며, 병합 상태와 Git 이력이 확인된 뒤 다음 단계로 진행합니다. 인증/통신 오류는 그대로 보고하고 중복 PR을 생성하지 않습니다.
+
+배포본은 임시 파일에서 생성한 뒤 완성된 파일로 교체합니다. 빌드 실패 시 기존 배포본을 보존합니다. 자동 검증은 방금 생성한 파일의 정확한 경로를 사용하며, 설정에서 배포 폴더를 변경해도 생성 파일을 릴리즈 커밋에 포함합니다.
+
+배포 명령에 사용자·기간·출력 경로를 직접 전달할 수 있습니다.
+
+```powershell
+npm run release:build -- -ReleaseUser "홍길동" -UsageDays 30 -RenewalDays 7
+npm run release:validate -- -OutputPath "dist/업무 간트 v4.9.2_홍길동_배포_20260911.xlsm"
+```
+
+`release:validate`에서 경로를 생략하면 현재 설정의 개발본 이름과 기준일(기본: 오늘), 사용자에 해당하는 배포본을 검증합니다. 다른 날짜의 파일은 `-Value yyyy-MM-dd` 또는 `-OutputPath`로 지정합니다.
+
+워크플로 회귀 검증은 임시 Git 저장소와 Excel/GitHub 모의 구현으로 실행하며 실제 저장소를 변경하지 않습니다.
+
+```powershell
+npm run test:workflow
+npm run test:release-security
+```
 
 배포 보안 설정을 실제로 수정하면 작업 성공 직후 이 릴리즈 절차를 자동 호출합니다. 별도의 VS Code 커밋이나 `npm run version:release` 실행은 필요하지 않습니다. 배포본 생성은 현재 버전의 파일만 만들며 버전을 올리거나 자동 릴리즈하지 않습니다. 개발본 동기화, 일괄 실행과 읽기 전용 항목도 자동 릴리즈하지 않습니다.
 
@@ -260,7 +282,7 @@ npm run workflow:status
 git branch --show-current
 ```
 
-`version:release`는 반드시 릴리즈할 `develop/vA.B.C`에서 실행해야 합니다. `feature/*` 브랜치에서 바로 실행하지 않습니다.
+새 릴리즈는 `develop/vA.B.C`에서 실행합니다. 중단 복구는 해당 `release/vA.B.C` 또는 진행 기록이 남아 있는 대상 브랜치(`main`)에서도 실행할 수 있습니다. `feature/*`에서는 먼저 부모 개발 브랜치로 병합합니다.
 
 ## 필요한 프로그램
 

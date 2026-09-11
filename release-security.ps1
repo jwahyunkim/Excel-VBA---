@@ -5,6 +5,7 @@ param(
 
     [string]$Date = "",
     [string]$OutputPath = "",
+    [string]$ResultPath = "",
     [string]$ReleaseUser = "",
     [string]$UsageDays = "",
     [string]$RenewalDays = ""
@@ -185,6 +186,53 @@ function Get-ReleaseVersion {
     return $matches[0].Groups[1].Value
 }
 
+function Get-ReleaseOutputPath {
+    param(
+        [Parameter(Mandatory = $true)]$Config,
+        [Parameter(Mandatory = $true)][DateTime]$ReleaseDate
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+        return Resolve-WorkspacePath -Path $OutputPath
+    }
+
+    $baseName = [IO.Path]::GetFileNameWithoutExtension($Config.WorkbookPath)
+    $userFilePart = if ([string]::IsNullOrWhiteSpace($ReleaseUser)) {
+        ""
+    }
+    else {
+        "_$(Get-SafeFileNamePart -Value $ReleaseUser)"
+    }
+    return Resolve-WorkspacePath -Path (Join-Path $Config.DistributionFolder "${baseName}${userFilePart}_배포_$($ReleaseDate.ToString('yyyyMMdd')).xlsm")
+}
+
+function Resolve-BuildResultPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkbookPath,
+        [Parameter(Mandatory = $true)][string]$DistributionPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ResultPath)) { return "" }
+    $candidate = if ([IO.Path]::IsPathRooted($ResultPath)) { $ResultPath } else { Join-Path $ScriptRoot $ResultPath }
+    $resolved = [IO.Path]::GetFullPath($candidate)
+    $workspaceRoot = [IO.Path]::GetFullPath($ScriptRoot).TrimEnd('\') + '\'
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $resolved.StartsWith($workspaceRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $resolved.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "ResultPath는 워크스페이스 또는 임시 폴더 안이어야 합니다: $resolved"
+    }
+    foreach ($protectedPath in @($WorkbookPath, $DistributionPath, $ConfigPath)) {
+        if ([string]::Equals($resolved, $protectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "ResultPath가 원본, 배포본 또는 설정 파일과 같습니다: $resolved"
+        }
+    }
+    $resultDirectory = [IO.Path]::GetDirectoryName($resolved)
+    if (-not (Test-Path -LiteralPath $resultDirectory -PathType Container)) {
+        throw "ResultPath의 폴더가 없습니다: $resultDirectory"
+    }
+    return $resolved
+}
+
 function Get-ClassCode {
     $lines = [IO.File]::ReadAllLines($WorkbookClassPath)
     $startIndex = -1
@@ -321,7 +369,7 @@ function Invoke-WorkbookUpdate {
                 $AdminPassword)
             $expectedCode = New-RenewalCode -TargetDate $ReleaseDate -Secret $RenewalSecret
             if ($vbaCode -ne $expectedCode) {
-                throw "PowerShell/VBA 연장코드 계산 불일치: PowerShell=$expectedCode, VBA=$vbaCode"
+                throw "PowerShell/VBA 연장코드 계산이 일치하지 않습니다."
             }
 
             $visibleSheets = @()
@@ -436,42 +484,61 @@ function Build-ReleaseWorkbook {
 
     $releaseVersion = Get-ReleaseVersion -WorkbookPath $config.WorkbookPath
     $expiryDate = $releaseDate.AddDays($resolvedUsageDays)
-    $distributionPath = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-        $baseName = [IO.Path]::GetFileNameWithoutExtension($config.WorkbookPath)
-        $userFilePart = if ([string]::IsNullOrWhiteSpace($ReleaseUser)) {
-            ""
-        }
-        else {
-            "_$(Get-SafeFileNamePart -Value $resolvedReleaseUser)"
-        }
-        Join-Path $config.DistributionFolder "${baseName}${userFilePart}_배포_$($releaseDate.ToString('yyyyMMdd')).xlsm"
-    }
-    else {
-        Resolve-WorkspacePath -Path $OutputPath
-    }
+    $distributionPath = Get-ReleaseOutputPath -Config $config -ReleaseDate $releaseDate
 
     if ([IO.Path]::GetExtension($distributionPath) -ne ".xlsm") {
         throw "배포 파일 확장자는 .xlsm이어야 합니다: $distributionPath"
     }
+    if ([string]::Equals($distributionPath, $config.WorkbookPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "배포 경로는 개발 원본과 달라야 합니다: $distributionPath"
+    }
+    $resolvedResultPath = Resolve-BuildResultPath -WorkbookPath $config.WorkbookPath -DistributionPath $distributionPath
+    if ($resolvedResultPath) {
+        # Clear any earlier result before starting; a failed build must not return a stale path.
+        [IO.File]::WriteAllText($resolvedResultPath, "", [Text.UTF8Encoding]::new($false))
+    }
 
     Write-Host "[1/6] 설정 검증 완료"
-    if (-not (Test-Path -LiteralPath $config.DistributionFolder)) {
-        $null = New-Item -ItemType Directory -Path $config.DistributionFolder
+    $distributionDirectory = [IO.Path]::GetDirectoryName($distributionPath)
+    if (-not (Test-Path -LiteralPath $distributionDirectory -PathType Container)) {
+        $null = New-Item -ItemType Directory -Path $distributionDirectory -Force
     }
     Write-Host "[2/6] 배포 폴더 준비 완료"
-    Copy-Item -LiteralPath $config.WorkbookPath -Destination $distributionPath -Force
-    Write-Host "[3/6] 개발 원본을 배포본으로 복사 완료"
+    $stagedPath = Join-Path $distributionDirectory (".release-build-" + [Guid]::NewGuid().ToString("N") + ".xlsm")
+    try {
+        Copy-Item -LiteralPath $config.WorkbookPath -Destination $stagedPath
+        Write-Host "[3/6] 개발 원본을 임시 배포본으로 복사 완료"
 
-    Invoke-WorkbookUpdate `
-        -WorkbookPath $distributionPath `
-        -ConfigureRelease `
-        -ReleaseDate $releaseDate `
-        -ExpiryDate $expiryDate `
-        -ReleaseVersion $releaseVersion `
-        -RenewalDays $resolvedRenewalDays `
-        -RenewalSecret $config.RenewalSecret `
-        -ReleaseUser $resolvedReleaseUser `
-        -AdminPassword $config.ProjectPassword
+        Invoke-WorkbookUpdate `
+            -WorkbookPath $stagedPath `
+            -ConfigureRelease `
+            -ReleaseDate $releaseDate `
+            -ExpiryDate $expiryDate `
+            -ReleaseVersion $releaseVersion `
+            -RenewalDays $resolvedRenewalDays `
+            -RenewalSecret $config.RenewalSecret `
+            -ReleaseUser $resolvedReleaseUser `
+            -AdminPassword $config.ProjectPassword
+
+        # Publish only after Excel has saved and closed the configured copy.
+        if (Test-Path -LiteralPath $distributionPath -PathType Leaf) {
+            [IO.File]::Replace($stagedPath, $distributionPath, [NullString]::Value)
+        }
+        else {
+            [IO.File]::Move($stagedPath, $distributionPath)
+        }
+    }
+    finally {
+        $resolvedStagedPath = [IO.Path]::GetFullPath($stagedPath)
+        if ([string]::Equals([IO.Path]::GetDirectoryName($resolvedStagedPath), $distributionDirectory, [StringComparison]::OrdinalIgnoreCase) -and
+            [IO.Path]::GetFileName($resolvedStagedPath) -match '^\.release-build-[0-9a-f]{32}\.xlsm$' -and
+            (Test-Path -LiteralPath $resolvedStagedPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $resolvedStagedPath -Force
+        }
+    }
+    if ($resolvedResultPath) {
+        [IO.File]::WriteAllText($resolvedResultPath, $distributionPath, [Text.UTF8Encoding]::new($false))
+    }
     Write-Host "[4/6] 보안 VBA/만료정보 적용 및 계산 교차검증 완료"
     Write-Host "[5/6] 잠금 상태 검증 완료(디스크에는 사용안내 시트만 표시)"
     Write-Host "[6/6] 배포본 생성 완료" -ForegroundColor Green
@@ -480,13 +547,11 @@ function Build-ReleaseWorkbook {
     Write-Host "배포 대상: $resolvedReleaseUser"
     Write-Host "사용 기간: $($releaseDate.ToString('yyyy-MM-dd')) ~ $($expiryDate.ToString('yyyy-MM-dd'))"
     Write-Host "1회 연장 기간: $($resolvedRenewalDays)일"
-    Write-Host "오늘 연장 코드: $(New-RenewalCode -TargetDate $releaseDate -Secret $config.RenewalSecret)"
     Write-Host ""
     Write-Host "마지막 수동 단계(VBA 소스 열람 방지):" -ForegroundColor Yellow
     Write-Host "1) 배포본을 열고 Alt+F11"
     Write-Host "2) 도구 > VBAProject 속성 > 보호"
-    Write-Host "3) '보기 위해 프로젝트 잠금' 체크 후 아래 암호를 두 번 입력"
-    Write-Host "   $($config.ProjectPassword)"
+    Write-Host "3) '보기 위해 프로젝트 잠금' 체크 후 config.json의 vba_project_password를 두 번 입력"
     Write-Host "4) 저장하고 Excel을 완전히 닫은 뒤 다시 열어 잠금을 확인"
 }
 
@@ -625,19 +690,10 @@ function Test-ReleaseSaveCycle {
 
 function Test-ReleaseWorkbook {
     $config = Get-LocalConfig
-    $sourceReleasePath = if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
-        Resolve-WorkspacePath -Path $OutputPath
-    }
-    else {
-        $latest = Get-ChildItem -LiteralPath $config.DistributionFolder -Filter "*.xlsm" -File |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
-        if ($null -eq $latest) { throw "검증할 배포본이 없습니다: $($config.DistributionFolder)" }
-        $latest.FullName
-    }
+    $sourceReleasePath = Get-ReleaseOutputPath -Config $config -ReleaseDate (Resolve-TargetDate)
 
-    if (-not (Test-Path -LiteralPath $sourceReleasePath)) {
-        throw "배포본을 찾을 수 없습니다: $sourceReleasePath"
+    if (-not (Test-Path -LiteralPath $sourceReleasePath -PathType Leaf)) {
+        throw "배포본을 찾을 수 없습니다: $sourceReleasePath (다른 날짜나 사용자 배포본은 -Date/-ReleaseUser 또는 -OutputPath로 지정하세요.)"
     }
 
     $systemTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

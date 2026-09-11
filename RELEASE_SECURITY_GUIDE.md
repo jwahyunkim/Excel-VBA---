@@ -89,7 +89,7 @@ Excel은 VBA 프로젝트 암호 설정을 자동화하는 공식 API를 제공�
 1. 배포본을 열고 `Alt+F11`
 2. `도구 > VBAProject 속성 > 보호`
 3. `보기 위해 프로젝트 잠금` 체크
-4. 빌드 결과에 표시된 `vba_project_password`를 두 번 입력
+4. `config.json`의 `release_security.vba_project_password`를 두 번 입력
 5. 저장하고 Excel을 완전히 닫은 뒤 다시 열어 잠금을 확인
 
 개발 원본의 VBA 프로젝트는 잠그지 않습니다.

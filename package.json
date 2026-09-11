@@ -17,7 +17,9 @@
         "release:status": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action SecurityStatus",
         "release:sync-dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action SecuritySync",
         "release:validate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action SecurityValidate",
-        "release:all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action SecurityAll"
+        "release:all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./version-workflow.ps1 -Action SecurityAll",
+        "test:workflow": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/test-version-workflow.ps1",
+        "test:release-security": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/test-release-security.ps1"
     },
     "author": "LocalSmart",
     "license": "ISC",
