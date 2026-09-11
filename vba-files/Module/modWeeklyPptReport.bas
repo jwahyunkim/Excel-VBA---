@@ -1342,29 +1342,26 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
                                    CStr(categoryParts(categoryIndex)), _
                                    GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
                                    GetWeeklyReportShowCategoryOwnerFlag(categoryIndex + 1))
-                If Len(blockText) = 0 Then
-                    blockText = GetWeeklyReportCategoryBullet(categoryIndex + 1) & _
-                                " " & categoryText
-                Else
-                    blockText = blockText & ChrW(11) & _
-                                Space$((GetWeeklyReportVisibleCategoryPosition( _
-                                           categoryIndex + 1) - 1) * 4) & _
-                                GetWeeklyReportCategoryBullet(categoryIndex + 1) & _
-                                " " & categoryText
-                End If
+                categoryText = FormatWeeklyReportLine( _
+                                   GetWeeklyReportVisibleCategoryPosition(categoryIndex + 1) - 1, _
+                                   GetWeeklyReportCategoryBullet(categoryIndex + 1), categoryText, _
+                                   categoryIndex + 1)
+                If Len(blockText) > 0 Then blockText = blockText & ChrW(11)
+                blockText = blockText & categoryText
             End If
         Next categoryIndex
 
         If groupByProgram Then
             Set programNames = CollectWeeklyProgramNames(rows, CStr(moduleName))
             For Each programName In programNames
-                categoryText = Space$((GetWeeklyReportVisibleCategoryPosition(4) - 1) * 4) & _
-                               GetWeeklyReportCategoryBullet(4) & " " & _
+                categoryText = FormatWeeklyReportLine( _
+                               GetWeeklyReportVisibleCategoryPosition(4) - 1, _
+                               GetWeeklyReportCategoryBullet(4), _
                                AppendWeeklyOwnerText( _
                                    CStr(programName), _
                                    GetWeeklyProgramOwnerText( _
                                        rows, CStr(moduleName), CStr(programName)), _
-                                   GetWeeklyReportShowCategoryOwnerFlag(4))
+                                   GetWeeklyReportShowCategoryOwnerFlag(4)), 4)
                 If Len(blockText) = 0 Then
                     blockText = categoryText
                 Else
@@ -1462,8 +1459,8 @@ Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
                           JoinOwnerNameSet(hierarchyOwners(pathToken), ", ") & ")"
         End If
 
-        lineText = Space$((depth + levelOffset) * 4) & _
-                   GetWeeklyReportLevelBullet(depth + 1) & " " & displayText
+        lineText = FormatWeeklyReportLine(depth + levelOffset, _
+                       GetWeeklyReportLevelBullet(depth + 1), displayText, depth + 5)
         If Len(blockText) = 0 Then
             blockText = lineText
         Else
@@ -1705,6 +1702,17 @@ Private Sub FillWeeklyReportPeriodText(ByVal slide As Object, _
         Format$(nextWeekStart, "yyyy.mm.dd") & "~" & Format$(nextWeekEnd, "yyyy.mm.dd")
 End Sub
 
+Private Function FormatWeeklyReportLine(ByVal indentLevel As Long, _
+                                        ByVal bulletText As String, _
+                                        ByVal displayText As String, _
+                                        ByVal bulletIndex As Long) As String
+    If indentLevel < 0 Then indentLevel = 0
+    FormatWeeklyReportLine = Space$(GetWeeklyReportIndentSpaces(bulletIndex, indentLevel * 4))
+    If Len(bulletText) > 0 Then _
+        FormatWeeklyReportLine = FormatWeeklyReportLine & bulletText & " "
+    FormatWeeklyReportLine = FormatWeeklyReportLine & displayText
+End Function
+
 Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
                                          ByVal items As Collection, _
                                          ByVal dateItems As Collection, _
@@ -1756,19 +1764,16 @@ Private Sub FillWeeklyReportCurrentTable(ByVal slide As Object, _
         Set taskParagraph = taskTextRange.Paragraphs(i)
         If levelValue < 0 Then
             categoryLevel = -levelValue
-            displayText = Space$((GetWeeklyReportVisibleCategoryPosition( _
-                                      categoryLevel) - 1) * 4) & _
-                          GetWeeklyReportCategoryBullet(categoryLevel) & " " & _
-                          displayText
-            taskParagraph.ParagraphFormat.Bullet.Visible = False
+            displayText = FormatWeeklyReportLine( _
+                              GetWeeklyReportVisibleCategoryPosition(categoryLevel) - 1, _
+                              GetWeeklyReportCategoryBullet(categoryLevel), displayText, categoryLevel)
         Else
             taskLevel = levelValue - categoryDepth
             If taskLevel < 1 Then taskLevel = 1
-            displayText = Space$((levelValue - 1) * 4) & _
-                          GetWeeklyReportLevelBullet(taskLevel) & " " & _
-                          displayText
-            taskParagraph.ParagraphFormat.Bullet.Visible = False
+            displayText = FormatWeeklyReportLine(levelValue - 1, _
+                              GetWeeklyReportLevelBullet(taskLevel), displayText, taskLevel + 4)
         End If
+        taskParagraph.ParagraphFormat.Bullet.Visible = False
 
         SetPowerPointParagraphText taskParagraph, displayText
         dateDisplayText = CStr(dateItems(i))
