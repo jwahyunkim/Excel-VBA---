@@ -651,6 +651,22 @@ Public Sub EnsureWeeklyReportConfigSheet()
     Dim ws As Worksheet
     Dim i As Long
     Dim isNewSheet As Boolean
+    Dim bulletRow As Long
+    Dim bulletMode As String
+    Dim bulletDefault As String
+    Dim previewMode As String
+    Dim previewBullet As String
+    Dim previewPrefix As String
+    Dim previewText As String
+    Dim taskNameVisible As String
+    Dim taskLevelVisible As String
+    Dim oldCustomSettings As Variant
+    Dim oldModuleList As Variant
+    Dim moduleListLastRow As Long
+    Dim previewCategoryCount As String
+    Dim previewAutoSpaces As String
+    Dim previewIndentCell As String
+    Dim previewIndent As String
 
     Set ws = GetWeeklyReportConfigSheet()
     If ws Is Nothing Then
@@ -658,6 +674,21 @@ Public Sub EnsureWeeklyReportConfigSheet()
                      After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
         ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME
         isNewSheet = True
+    End If
+
+    ' Shift the previous custom-page layout once, preserving assignments and its list.
+    If CStr(ws.Range("G7").Value2) = "PPT 표시 예시" Or _
+       CStr(ws.Range("H1").Value2) = "커스텀 페이지 배치" Then
+        oldCustomSettings = ws.Range("H3:J197").Value2
+        moduleListLastRow = ws.Cells(ws.Rows.Count, "J").End(xlUp).Row
+        If moduleListLastRow < 2 Then moduleListLastRow = 2
+        oldModuleList = ws.Range("J1:J" & CStr(moduleListLastRow)).Value2
+        ws.Range("H1:J197").UnMerge
+        ws.Range("H1:J197").Clear
+        ws.Range("J1:J" & CStr(moduleListLastRow)).Clear
+        ws.Range("I3:K197").Value2 = oldCustomSettings
+        ws.Range("K1:K" & CStr(moduleListLastRow)).Value2 = oldModuleList
+        ws.Range("G8:G14").Clear
     End If
 
     ws.Columns("A:N").Hidden = False
@@ -682,19 +713,21 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Range("A8").Value = "페이지 분류 기준"
     ws.Range("A9").Value = "내용 초과 시 처리"
 
-    ws.Range("D6").Value = "글머리 표시 설정"
+    ws.Range("D6").Value = "글머리 모양 설정"
     ws.Range("D7").Value = "항목 단계"
     ws.Range("E7").Value = "기호"
-    ws.Range("F7").Value = "표시 방식"
+    ws.Range("F7").Value = "글머리 방식"
+    ws.Range("G7").Value = "앞 공백 수"
+    ws.Range("H7").Value = "PPT 표시 예시"
     ws.Range("D8:D14").Value = Application.Transpose( _
         Array("타입", "대분류", "중분류", "소분류", "업무 Level 1", "업무 Level 2", "업무 Level 3"))
 
-    ws.Range("A16:G212").Clear
-    ws.Range("H1:I1").UnMerge
-    ws.Range("H1:I1").Merge
-    ws.Range("H1").Value = "커스텀 페이지 배치"
-    ws.Range("H2").Value = "페이지 번호"
-    ws.Range("I2").Value = "분류 항목"
+    ws.Range("A16:H212").Clear
+    ws.Range("I1:J1").UnMerge
+    ws.Range("I1:J1").Merge
+    ws.Range("I1").Value = "커스텀 페이지 배치"
+    ws.Range("I2").Value = "페이지 번호"
+    ws.Range("J2").Value = "분류 항목"
 
     If isNewSheet Then
         ws.Range("B2:G5").Value = "N"
@@ -718,29 +751,88 @@ Public Sub EnsureWeeklyReportConfigSheet()
     If Trim$(CStr(ws.Range(WR_OVERFLOW_CELL).Value2)) = "" Then _
         ws.Range(WR_OVERFLOW_CELL).Value = WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
 
+    taskNameVisible = "UPPER(TRIM($F$2))<>""N"""
+    taskLevelVisible = "UPPER(TRIM($G$2))=""Y"""
+    previewCategoryCount = "0"
     For i = 0 To 6
+        Select Case i
+            Case 0, 4: bulletDefault = ChrW(&H2022)
+            Case 1, 5: bulletDefault = "-"
+            Case 2, 6: bulletDefault = ChrW(&HB7)
+            Case 3: bulletDefault = ChrW(&H25E6)
+        End Select
         If Len(Trim$(CStr(ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value2))) = 0 Then
-            Select Case i
-                Case 0: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&H2022)
-                Case 1: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = "-"
-                Case 2: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&HB7)
-                Case 3: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&H25E6)
-                Case 4: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&H2022)
-                Case 5: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = "-"
-                Case 6: ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = ChrW(&HB7)
-            End Select
+            ws.Range(WR_BULLET_VALUE_FIRST_CELL).Offset(i, 0).Value = bulletDefault
         End If
-        If Len(Trim$(CStr(ws.Range(WR_BULLET_MODE_FIRST_CELL).Offset(i, 0).Value2))) = 0 Then _
+        bulletMode = Trim$(CStr(ws.Range(WR_BULLET_MODE_FIRST_CELL).Offset(i, 0).Value2))
+        If Len(bulletMode) = 0 Then
             ws.Range(WR_BULLET_MODE_FIRST_CELL).Offset(i, 0).Value = "기호"
+        ElseIf bulletMode = "표시 안 함" Then
+            ws.Range(WR_BULLET_MODE_FIRST_CELL).Offset(i, 0).Value = "글머리 없음"
+        End If
+
+        ' Preview formulas do not call the bullet getter, which advances numbering.
+        bulletRow = ws.Range(WR_BULLET_VALUE_FIRST_CELL).Row + i
+        previewMode = "TRIM(F" & bulletRow & ")"
+        previewBullet = "IF(LEN(" & previewMode & ")=0,""" & bulletDefault & _
+                        """,TRIM(E" & bulletRow & "))"
+        previewPrefix = GetWeeklyReportPreviewPrefixFormula(previewMode, previewBullet)
+        If i < 4 Then
+            previewCategoryCount = previewCategoryCount & "+IF(UPPER(TRIM(" & _
+                ws.Range(WR_DISPLAY_TYPE_CELL).Offset(0, i).Address & "))<>""N"",1,0)"
+            previewAutoSpaces = "MAX(0,(" & previewCategoryCount & "-1)*4)"
+        Else
+            previewAutoSpaces = "(" & previewCategoryCount & "+" & CStr(i - 4) & ")*4"
+        End If
+        previewIndentCell = ws.Range(WR_BULLET_INDENT_FIRST_CELL).Offset(i, 0).Address
+        previewIndent = "REPT("" "",IFERROR(IF(AND(LEN(TRIM(" & previewIndentCell & _
+            "))>0,TYPE(" & previewIndentCell & ")<>4,ISNUMBER(1*" & previewIndentCell & "),1*" & previewIndentCell & _
+            ">=0,1*" & previewIndentCell & "<=40,MOD(1*" & previewIndentCell & _
+            ",1)=0),1*" & previewIndentCell & "," & previewAutoSpaces & ")," & _
+            previewAutoSpaces & "))"
+        If i < 4 Then
+            ws.Cells(bulletRow, 8).Formula = _
+                "=IF(UPPER(TRIM(" & ws.Range(WR_DISPLAY_TYPE_CELL).Offset(0, i).Address & _
+                "))<>""N""," & previewIndent & "&" & previewPrefix & "&D" & bulletRow & ",""항목 숨김"")"
+        Else
+            previewText = "IF(" & taskLevelVisible & ",""Level " & CStr(i - 3) & _
+                          """&IF(" & taskNameVisible & ","" - "",""""),"""")&" & _
+                          "IF(" & taskNameVisible & ",""업무명"","""")"
+            ws.Cells(bulletRow, 8).Formula = _
+                "=IF(OR(" & taskNameVisible & "," & taskLevelVisible & ")," & previewIndent & "&" & previewPrefix & _
+                "&" & previewText & ",""항목 숨김"")"
+        End If
     Next i
+
+    ws.Range("A11:C15").UnMerge
+    For i = 11 To 15
+        ws.Range("A" & i & ":C" & i).Merge
+    Next i
+    ws.Range("A11").Value = "표시 설정 적용 기준"
+    ws.Range("A12").Value = "항목 표시가 N이면 글머리를 설정해도 항목은 숨깁니다."
+    ws.Range("A13").Value = "글머리 없음은 기호만 없애고 항목은 표시합니다."
+    ws.Range("A14").Value = "업무 레벨은 'Level 1' 같은 이름표의 표시 여부입니다."
+    ws.Range("A15").Value = "중·소분류를 보려면 D2·E2를 Y로 설정하세요."
+    ws.Range("D15:H15").UnMerge
+    ws.Range("D15:H15").Merge
+    ws.Range("D15").Value = "앞 공백 수: 0~40칸, 빈칸은 단계별 자동 들여쓰기."
 
     On Error Resume Next
     ws.Range("B2:G5").Validation.Delete
     ws.Range("B7:B9").Validation.Delete
-    ws.Range("E8:F14").Validation.Delete
-    ws.Range("H3:H197").Validation.Delete
+    ws.Range("E8:G14").Validation.Delete
+    ws.Range("I3:I197").Validation.Delete
+    ws.Range("J3:J197").Validation.Delete
     On Error GoTo 0
     ws.Range("B2:G4").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
+    With ws.Range("B2:F2").Validation
+        .InputTitle = "PPT 항목 표시"
+        .InputMessage = "Y이면 항목을 표시하고 N이면 숨깁니다. 글머리 설정은 표시되는 항목에만 적용됩니다."
+    End With
+    With ws.Range(WR_DISPLAY_LEVEL_CELL).Validation
+        .InputTitle = "업무 레벨 이름표"
+        .InputMessage = "Y이면 업무 앞에 Level 1 같은 이름표를 붙입니다. N이어도 업무명과 하위 업무는 표시할 수 있습니다."
+    End With
     ws.Range("B5:F5").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
     ws.Range("G5").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
         "전체,Level 1까지,Level 2까지,Level 3까지"
@@ -753,8 +845,36 @@ Public Sub EnsureWeeklyReportConfigSheet()
         WEEKLY_REPORT_OVERFLOW_MODE_EXPAND & "," & WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
     ws.Range("E8:E14").Validation.Add xlValidateTextLength, xlValidAlertStop, xlBetween, "1", "5"
     ws.Range("F8:F14").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
-        "기호,번호 매기기,표시 안 함"
-    ws.Range("H3:H197").Validation.Add xlValidateWholeNumber, xlValidAlertStop, xlBetween, "1", "1000"
+        "기호,번호 매기기,원 숫자 ①,괄호 숫자 (1),반괄호 숫자 1),원 알파벳 ⓐ,원 한글 자음 ㉠,글머리 없음"
+    With ws.Range("F8:F14").Validation
+        .InputTitle = "표시되는 항목의 글머리"
+        .InputMessage = "번호·문자는 같은 단계에서 순서대로 매깁니다. 글머리 없음은 기호만 숨깁니다. 항목 표시 여부는 위 표에서 설정하세요."
+    End With
+    With ws.Range("G8:G14").Validation
+        .Add xlValidateWholeNumber, xlValidAlertStop, xlBetween, "0", "40"
+        .IgnoreBlank = True
+        .ShowInput = True
+        .ShowError = True
+        .InputTitle = "글머리 앞 공백 수"
+        .InputMessage = "줄 맨 앞에 넣을 총 공백 수(0~40)를 입력하세요. 0은 공백 없음, 빈칸은 단계별 자동 들여쓰기입니다."
+        .ErrorTitle = "앞 공백 수 오류"
+        .ErrorMessage = "0~40 사이 정수 또는 빈칸으로 설정하세요."
+    End With
+    ws.Range("G8:G14").NumberFormat = "0"
+    ws.Range("I3:I197").Validation.Add xlValidateWholeNumber, xlValidAlertStop, xlBetween, "1", "1000"
+    moduleListLastRow = ws.Cells(ws.Rows.Count, WR_MODULE_LIST_COLUMN).End(xlUp).Row
+    If moduleListLastRow < 2 Then moduleListLastRow = 2
+    With ws.Range("J3:J197").Validation
+        .Add xlValidateList, xlValidAlertStop, xlBetween, _
+            "=$" & WR_MODULE_LIST_COLUMN & "$2:$" & WR_MODULE_LIST_COLUMN & "$" & CStr(moduleListLastRow)
+        .IgnoreBlank = True
+        .InCellDropdown = True
+        .ShowError = True
+        .InputTitle = "커스텀 분류 항목 선택"
+        .InputMessage = "아직 선택하지 않은 분류 항목만 표시됩니다."
+        .ErrorTitle = "분류 항목 선택 오류"
+        .ErrorMessage = "드롭다운에 있는 미선택 분류 항목만 선택할 수 있습니다."
+    End With
 
     ws.Cells.Font.Name = "맑은 고딕"
     ws.Cells.Font.Size = 10
@@ -762,22 +882,52 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Columns("B:C").ColumnWidth = 15
     ws.Columns("D").ColumnWidth = 25
     ws.Columns("E:G").ColumnWidth = 16
-    ws.Columns("H").ColumnWidth = 14
-    ws.Columns("I").ColumnWidth = 42
-    ws.Columns("J").Hidden = True
+    ws.Columns("F").ColumnWidth = 26
+    ws.Columns("H").ColumnWidth = 38
+    ws.Columns("I").ColumnWidth = 14
+    ws.Columns("J").ColumnWidth = 42
+    ws.Columns("K").Hidden = True
     ws.Rows("1:17").RowHeight = 24
     ws.Rows("15:212").RowHeight = 21
+    ws.Rows("12:15").RowHeight = 32
     ws.Range("A1:G5").Borders.LineStyle = xlContinuous
     ws.Range("A6:B9").Borders.LineStyle = xlContinuous
-    ws.Range("D6:F14").Borders.LineStyle = xlContinuous
-    ws.Range("H1:I197").Borders.LineStyle = xlContinuous
-    ws.Range("A1:G1,A6:B6,D6:F7,H1:I2").Font.Bold = True
+    ws.Range("D6:H14").Borders.LineStyle = xlContinuous
+    ws.Range("I1:J197").Borders.LineStyle = xlContinuous
+    ws.Range("A1:G1,A6:B6,D6:H7,I1:J2,A11:C11").Font.Bold = True
     ws.Range("A1:G1").Interior.Color = RGB(237, 125, 49)
-    ws.Range("A6:B6,D6:F7,H1:I2").Interior.Color = RGB(252, 228, 214)
+    ws.Range("A6:B6,D6:H7,I1:J2,A11:C11").Interior.Color = RGB(252, 228, 214)
     ws.Range("A4:G5").Interior.Color = RGB(255, 242, 204)
-    ws.Range("A1:I212").VerticalAlignment = xlCenter
-    ws.Range("A1:I14").WrapText = False
+    ws.Range("A1:J212").VerticalAlignment = xlCenter
+    ws.Range("A1:J14").WrapText = False
+    ws.Range("A12:C15,D15:H15,H8:H14").WrapText = True
+    ws.Range("G8:G14").Interior.Color = RGB(255, 255, 255)
+    ws.Range("H8:H14").Interior.Color = RGB(242, 242, 242)
+    ws.Range("H8:H14").HorizontalAlignment = xlLeft
 End Sub
+
+Public Function GetWeeklyReportIndentSpaces(ByVal bulletIndex As Long, _
+                                            ByVal defaultSpaces As Long) As Long
+    Dim ws As Worksheet
+    Dim settingValue As Variant
+    Dim spaceCount As Double
+
+    GetWeeklyReportIndentSpaces = defaultSpaces
+    On Error GoTo UseDefault
+    If bulletIndex < 1 Or bulletIndex > 7 Then Exit Function
+    Set ws = GetWeeklyReportConfigSheet()
+    If ws Is Nothing Then Exit Function
+    settingValue = ws.Range(WR_BULLET_INDENT_FIRST_CELL).Offset(bulletIndex - 1, 0).Value2
+    If IsError(settingValue) Or IsEmpty(settingValue) Then Exit Function
+    If Len(Trim$(CStr(settingValue))) = 0 Then Exit Function
+    If VarType(settingValue) = vbBoolean Then Exit Function
+    If Not IsNumeric(settingValue) Then Exit Function
+    spaceCount = CDbl(settingValue)
+    If spaceCount < 0 Or spaceCount > 40 Then Exit Function
+    If spaceCount <> Fix(spaceCount) Then Exit Function
+    GetWeeklyReportIndentSpaces = CLng(spaceCount)
+UseDefault:
+End Function
 
 Private Function GetWeeklyReportSettingCell(ByVal legacyCell As String) As String
     Select Case legacyCell
@@ -809,6 +959,7 @@ Private Function GetWeeklyReportConfiguredBullet(ByVal ws As Worksheet, _
                                                  ByRef isConfigured As Boolean) As String
     Dim displayMode As String
     Dim itemNumber As Long
+    Dim numberedBullet As String
 
     If bulletIndex < 1 Then bulletIndex = 1
     If bulletIndex > 7 Then bulletIndex = 7
@@ -816,16 +967,89 @@ Private Function GetWeeklyReportConfiguredBullet(ByVal ws As Worksheet, _
     displayMode = Trim$(CStr(ws.Range(WR_BULLET_MODE_FIRST_CELL). _
                                       Offset(bulletIndex - 1, 0).Value2))
     isConfigured = (Len(displayMode) > 0)
+    numberedBullet = FormatWeeklyReportNumber(displayMode, itemNumber)
+    If Len(numberedBullet) > 0 Then
+        GetWeeklyReportConfiguredBullet = numberedBullet
+        Exit Function
+    End If
     Select Case displayMode
-        Case "번호 매기기", "레벨 번호"
-            GetWeeklyReportConfiguredBullet = CStr(itemNumber) & "."
-        Case "표시 안 함"
+        Case "글머리 없음", "표시 안 함"
             GetWeeklyReportConfiguredBullet = ""
         Case Else
             GetWeeklyReportConfiguredBullet = Trim$(CStr( _
                 ws.Range(WR_BULLET_VALUE_FIRST_CELL). _
                    Offset(bulletIndex - 1, 0).Value2))
     End Select
+End Function
+
+Public Function FormatWeeklyReportNumber(ByVal displayMode As String, _
+                                         ByVal itemNumber As Long) As String
+    If itemNumber < 1 Then itemNumber = 1
+
+    Select Case Trim$(displayMode)
+        Case "번호 매기기", "레벨 번호"
+            FormatWeeklyReportNumber = CStr(itemNumber) & "."
+        Case "원 숫자 ①"
+            Select Case itemNumber
+                Case 1 To 20
+                    FormatWeeklyReportNumber = ChrW(&H2460 + itemNumber - 1)
+                Case 21 To 35
+                    FormatWeeklyReportNumber = ChrW(&H3251 + itemNumber - 21)
+                Case 36 To 50
+                    FormatWeeklyReportNumber = ChrW(&H32B1 + itemNumber - 36)
+                Case Else
+                    FormatWeeklyReportNumber = "(" & CStr(itemNumber) & ")"
+            End Select
+        Case "괄호 숫자 (1)"
+            FormatWeeklyReportNumber = "(" & CStr(itemNumber) & ")"
+        Case "반괄호 숫자 1)"
+            FormatWeeklyReportNumber = CStr(itemNumber) & ")"
+        Case "원 알파벳 ⓐ"
+            If itemNumber <= 26 Then
+                FormatWeeklyReportNumber = ChrW(&H24D0 + itemNumber - 1)
+            Else
+                FormatWeeklyReportNumber = "(" & GetWeeklyReportLetterSequence( _
+                    itemNumber, "abcdefghijklmnopqrstuvwxyz") & ")"
+            End If
+        Case "원 한글 자음 ㉠"
+            If itemNumber <= 14 Then
+                FormatWeeklyReportNumber = ChrW(&H3260 + itemNumber - 1)
+            Else
+                FormatWeeklyReportNumber = "(" & GetWeeklyReportLetterSequence( _
+                    itemNumber, "ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ") & ")"
+            End If
+    End Select
+End Function
+
+Private Function GetWeeklyReportLetterSequence(ByVal itemNumber As Long, _
+                                               ByVal letters As String) As String
+    Dim letterCount As Long
+    Dim result As String
+
+    letterCount = Len(letters)
+    Do While itemNumber > 0
+        itemNumber = itemNumber - 1
+        result = Mid$(letters, (itemNumber Mod letterCount) + 1, 1) & result
+        itemNumber = itemNumber \ letterCount
+    Loop
+    GetWeeklyReportLetterSequence = result
+End Function
+
+Private Function GetWeeklyReportPreviewPrefixFormula(ByVal previewMode As String, _
+                                                      ByVal previewBullet As String) As String
+    Dim numberedMode As Variant
+    Dim result As String
+
+    result = "IF(OR(" & previewMode & "=""글머리 없음""," & previewMode & _
+             "=""표시 안 함""),"""",IF(LEN(" & previewBullet & _
+             ")=0,""""," & previewBullet & "&"" ""))"
+    For Each numberedMode In Array("번호 매기기", "레벨 번호", "원 숫자 ①", _
+                                   "괄호 숫자 (1)", "반괄호 숫자 1)", _
+                                   "원 알파벳 ⓐ", "원 한글 자음 ㉠")
+        result = "IF(" & previewMode & "=""" & CStr(numberedMode) & """,""" & _
+                 FormatWeeklyReportNumber(CStr(numberedMode), 1) & " ""," & result & ")"
+    Next numberedMode
+    GetWeeklyReportPreviewPrefixFormula = result
 End Function
 
 Public Sub ResetWeeklyReportNumbering()
