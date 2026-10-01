@@ -234,6 +234,60 @@ Add-WorkflowCase 'npm positional values bind after the named Action parameter' {
     Assert-WorkflowEqual $build.Value '2026-09-11' 'release:build positional date'
 }
 
+Add-WorkflowCase 'automatic commit preserves staged and unstaged whitespace errors' {
+    $fixturePath = New-WorkflowRepository
+    Push-Location $fixturePath
+    try {
+        $stagedText = "staged change  `n`n"
+        $unstagedText = "worktree change  `n`n"
+        [IO.File]::WriteAllText((Join-Path $fixturePath 'staged.txt'), $stagedText)
+        $null = Invoke-FixtureGit add staged.txt
+        [IO.File]::WriteAllText((Join-Path $fixturePath 'config.json'),
+            ([IO.File]::ReadAllText((Join-Path $fixturePath 'config.json')) + "`n`n"))
+        [IO.File]::WriteAllText((Join-Path $fixturePath 'unstaged.txt'), $unstagedText)
+        Commit-CurrentBranchChanges -ExpectedBranch main -CommitMessage 'fixture: whitespace allowed'
+        Assert-WorkflowEqual (Invoke-FixtureGit rev-list --count HEAD) '2' 'Whitespace must not prevent the commit'
+        Assert-WorkflowEqual (Invoke-FixtureGit status --porcelain) '' 'All changes must be committed'
+        Assert-WorkflowEqual ([IO.File]::ReadAllText((Join-Path $fixturePath 'staged.txt'))) $stagedText 'Staged bytes must be preserved'
+        Assert-WorkflowEqual ([IO.File]::ReadAllText((Join-Path $fixturePath 'unstaged.txt'))) $unstagedText 'Unstaged bytes must be preserved'
+    }
+    finally { Pop-Location }
+}
+
+Add-WorkflowCase 'whitespace inspection still rejects Git command failures' {
+    function git { $global:LASTEXITCODE = 128 }
+    $caught = $null
+    try { Test-StagedWhitespace } catch { $caught = $_ }
+    Assert-WorkflowTrue ($null -ne $caught) 'Git failures must stop automatic commit'
+    Assert-WorkflowTrue ($caught.Exception.Message -match '128') 'The failure must retain the Git exit code'
+}
+
+Add-WorkflowCase 'automatic commit still rejects unresolved merge conflicts' {
+    $fixturePath = New-WorkflowRepository
+    Push-Location $fixturePath
+    try {
+        $conflictPath = Join-Path $fixturePath 'conflict.txt'
+        [IO.File]::WriteAllText($conflictPath, "base`n")
+        $null = Invoke-FixtureGit add conflict.txt
+        $null = Invoke-FixtureGit commit --quiet -m 'fixture: conflict base'
+        $null = Invoke-FixtureGit switch --quiet -c child
+        [IO.File]::WriteAllText($conflictPath, "child`n")
+        $null = Invoke-FixtureGit commit --quiet -am 'fixture: child'
+        $null = Invoke-FixtureGit switch --quiet main
+        [IO.File]::WriteAllText($conflictPath, "main`n")
+        $null = Invoke-FixtureGit commit --quiet -am 'fixture: main'
+        $beforeCommit = Invoke-FixtureGit rev-parse HEAD
+        & git merge child *> $null
+        Assert-WorkflowEqual $LASTEXITCODE 1 'Fixture must produce a real merge conflict'
+        $caught = $null
+        try { Commit-CurrentBranchChanges -ExpectedBranch main -CommitMessage 'must not commit' } catch { $caught = $_ }
+        Assert-WorkflowTrue ($null -ne $caught) 'Merge conflicts must stop automatic commit'
+        Assert-WorkflowEqual (Invoke-FixtureGit rev-parse HEAD) $beforeCommit 'A conflict must not create a commit'
+        Assert-WorkflowEqual (Invoke-FixtureGit diff --name-only --diff-filter=U) 'conflict.txt' 'Unresolved index entries must be preserved'
+    }
+    finally { Pop-Location }
+}
+
 Add-WorkflowCase 'release preparation renames, builds, validates, and commits the workbook' {
     $fixturePath = New-WorkflowRepository
     Push-Location $fixturePath

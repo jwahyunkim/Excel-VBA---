@@ -75,6 +75,18 @@ function Invoke-Git {
     Invoke-CheckedCommand -Command "git" -Arguments $Arguments
 }
 
+function Test-StagedWhitespace {
+    # git diff --check의 공백 오류(exit 2)는 커밋을 막지 않습니다.
+    & git diff --cached --check | Out-Host
+    $checkExitCode = $LASTEXITCODE
+    if ($checkExitCode -eq 2) {
+        Write-Warning "공백 또는 파일 끝 빈 줄 문제가 있습니다. 파일 내용을 유지하고 자동 커밋을 계속합니다."
+    }
+    elseif ($checkExitCode -ne 0) {
+        throw "스테이징된 변경 검사 실패(exit $checkExitCode): git diff --cached --check"
+    }
+}
+
 function Get-GitOutput {
     param([string[]]$Arguments)
 
@@ -1032,7 +1044,7 @@ function Prepare-ReleaseCommit {
     if ([string]::IsNullOrWhiteSpace($builtPath)) { throw "생성된 배포본 경로가 없습니다." }
     Invoke-ReleaseSecurityCommand -ReleaseAction Validate -OutputPath $builtPath
     Invoke-Git -Arguments @("add", "-A", "--", $ConfigFile, (Split-Path -Parent $newPath), $builtPath)
-    Invoke-Git -Arguments @("diff", "--check", "--cached")
+    Test-StagedWhitespace
     & git diff --cached --quiet
     if ($LASTEXITCODE -eq 1) {
         Invoke-Git -Arguments @("commit", "-m", "v$ReleaseVersion 배포 준비")
@@ -1267,9 +1279,8 @@ function Commit-CurrentBranchChanges {
         throw "해결되지 않은 병합 충돌이 있습니다. 충돌을 먼저 해결하세요."
     }
 
-    Invoke-Git -Arguments @("diff", "--check")
     Invoke-Git -Arguments @("add", "-A", "--", ".")
-    Invoke-Git -Arguments @("diff", "--cached", "--check")
+    Test-StagedWhitespace
 
     & git diff --cached --quiet
     if ($LASTEXITCODE -eq 1) {
