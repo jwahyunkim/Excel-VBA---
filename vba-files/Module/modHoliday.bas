@@ -15,16 +15,6 @@ Public Sub EnsureConfigSheet()
     Dim rngDisplayGanttOnly As Range
     Dim rngDisplayReportOnly As Range
     Dim rngTaskMaxLength As Range
-    Dim rngWeeklyReportModuleOwner As Range
-    Dim rngWeeklyReportProgramOwner As Range
-    Dim rngWeeklyReportTaskOwner As Range
-    Dim rngWeeklyReportDisplay As Range
-    Dim rngWeeklyReportPageMode As Range
-    Dim rngWeeklyReportPageGroup As Range
-    Dim rngWeeklyReportOverflowMode As Range
-    Dim rngWeeklyReportProgramGroup As Range
-    Dim rngWeeklyReportBullets As Range
-    Dim rngWeeklyCustomPageNumbers As Range
     Dim legacyTaskMaxLength As Variant
 
     On Error Resume Next
@@ -67,34 +57,11 @@ Public Sub EnsureConfigSheet()
     End If
     ws.Range(INPUT_SETTING_TITLE_CELL).Value = "간트 - 입력 제한 설정"
     legacyTaskMaxLength = ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value
-    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 내용 최대 글자 수"
-    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 내용 최대 글자 수"
-    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 내용 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 각 내용 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 각 내용 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 각 내용 최대 글자 수"
     ' Clear settings left by the retired development-report feature.
     ws.Range("L1:M7").Clear
-    ws.Range(WEEKLY_REPORT_SETTING_TITLE_CELL).Value = "주간보고 설정"
-    ws.Range(WEEKLY_REPORT_OWNER_LABEL_CELL).Value = "담당자 이름 출력"
-    ws.Range(WEEKLY_REPORT_DISPLAY_LABEL_CELL).Value = "주간보고 항목 출력"
-    ws.Range(WEEKLY_REPORT_OWNER_TYPE_LABEL_CELL).Value = "타입"
-    ws.Range(WEEKLY_REPORT_OWNER_MAJOR_LABEL_CELL).Value = "대분류"
-    ws.Range(WEEKLY_REPORT_OWNER_MIDDLE_LABEL_CELL).Value = "중분류"
-    ws.Range(WEEKLY_REPORT_OWNER_MINOR_LABEL_CELL).Value = "소분류"
-    ws.Range(WEEKLY_REPORT_OWNER_TASK_LABEL_CELL).Value = "업무명"
-    ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_LABEL_CELL).Value = "업무 레벨"
-    ws.Range(WEEKLY_REPORT_PAGE_MODE_LABEL_CELL).Value = "페이지 출력 모드"
-    ws.Range(WEEKLY_REPORT_PAGE_GROUP_LABEL_CELL).Value = "페이지 그룹핑 기준"
-    ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_LABEL_CELL).Value = "내용 넘침 처리"
-    ws.Range(WEEKLY_REPORT_CATEGORY_DEPTH_LABEL_CELL).Value = "트리 반복 출력"
-    ws.Range(WEEKLY_REPORT_BULLET_TITLE_CELL).Value = "주간보고 글머리 기호"
-    ws.Range(WEEKLY_REPORT_BULLET_TYPE_LABEL_CELL).Value = "타입"
-    ws.Range(WEEKLY_REPORT_BULLET_MAJOR_LABEL_CELL).Value = "대분류"
-    ws.Range(WEEKLY_REPORT_BULLET_MIDDLE_LABEL_CELL).Value = "중분류"
-    ws.Range(WEEKLY_REPORT_BULLET_MINOR_LABEL_CELL).Value = "소분류"
-    ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_LABEL_CELL).Value = "Level 1"
-    ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_LABEL_CELL).Value = "Level 2"
-    ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_LABEL_CELL).Value = "Level 3"
-    ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_HEADER_CELL).Value = "커스텀 페이지 번호"
-    ws.Range(WEEKLY_REPORT_CUSTOM_MODULE_HEADER_CELL).Value = "분류 항목"
     ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "숨김 제외 No."
     ws.Range(HIDE_EXCLUDE_DATE_HEADER_CELL).Value = "숨김 제외 날짜"
 
@@ -111,81 +78,6 @@ Public Sub EnsureConfigSheet()
     If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value)) = "" Then
         ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value = legacyTaskMaxLength
     End If
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_OWNER_MODULE_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_MIDDLE_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_OWNER_MIDDLE_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).Value)) = "" Or _
-       Trim$(CStr(ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).Value)) = _
-       WEEKLY_REPORT_OWNER_TASK_LEVEL_ALL Then _
-        ws.Range(WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_DISPLAY_TYPE_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_DISPLAY_TYPE_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_DISPLAY_MAJOR_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_DISPLAY_MAJOR_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_DISPLAY_MIDDLE_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_DISPLAY_MIDDLE_VALUE_CELL).Value = "N"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_DISPLAY_MINOR_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_DISPLAY_MINOR_VALUE_CELL).Value = "N"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_DISPLAY_TASK_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_DISPLAY_TASK_VALUE_CELL).Value = "Y"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_DISPLAY_TASK_LEVEL_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_DISPLAY_TASK_LEVEL_VALUE_CELL).Value = "N"
-    Select Case Trim$(CStr(ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value))
-        Case WEEKLY_REPORT_PAGE_MODE_ALL, WEEKLY_REPORT_PAGE_MODE_MODULE, _
-             WEEKLY_REPORT_PAGE_MODE_CUSTOM
-        Case WEEKLY_REPORT_PAGE_MODE_LEGACY_MODULE
-            ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_MODULE
-        Case Else
-            ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_ALL
-    End Select
-    Select Case Trim$(CStr(ws.Range(WEEKLY_REPORT_PAGE_GROUP_VALUE_CELL).Value))
-        Case WEEKLY_REPORT_CATEGORY_DEPTH_TYPE, WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR, _
-             WEEKLY_REPORT_CATEGORY_DEPTH_MIDDLE, WEEKLY_REPORT_CATEGORY_DEPTH_MINOR
-        Case Else
-            ws.Range(WEEKLY_REPORT_PAGE_GROUP_VALUE_CELL).Value = _
-                WEEKLY_REPORT_CATEGORY_DEPTH_TYPE
-    End Select
-    Select Case Trim$(CStr(ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value))
-        Case WEEKLY_REPORT_OVERFLOW_MODE_EXPAND, WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
-        Case Else
-            ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).Value = _
-                WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
-    End Select
-    If UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_REPEAT_TYPE_VALUE_CELL).Value))) <> "Y" Then _
-        ws.Range(WEEKLY_REPORT_REPEAT_TYPE_VALUE_CELL).Value = "N"
-    If UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_REPEAT_MAJOR_VALUE_CELL).Value))) <> "Y" Then _
-        ws.Range(WEEKLY_REPORT_REPEAT_MAJOR_VALUE_CELL).Value = "N"
-    If UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_REPEAT_MIDDLE_VALUE_CELL).Value))) <> "Y" Then _
-        ws.Range(WEEKLY_REPORT_REPEAT_MIDDLE_VALUE_CELL).Value = "N"
-    If UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_REPEAT_MINOR_VALUE_CELL).Value))) <> "Y" Then _
-        ws.Range(WEEKLY_REPORT_REPEAT_MINOR_VALUE_CELL).Value = "N"
-    If UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_REPEAT_TASK_VALUE_CELL).Value))) <> "Y" Then _
-        ws.Range(WEEKLY_REPORT_REPEAT_TASK_VALUE_CELL).Value = "N"
-    If UCase$(Trim$(CStr(ws.Range(WEEKLY_REPORT_REPEAT_TASK_LEVEL_VALUE_CELL).Value))) <> "Y" Then _
-        ws.Range(WEEKLY_REPORT_REPEAT_TASK_LEVEL_VALUE_CELL).Value = "N"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL).Value = ChrW(&H2022)
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_MAJOR_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_MAJOR_VALUE_CELL).Value = "-"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_MIDDLE_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_MIDDLE_VALUE_CELL).Value = ChrW(&HB7)
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_MINOR_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_MINOR_VALUE_CELL).Value = ChrW(&H25E6)
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_LEVEL1_VALUE_CELL).Value = ChrW(&H2022)
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_LEVEL2_VALUE_CELL).Value = "-"
-    If Trim$(CStr(ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL).Value)) = "" Then _
-        ws.Range(WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL).Value = ChrW(&HB7)
-
-
     ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
     ws.Columns(HOLIDAY_COL_TYPE).ColumnWidth = 12
     ws.Columns(HOLIDAY_COL_DESC).ColumnWidth = 24
@@ -194,16 +86,6 @@ Public Sub EnsureConfigSheet()
     ws.Columns("G").ColumnWidth = 14
     ws.Columns("I").ColumnWidth = 26
     ws.Columns("J").ColumnWidth = 14
-    ws.Columns("O").ColumnWidth = 20
-    ws.Columns("P").ColumnWidth = 14
-    ws.Columns("Q").ColumnWidth = 14
-    ws.Columns("R").ColumnWidth = 14
-    ws.Columns("S").ColumnWidth = 14
-    ws.Columns("T").ColumnWidth = 14
-    ws.Columns("U").ColumnWidth = 16
-    ws.Columns("W").ColumnWidth = 18
-    ws.Columns("X").ColumnWidth = 12
-
     ws.Range("A1:C1").Font.Bold = True
     ws.Range("A1:C1").Interior.Color = RGB(242, 242, 242)
     ws.Range("A1:C1").Borders.LineStyle = xlContinuous
@@ -224,21 +106,6 @@ Public Sub EnsureConfigSheet()
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(221, 235, 247)
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Borders.LineStyle = xlContinuous
     ws.Range("I8:J10").Borders.LineStyle = xlContinuous
-    ws.Range("O1:U1").Font.Bold = True
-    ws.Range("O1:U1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O1:U1").Borders.LineStyle = xlContinuous
-    ws.Range("O2:U2").Font.Bold = True
-    ws.Range("O2:U3").Borders.LineStyle = xlContinuous
-    ws.Range("O4:R5").Borders.LineStyle = xlContinuous
-    ws.Range("O6:U6").Borders.LineStyle = xlContinuous
-    ws.Range("O6").Font.Bold = True
-    ws.Range("O7:P7").Font.Bold = True
-    ws.Range("O7:P7").Interior.Color = RGB(252, 228, 214)
-    ws.Range("O7:P" & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).Borders.LineStyle = xlContinuous
-    ws.Range("W1:X1").Font.Bold = True
-    ws.Range("W1:X1").Interior.Color = RGB(252, 228, 214)
-    ws.Range("W1:X8").Borders.LineStyle = xlContinuous
-
     ws.Range("F2:G2").Borders.LineStyle = xlContinuous
     ws.Range("I2:J5").Borders.LineStyle = xlContinuous
     ws.Range("F5:G5").Font.Bold = True
@@ -253,19 +120,6 @@ Public Sub EnsureConfigSheet()
     ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).NumberFormat = "0"
-    ws.Range(WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL & ":" & _
-             WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL).NumberFormat = "General"
-    ws.Range(WEEKLY_REPORT_DISPLAY_TYPE_VALUE_CELL & ":" & _
-             WEEKLY_REPORT_DISPLAY_TASK_LEVEL_VALUE_CELL).NumberFormat = "General"
-    ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL).NumberFormat = "General"
-    ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL).NumberFormat = "General"
-    ws.Range(WEEKLY_REPORT_REPEAT_TYPE_VALUE_CELL & ":" & _
-             WEEKLY_REPORT_REPEAT_TASK_LEVEL_VALUE_CELL).NumberFormat = "General"
-    ws.Range(WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL & ":" & _
-             WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL).NumberFormat = "General"
-    ws.Range(WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
-             WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW)).NumberFormat = "0"
-
     lastSheetRow = ws.rows.Count
     Set rngType = ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_DATA_START_ROW & ":" & HOLIDAY_COL_TYPE & lastSheetRow)
     Set rngHideLevel = ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL)
@@ -276,27 +130,6 @@ Public Sub EnsureConfigSheet()
     Set rngDisplayGanttOnly = ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL)
     Set rngDisplayReportOnly = ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL)
     Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_RANGE)
-    Set rngWeeklyReportModuleOwner = ws.Range( _
-        WEEKLY_REPORT_OWNER_TYPE_VALUE_CELL & ":" & _
-        WEEKLY_REPORT_OWNER_TASK_LEVEL_VALUE_CELL)
-    Set rngWeeklyReportProgramOwner = ws.Range(WEEKLY_REPORT_OWNER_PROGRAM_VALUE_CELL)
-    Set rngWeeklyReportTaskOwner = ws.Range(WEEKLY_REPORT_OWNER_TASK_VALUE_CELL)
-    Set rngWeeklyReportDisplay = ws.Range( _
-        WEEKLY_REPORT_DISPLAY_TYPE_VALUE_CELL & ":" & _
-        WEEKLY_REPORT_DISPLAY_TASK_LEVEL_VALUE_CELL)
-    Set rngWeeklyReportPageMode = ws.Range(WEEKLY_REPORT_PAGE_MODE_VALUE_CELL)
-    Set rngWeeklyReportPageGroup = ws.Range(WEEKLY_REPORT_PAGE_GROUP_VALUE_CELL)
-    Set rngWeeklyReportOverflowMode = ws.Range(WEEKLY_REPORT_OVERFLOW_MODE_VALUE_CELL)
-    Set rngWeeklyReportProgramGroup = ws.Range( _
-        WEEKLY_REPORT_REPEAT_TYPE_VALUE_CELL & ":" & _
-        WEEKLY_REPORT_REPEAT_TASK_LEVEL_VALUE_CELL)
-    Set rngWeeklyReportBullets = ws.Range( _
-        WEEKLY_REPORT_BULLET_TYPE_VALUE_CELL & ":" & _
-        WEEKLY_REPORT_BULLET_LEVEL3_VALUE_CELL)
-    Set rngWeeklyCustomPageNumbers = ws.Range( _
-        WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_START_ROW) & ":" & _
-        WEEKLY_REPORT_CUSTOM_PAGE_COLUMN & CStr(WEEKLY_REPORT_CUSTOM_END_ROW))
-
     On Error Resume Next
     rngType.Validation.Delete
     rngHideLevel.Validation.Delete
@@ -307,16 +140,6 @@ Public Sub EnsureConfigSheet()
     rngDisplayGanttOnly.Validation.Delete
     rngDisplayReportOnly.Validation.Delete
     rngTaskMaxLength.Validation.Delete
-    rngWeeklyReportModuleOwner.Validation.Delete
-    rngWeeklyReportProgramOwner.Validation.Delete
-    rngWeeklyReportTaskOwner.Validation.Delete
-    rngWeeklyReportDisplay.Validation.Delete
-    rngWeeklyReportPageMode.Validation.Delete
-    rngWeeklyReportPageGroup.Validation.Delete
-    rngWeeklyReportOverflowMode.Validation.Delete
-    rngWeeklyReportProgramGroup.Validation.Delete
-    rngWeeklyReportBullets.Validation.Delete
-    rngWeeklyCustomPageNumbers.Validation.Delete
     On Error GoTo 0
 
     rngType.Validation.Add Type:=xlValidateList, _
@@ -402,249 +225,60 @@ Public Sub EnsureConfigSheet()
         "레벨별 내용 최대 글자 수는 " & MIN_TASK_MAX_LENGTH & "~" & _
         MAX_TASK_MAX_LENGTH & " 사이 정수여야 합니다."
 
-    With rngWeeklyReportModuleOwner.Validation
-        .Add Type:=xlValidateList, _
-             AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, _
-             Formula1:="Y,N"
-        .IgnoreBlank = False
-        .InCellDropdown = True
-        .InputTitle = "주간보고 담당자 표시"
-        .InputMessage = "해당 구분의 담당자를 표시하려면 Y, 숨기려면 N을 선택하세요."
-        .ErrorTitle = "설정값 오류"
-        .ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
-    End With
-
-    With rngWeeklyReportDisplay.Validation
-        .Add Type:=xlValidateList, _
-             AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, _
-             Formula1:="Y,N"
-        .IgnoreBlank = False
-        .InCellDropdown = True
-        .InputTitle = "주간보고 항목 출력"
-        .InputMessage = "해당 항목을 주간보고에 출력하려면 Y, 숨기려면 N을 선택하세요."
-        .ErrorTitle = "설정값 오류"
-        .ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
-    End With
-
-    rngWeeklyReportPageMode.Validation.Add Type:=xlValidateList, _
-                                           AlertStyle:=xlValidAlertStop, _
-                                           Operator:=xlBetween, _
-                                           Formula1:=WEEKLY_REPORT_PAGE_MODE_ALL & "," & _
-                                                     WEEKLY_REPORT_PAGE_MODE_MODULE & "," & _
-                                                     WEEKLY_REPORT_PAGE_MODE_CUSTOM
-    rngWeeklyReportPageMode.Validation.IgnoreBlank = False
-    rngWeeklyReportPageMode.Validation.InCellDropdown = True
-    rngWeeklyReportPageMode.Validation.InputTitle = "주간보고 페이지 출력"
-    rngWeeklyReportPageMode.Validation.InputMessage = _
-        "전체 통합, 분류 기준마다 페이지 분리 또는 커스텀 페이지를 선택하세요."
-    rngWeeklyReportPageMode.Validation.ErrorTitle = "설정값 오류"
-    rngWeeklyReportPageMode.Validation.ErrorMessage = "목록에 있는 페이지 출력 모드만 선택할 수 있습니다."
-
-    With rngWeeklyReportPageGroup.Validation
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, _
-             Formula1:=WEEKLY_REPORT_CATEGORY_DEPTH_TYPE & "," & _
-                       WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR & "," & _
-                       WEEKLY_REPORT_CATEGORY_DEPTH_MIDDLE & "," & _
-                       WEEKLY_REPORT_CATEGORY_DEPTH_MINOR
-        .IgnoreBlank = False
-        .InCellDropdown = True
-        .InputTitle = "페이지 그룹핑 기준"
-        .InputMessage = "PPT 페이지를 나눌 분류 단계를 선택하세요."
-        .ErrorTitle = "설정값 오류"
-        .ErrorMessage = "목록에 있는 분류 단계만 선택할 수 있습니다."
-    End With
-
-    rngWeeklyReportOverflowMode.Validation.Add Type:=xlValidateList, _
-                                               AlertStyle:=xlValidAlertStop, _
-                                               Operator:=xlBetween, _
-                                               Formula1:=WEEKLY_REPORT_OVERFLOW_MODE_EXPAND & "," & _
-                                                         WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
-    rngWeeklyReportOverflowMode.Validation.IgnoreBlank = False
-    rngWeeklyReportOverflowMode.Validation.InCellDropdown = True
-    rngWeeklyReportOverflowMode.Validation.InputTitle = "주간보고 내용 넘침 처리"
-    rngWeeklyReportOverflowMode.Validation.InputMessage = _
-        "영역을 계속 늘리거나 템플릿 수용량에 맞춰 새 슬라이드로 나눌 수 있습니다."
-    rngWeeklyReportOverflowMode.Validation.ErrorTitle = "설정값 오류"
-    rngWeeklyReportOverflowMode.Validation.ErrorMessage = "목록에 있는 내용 넘침 처리 모드만 선택할 수 있습니다."
-
-    With rngWeeklyReportProgramGroup.Validation
-        .Add Type:=xlValidateList, _
-             AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, _
-             Formula1:="Y,N"
-        .IgnoreBlank = False
-        .InCellDropdown = True
-        .InputTitle = "트리 반복 출력"
-        .InputMessage = "같은 상위 트리를 업무마다 반복하려면 Y, 한 번만 표시하려면 N을 선택하세요."
-        .ErrorTitle = "설정값 오류"
-        .ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
-    End With
-
-    rngWeeklyReportBullets.Validation.Add Type:=xlValidateTextLength, _
-                                           AlertStyle:=xlValidAlertStop, _
-                                           Operator:=xlBetween, _
-                                           Formula1:="1", _
-                                           Formula2:="5"
-    rngWeeklyReportBullets.Validation.IgnoreBlank = False
-    rngWeeklyReportBullets.Validation.InputTitle = "주간보고 글머리 기호"
-    rngWeeklyReportBullets.Validation.InputMessage = _
-        "각 Level에 사용할 글머리 기호를 1~5자로 입력하세요."
-    rngWeeklyReportBullets.Validation.ErrorTitle = "설정값 오류"
-    rngWeeklyReportBullets.Validation.ErrorMessage = "글머리 기호는 1~5자로 입력해야 합니다."
-
-    rngWeeklyCustomPageNumbers.Validation.Add Type:=xlValidateWholeNumber, _
-                                                AlertStyle:=xlValidAlertStop, _
-                                                Operator:=xlBetween, _
-                                                Formula1:="1", _
-                                                Formula2:="1000"
-    rngWeeklyCustomPageNumbers.Validation.IgnoreBlank = True
-    rngWeeklyCustomPageNumbers.Validation.InputTitle = "커스텀 페이지 번호"
-    rngWeeklyCustomPageNumbers.Validation.InputMessage = _
-        "같은 페이지에 넣을 분류 항목에는 같은 페이지 번호를 입력하세요."
-    rngWeeklyCustomPageNumbers.Validation.ErrorTitle = "설정값 오류"
-    rngWeeklyCustomPageNumbers.Validation.ErrorMessage = "페이지 번호는 1~1000 사이 정수여야 합니다."
-
     EnsureWeeklyReportConfigSheet
-    EnsureDailyReportConfigSheet
     RefreshWeeklyReportModuleDropdown
     ws.Range("O1:X203").Clear
     ws.Range("AA1:AA203").Clear
+    EnsureTaskTypeConfig
 End Sub
-
-Public Sub EnsureDailyReportConfigSheet()
-    Dim ws As Worksheet
-    Dim isNewSheet As Boolean
-
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(DAILY_REPORT_CONFIG_SHEET_NAME)
-    On Error GoTo 0
-
-    If ws Is Nothing Then
-        Set ws = ThisWorkbook.Worksheets.Add( _
-                     After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-        ws.Name = DAILY_REPORT_CONFIG_SHEET_NAME
-        isNewSheet = True
-    End If
-
-    ws.Range("A1").Value = "일일현황 표시 설정"
-    ws.Range("B1").Value = "타입"
-    ws.Range("C1").Value = "대분류"
-    ws.Range("D1").Value = "중분류"
-    ws.Range("E1").Value = "소분류"
-    ws.Range("F1").Value = "업무명"
-    ws.Range("G1").Value = "업무 레벨"
-    ws.Range("A2").Value = "진척률 표시"
-
-    If isNewSheet Or Application.WorksheetFunction.CountA(ws.Range("B2:G2")) = 0 Then
-        ws.Range("B2:E2").Value = "N"
-        ws.Range(DR_PROGRESS_TASK_CELL).Value = "Y"
-        ws.Range(DR_PROGRESS_LEVEL_CELL).Value = "전체"
-    End If
-
-    On Error Resume Next
-    ws.Range("B2:F2").Validation.Delete
-    ws.Range(DR_PROGRESS_LEVEL_CELL).Validation.Delete
-    On Error GoTo 0
-
-    With ws.Range("B2:F2").Validation
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, Formula1:="Y,N"
-        .IgnoreBlank = False
-        .InCellDropdown = True
-        .InputTitle = "진척률 표시"
-        .InputMessage = "해당 항목에 진척률을 표시하려면 Y, 숨기려면 N을 선택하세요."
-        .ErrorTitle = "설정값 오류"
-        .ErrorMessage = "Y 또는 N만 선택할 수 있습니다."
-    End With
-
-    With ws.Range(DR_PROGRESS_LEVEL_CELL).Validation
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, _
-             Formula1:="전체,Level 1까지,Level 2까지,Level 3까지"
-        .IgnoreBlank = False
-        .InCellDropdown = True
-        .InputTitle = "업무 레벨"
-        .InputMessage = "진척률을 표시할 업무의 최대 Level을 선택하세요."
-        .ErrorTitle = "설정값 오류"
-        .ErrorMessage = "목록에 있는 업무 레벨만 선택할 수 있습니다."
-    End With
-
-    ws.Tab.Color = RGB(91, 155, 213)
-    ws.Cells.Font.Name = "맑은 고딕"
-    ws.Cells.Font.Size = 10
-    ws.Columns("A").ColumnWidth = 24
-    ws.Columns("B:G").ColumnWidth = 16
-    ws.Rows("1:2").RowHeight = 24
-    ws.Range("A1:G2").Borders.LineStyle = xlContinuous
-    ws.Range("A1:G1").Font.Bold = True
-    ws.Range("A1:G1").Interior.Color = RGB(91, 155, 213)
-    ws.Range("A1:G2").VerticalAlignment = xlCenter
-End Sub
-
-Public Function GetDailyReportShowCategoryProgressFlag( _
-                    ByVal categoryLevel As Long) As Boolean
-    Dim valueCell As String
-
-    Select Case categoryLevel
-        Case 1: valueCell = DR_PROGRESS_TYPE_CELL
-        Case 2: valueCell = DR_PROGRESS_MAJOR_CELL
-        Case 3: valueCell = DR_PROGRESS_MIDDLE_CELL
-        Case 4: valueCell = DR_PROGRESS_MINOR_CELL
-        Case Else: Exit Function
-    End Select
-    GetDailyReportShowCategoryProgressFlag = GetDailyReportConfigFlag(valueCell, False)
-End Function
-
-Public Function GetDailyReportShowTaskProgressFlag( _
-                    ByVal taskLevel As Long) As Boolean
-    Dim ws As Worksheet
-    Dim levelSetting As String
-    Dim maxLevel As Long
-
-    If Not GetDailyReportConfigFlag(DR_PROGRESS_TASK_CELL, True) Then Exit Function
-
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(DAILY_REPORT_CONFIG_SHEET_NAME)
-    On Error GoTo 0
-    If ws Is Nothing Then
-        GetDailyReportShowTaskProgressFlag = True
-        Exit Function
-    End If
-
-    levelSetting = Trim$(CStr(ws.Range(DR_PROGRESS_LEVEL_CELL).Value2))
-    Select Case levelSetting
-        Case "Level 1까지": maxLevel = 1
-        Case "Level 2까지": maxLevel = 2
-        Case "Level 3까지": maxLevel = 3
-        Case Else: maxLevel = 32767
-    End Select
-    GetDailyReportShowTaskProgressFlag = (taskLevel <= maxLevel)
-End Function
-
-Private Function GetDailyReportConfigFlag(ByVal valueCell As String, _
-                                          ByVal defaultValue As Boolean) As Boolean
-    Dim ws As Worksheet
-    Dim settingValue As String
-
-    GetDailyReportConfigFlag = defaultValue
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(DAILY_REPORT_CONFIG_SHEET_NAME)
-    On Error GoTo 0
-    If ws Is Nothing Then Exit Function
-
-    settingValue = UCase$(Trim$(CStr(ws.Range(valueCell).Value2)))
-    If settingValue = "Y" Then GetDailyReportConfigFlag = True
-    If settingValue = "N" Then GetDailyReportConfigFlag = False
-End Function
 
 Private Function GetWeeklyReportConfigSheet() As Worksheet
+    Dim legacyName As Variant
+
     On Error Resume Next
     Set GetWeeklyReportConfigSheet = _
         ThisWorkbook.Worksheets(WEEKLY_REPORT_CONFIG_SHEET_NAME)
+    If GetWeeklyReportConfigSheet Is Nothing Then
+        For Each legacyName In Array("config_주간보고", "config_주간 보고")
+            Set GetWeeklyReportConfigSheet = ThisWorkbook.Worksheets(CStr(legacyName))
+            If Not GetWeeklyReportConfigSheet Is Nothing Then
+                GetWeeklyReportConfigSheet.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME
+                Exit For
+            End If
+        Next legacyName
+    End If
     On Error GoTo 0
+End Function
+
+Public Sub GetOutputReportPeriod(ByRef startDate As Date, ByRef endDate As Date)
+    Dim ws As Worksheet
+
+    Set ws = GetWeeklyReportConfigSheet()
+    If ws Is Nothing Then
+        Err.Raise vbObjectError + 7140, "GetOutputReportPeriod", _
+                  "config_outfoot 시트에서 출력 기간을 설정하세요."
+    End If
+    If Not TryParseHolidayDate(ws.Range(OUTPUT_REPORT_START_CELL).Value, startDate) Or _
+       Not TryParseHolidayDate(ws.Range(OUTPUT_REPORT_END_CELL).Value, endDate) Then
+        Err.Raise vbObjectError + 7141, "GetOutputReportPeriod", _
+                  "config_outfoot 시트의 출력 시작일과 출력 종료일에 올바른 날짜를 입력하세요."
+    End If
+    startDate = DateValue(startDate)
+    endDate = DateValue(endDate)
+    If endDate < startDate Then
+        Err.Raise vbObjectError + 7142, "GetOutputReportPeriod", _
+                  "출력 종료일은 출력 시작일보다 빠를 수 없습니다."
+    End If
+End Sub
+
+Public Function GetOutputShowModificationFlag() As Boolean
+    Dim ws As Worksheet
+
+    GetOutputShowModificationFlag = True
+    Set ws = GetWeeklyReportConfigSheet()
+    If ws Is Nothing Then Exit Function
+    GetOutputShowModificationFlag = _
+        (UCase$(Trim$(CStr(ws.Range(OUTPUT_SHOW_MODIFICATION_CELL).Value2))) <> "N")
 End Function
 
 Public Sub EnsureWeeklyReportConfigSheet()
@@ -667,6 +301,8 @@ Public Sub EnsureWeeklyReportConfigSheet()
     Dim previewAutoSpaces As String
     Dim previewIndentCell As String
     Dim previewIndent As String
+    Dim defaultStart As Date
+    Dim defaultEnd As Date
 
     Set ws = GetWeeklyReportConfigSheet()
     If ws Is Nothing Then
@@ -696,37 +332,82 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Range("AA1:AA203").Clear
     ws.Tab.Color = RGB(237, 125, 49)
 
-    ws.Range("A1").Value = "주간보고 표시 설정"
+    ws.Range("A1").Value = "TXT 출력 표시 설정"
     ws.Range("B1").Value = "타입"
     ws.Range("C1").Value = "대분류"
     ws.Range("D1").Value = "중분류"
     ws.Range("E1").Value = "소분류"
     ws.Range("F1").Value = "업무명"
     ws.Range("G1").Value = "업무 레벨"
-    ws.Range("A2").Value = "PPT에 항목 표시"
+    ws.Range("A2").Value = "TXT에 항목 표시"
     ws.Range("A3").Value = "담당자 이름 표시"
     ws.Range("A4").Value = "같은 트리 반복 표시"
     ws.Range("A5").Value = "완료 예상일 표시"
 
-    ws.Range("A6").Value = "PPT 페이지 설정"
-    ws.Range("A7").Value = "페이지 구성 방식"
-    ws.Range("A8").Value = "페이지 분류 기준"
-    ws.Range("A9").Value = "내용 초과 시 처리"
+    ws.Range("A6").Value = "TXT 파일 설정"
+    ws.Range("A7").Value = "파일 구성 방식"
+    ws.Range("A8").Value = "파일 분류 기준"
+    ws.Range("A9:B9").Clear
 
     ws.Range("D6").Value = "글머리 모양 설정"
     ws.Range("D7").Value = "항목 단계"
     ws.Range("E7").Value = "기호"
     ws.Range("F7").Value = "글머리 방식"
     ws.Range("G7").Value = "앞 공백 수"
-    ws.Range("H7").Value = "PPT 표시 예시"
+    ws.Range("H7").Value = "TXT 표시 예시"
     ws.Range("D8:D14").Value = Application.Transpose( _
         Array("타입", "대분류", "중분류", "소분류", "업무 Level 1", "업무 Level 2", "업무 Level 3"))
 
-    ws.Range("A16:H212").Clear
+    ws.Range("A16:H16,A20:H212,D17:H19").Clear
+    ws.Range("A17:C19").UnMerge
+    ws.Range("A17").Value = "출력 시작일"
+    ws.Range("A18").Value = "출력 종료일"
+    ws.Range("A19").Value = "수정 내용 표시"
+    If Len(Trim$(CStr(ws.Range(OUTPUT_SHOW_MODIFICATION_CELL).Value2))) = 0 Then _
+        ws.Range(OUTPUT_SHOW_MODIFICATION_CELL).Value = "Y"
+    On Error Resume Next
+    If Not TryGetDisplayDateRange(defaultStart, defaultEnd) Then
+        defaultStart = Date
+        defaultEnd = Date
+    End If
+    If Err.Number <> 0 Then
+        defaultStart = Date
+        defaultEnd = Date
+        Err.Clear
+    End If
+    On Error GoTo 0
+    If Len(Trim$(CStr(ws.Range(OUTPUT_REPORT_START_CELL).Value2))) = 0 Then _
+        ws.Range(OUTPUT_REPORT_START_CELL).Value = defaultStart
+    If Len(Trim$(CStr(ws.Range(OUTPUT_REPORT_END_CELL).Value2))) = 0 Then _
+        ws.Range(OUTPUT_REPORT_END_CELL).Value = defaultEnd
+    ws.Range("B17:B18").NumberFormat = "yyyy-mm-dd"
+    ws.Range("A17:B19").Borders.LineStyle = xlContinuous
+    ws.Range("B17:B19").Interior.Color = RGB(255, 242, 204)
+    On Error Resume Next
+    ws.Range("B17:B18").Validation.Delete
+    ws.Range(OUTPUT_SHOW_MODIFICATION_CELL).Validation.Delete
+    On Error GoTo 0
+    With ws.Range("B17:B18").Validation
+        .Add xlValidateDate, xlValidAlertStop, xlBetween, "1", "2958465"
+        .IgnoreBlank = False
+        .InputTitle = "TXT 출력 기간"
+        .InputMessage = "시작일과 종료일을 포함한 기간의 업무를 출력합니다."
+        .ErrorTitle = "출력 날짜 오류"
+        .ErrorMessage = "올바른 날짜를 입력하세요."
+    End With
+    With ws.Range(OUTPUT_SHOW_MODIFICATION_CELL).Validation
+        .Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
+        .IgnoreBlank = False
+        .InCellDropdown = True
+        .InputTitle = "수정 내용 표시"
+        .InputMessage = "Y이면 각 요청 아래에 └ 수정 내용을 표시하고, N이면 숨깁니다."
+        .ErrorTitle = "표시 설정 오류"
+        .ErrorMessage = "Y 또는 N을 선택하세요."
+    End With
     ws.Range("I1:J1").UnMerge
     ws.Range("I1:J1").Merge
-    ws.Range("I1").Value = "커스텀 페이지 배치"
-    ws.Range("I2").Value = "페이지 번호"
+    ws.Range("I1").Value = "커스텀 파일 배치"
+    ws.Range("I2").Value = "파일 번호"
     ws.Range("J2").Value = "분류 항목"
 
     If isNewSheet Then
@@ -746,10 +427,14 @@ Public Sub EnsureWeeklyReportConfigSheet()
 
     If Trim$(CStr(ws.Range(WR_PAGE_MODE_CELL).Value2)) = "" Then _
         ws.Range(WR_PAGE_MODE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_ALL
+    Select Case Trim$(CStr(ws.Range(WR_PAGE_MODE_CELL).Value2))
+        Case "분류 기준마다 페이지 분리", "모듈별 페이지"
+            ws.Range(WR_PAGE_MODE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_MODULE
+        Case "커스텀 페이지"
+            ws.Range(WR_PAGE_MODE_CELL).Value = WEEKLY_REPORT_PAGE_MODE_CUSTOM
+    End Select
     If Trim$(CStr(ws.Range(WR_PAGE_GROUP_CELL).Value2)) = "" Then _
         ws.Range(WR_PAGE_GROUP_CELL).Value = WEEKLY_REPORT_CATEGORY_DEPTH_TYPE
-    If Trim$(CStr(ws.Range(WR_OVERFLOW_CELL).Value2)) = "" Then _
-        ws.Range(WR_OVERFLOW_CELL).Value = WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
 
     taskNameVisible = "UPPER(TRIM($F$2))<>""N"""
     taskLevelVisible = "UPPER(TRIM($G$2))=""Y"""
@@ -826,7 +511,7 @@ Public Sub EnsureWeeklyReportConfigSheet()
     On Error GoTo 0
     ws.Range("B2:G4").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, "Y,N"
     With ws.Range("B2:F2").Validation
-        .InputTitle = "PPT 항목 표시"
+        .InputTitle = "TXT 항목 표시"
         .InputMessage = "Y이면 항목을 표시하고 N이면 숨깁니다. 글머리 설정은 표시되는 항목에만 적용됩니다."
     End With
     With ws.Range(WR_DISPLAY_LEVEL_CELL).Validation
@@ -841,8 +526,6 @@ Public Sub EnsureWeeklyReportConfigSheet()
     ws.Range(WR_PAGE_GROUP_CELL).Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
         WEEKLY_REPORT_CATEGORY_DEPTH_TYPE & "," & WEEKLY_REPORT_CATEGORY_DEPTH_MAJOR & "," & _
         WEEKLY_REPORT_CATEGORY_DEPTH_MIDDLE & "," & WEEKLY_REPORT_CATEGORY_DEPTH_MINOR
-    ws.Range(WR_OVERFLOW_CELL).Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
-        WEEKLY_REPORT_OVERFLOW_MODE_EXPAND & "," & WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
     ws.Range("E8:E14").Validation.Add xlValidateTextLength, xlValidAlertStop, xlBetween, "1", "5"
     ws.Range("F8:F14").Validation.Add xlValidateList, xlValidAlertStop, xlBetween, _
         "기호,번호 매기기,원 숫자 ①,괄호 숫자 (1),반괄호 숫자 1),원 알파벳 ⓐ,원 한글 자음 ㉠,글머리 없음"
@@ -1554,25 +1237,6 @@ Public Function GetWeeklyReportPageMode() As String
     End Select
 End Function
 
-Public Function GetWeeklyReportOverflowMode() As String
-    Dim ws As Worksheet
-    Dim settingValue As String
-
-    GetWeeklyReportOverflowMode = WEEKLY_REPORT_OVERFLOW_MODE_EXPAND
-
-    On Error Resume Next
-    Set ws = GetWeeklyReportConfigSheet()
-    On Error GoTo 0
-    If ws Is Nothing Then Exit Function
-
-    settingValue = Trim$(CStr(ws.Range(WR_OVERFLOW_CELL).Value2))
-    Select Case settingValue
-        Case WEEKLY_REPORT_OVERFLOW_MODE_EXPAND, _
-             WEEKLY_REPORT_OVERFLOW_MODE_NEW_SLIDE
-            GetWeeklyReportOverflowMode = settingValue
-    End Select
-End Function
-
 Public Sub LoadWeeklyReportCustomPageAssignments(ByRef modulePageDict As Object)
     Dim ws As Worksheet
     Dim lastPageRow As Long
@@ -1600,24 +1264,24 @@ Public Sub LoadWeeklyReportCustomPageAssignments(ByRef modulePageDict As Object)
         If Len(Trim$(CStr(pageValue))) > 0 Or Len(moduleName) > 0 Then
             If Len(Trim$(CStr(pageValue))) = 0 Or Len(moduleName) = 0 Then
                 Err.Raise vbObjectError + 7120, "LoadWeeklyReportCustomPageAssignments", _
-                          "config 시트의 커스텀 페이지 설정 " & CStr(r) & _
-                          "행에 페이지 번호와 분류 항목을 모두 입력하세요."
+                          "config_outfoot 시트의 커스텀 파일 설정 " & CStr(r) & _
+                          "행에 파일 번호와 분류 항목을 모두 입력하세요."
             End If
 
             If Not IsNumeric(pageValue) Or CDbl(pageValue) <> Fix(CDbl(pageValue)) Then
                 Err.Raise vbObjectError + 7121, "LoadWeeklyReportCustomPageAssignments", _
-                          "config 시트의 커스텀 페이지 번호는 정수여야 합니다: " & CStr(r) & "행"
+                          "config 시트의 커스텀 파일 번호는 정수여야 합니다: " & CStr(r) & "행"
             End If
 
             pageNumber = CLng(pageValue)
             If pageNumber < 1 Or pageNumber > 1000 Then
                 Err.Raise vbObjectError + 7122, "LoadWeeklyReportCustomPageAssignments", _
-                          "config 시트의 커스텀 페이지 번호는 1~1000 사이여야 합니다: " & CStr(r) & "행"
+                          "config 시트의 커스텀 파일 번호는 1~1000 사이여야 합니다: " & CStr(r) & "행"
             End If
 
             If modulePageDict.Exists(moduleName) Then
                 Err.Raise vbObjectError + 7123, "LoadWeeklyReportCustomPageAssignments", _
-                          "config_주간보고 시트의 커스텀 페이지 설정에 같은 분류 항목이 중복되었습니다: " & moduleName
+                          "config_outfoot 시트의 커스텀 파일 설정에 같은 분류 항목이 중복되었습니다: " & moduleName
             End If
 
             modulePageDict.Add moduleName, pageNumber
@@ -1659,8 +1323,9 @@ Public Sub RefreshWeeklyReportModuleDropdown()
 
     For Each taskWs In ThisWorkbook.Worksheets
         If taskWs.Name <> CONFIG_SHEET_NAME And _
-           taskWs.Name <> "WeeklyPptTemplate" And _
-           (Trim$(CStr(taskWs.Range("H" & HEADER_ROW).Value2)) = "내용" Or _
+           taskWs.Name <> WEEKLY_REPORT_CONFIG_SHEET_NAME And _
+           (Trim$(CStr(taskWs.Range(COL_TASK & HEADER_ROW).Value2)) = "요청 내용" Or _
+            Trim$(CStr(taskWs.Range("H" & HEADER_ROW).Value2)) = "내용" Or _
             Trim$(CStr(taskWs.Range("F" & HEADER_ROW).Value2)) = "내용" Or _
             Trim$(CStr(taskWs.Range("E" & HEADER_ROW).Value2)) = "내용") Then
             lastRow = GetLastDataRow(taskWs)
@@ -1677,7 +1342,7 @@ Public Sub RefreshWeeklyReportModuleDropdown()
     Next taskWs
 
     configWs.Columns(WR_MODULE_LIST_COLUMN).ClearContents
-    configWs.Cells(1, WR_MODULE_LIST_COLUMN).Value = "주간보고 미선택 분류 항목 목록"
+    configWs.Cells(1, WR_MODULE_LIST_COLUMN).Value = "TXT 미선택 분류 항목 목록"
     outputRow = 2
     For Each moduleNameItem In moduleNames
         configWs.Cells(outputRow, WR_MODULE_LIST_COLUMN).Value = CStr(moduleNameItem)
@@ -1743,7 +1408,8 @@ Public Sub RefreshTaskTextLengthValidation()
 
     For Each ws In ThisWorkbook.Worksheets
         If ws.Name <> CONFIG_SHEET_NAME And _
-           ws.Name <> "WeeklyPptTemplate" Then
+           ws.Name <> WEEKLY_REPORT_CONFIG_SHEET_NAME And _
+           CStr(ws.Range(COL_NO & HEADER_ROW).Value2) = "No." Then
             wasProtected = _
                 (ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios)
             If wasProtected Then UnprotectTaskSheet ws

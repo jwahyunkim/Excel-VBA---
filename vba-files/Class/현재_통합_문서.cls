@@ -1,4 +1,4 @@
-﻿VERSION 1.0 CLASS
+VERSION 1.0 CLASS
 BEGIN
   MultiUse = -1  'True
 END
@@ -26,14 +26,19 @@ End Sub
 
 Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     Dim duplicateModule As String
+    Dim invalidTypeCell As String
 
     On Error GoTo EH
 
     If Not TypeOf Sh Is Worksheet Then Exit Sub
 
     If Sh.Name = CONFIG_SHEET_NAME Or _
-       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
-       Sh.Name = DAILY_REPORT_CONFIG_SHEET_NAME Then
+       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
+        If Sh.Name = CONFIG_SHEET_NAME And _
+           Not Intersect(Target, Sh.Range(TASK_TYPE_CONFIG_RANGE)) Is Nothing Then
+            Application.enableEvents = False
+            RefreshTaskTypeValidation
+        End If
         If Sh.Name = CONFIG_SHEET_NAME And _
            Not Intersect(Target, Sh.Range(TASK_MAX_LENGTH_VALUE_RANGE)) Is Nothing Then
             Application.enableEvents = False
@@ -59,6 +64,19 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     End If
 
     Application.enableEvents = False
+    invalidTypeCell = GetInvalidTaskType(Sh, Target)
+    If Len(invalidTypeCell) > 0 Then
+        Application.Undo
+        RefreshTaskTypeValidation
+        MsgBox "config 시트에 등록한 타입만 입력할 수 있습니다: " & invalidTypeCell, _
+               vbExclamation, "타입 입력 오류"
+        GoTo SafeExit
+    End If
+    If CStr(Sh.Range(COL_TYPE & HEADER_ROW).Value2) = "타입" And _
+       Not Intersect(Target, Sh.Range(COL_TYPE & DATA_START_ROW & ":" & _
+                                     COL_TYPE & Sh.Rows.Count)) Is Nothing Then
+        RefreshTaskTypeValidation
+    End If
     HandleTaskHierarchyChange Sh, Target
 
 SafeExit:
@@ -99,8 +117,7 @@ Private Sub Workbook_SheetFollowHyperlink(ByVal Sh As Object, ByVal Target As Hy
     On Error GoTo SafeExit
 
     If Sh.Name = CONFIG_SHEET_NAME Or _
-       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
-       Sh.Name = DAILY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
+       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
 
     Set anchorCell = Target.Range
     If anchorCell Is Nothing Then Exit Sub

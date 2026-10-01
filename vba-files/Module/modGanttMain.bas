@@ -27,7 +27,7 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
 
     Set ws = ActiveSheet
 
-    If ws.Name = CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
         If Not showCompletionMessage Then Err.Raise vbObjectError + 2120, , "config 시트에서는 실행할 수 없습니다."
         MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
@@ -44,7 +44,6 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
         ApplyCalculatedColumnsProtection ws, lastRow
     End If
     LoadHolidaySettings holidayDict, workdayDict
-
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then
         If Not showCompletionMessage Then Err.Raise vbObjectError + 2120, , "데이터가 없습니다."
@@ -113,7 +112,7 @@ Public Sub 칸트차트_초기화()
 
     Set ws = ActiveSheet
 
-    If ws.Name = CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
         MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
@@ -123,6 +122,7 @@ Public Sub 칸트차트_초기화()
 
     UnprotectTaskSheet ws
 
+    If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
 
@@ -152,13 +152,14 @@ Public Sub 칸트차트_항목숨기기()
 
     Set ws = ActiveSheet
 
-    If ws.Name = CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
         MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
 
     EnsureConfigSheet
 
+    If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then
         MsgBox "데이터가 없습니다.", vbExclamation
@@ -217,7 +218,7 @@ Public Sub 칸트차트_개체삽입()
 
     Set ws = ActiveSheet
 
-    If ws.Name = CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
         MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
@@ -235,6 +236,7 @@ Public Sub 칸트차트_개체삽입()
     targetRow = ActiveCell.Row
     oleName = GetGanttPptOleName(targetRow)
 
+    If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
     If HasEmbeddedPptObject(ws, targetRow) Then
         MsgBox "해당 행에는 이미 PPT 개체가 삽입되어 있습니다.", vbExclamation
         Exit Sub
@@ -273,6 +275,7 @@ Public Sub 칸트차트_개체삽입()
     SetGanttPptCellIcon ws, targetRow
 
     If wasProtected Then
+        If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
         lastRow = GetLastDataRow(ws)
         If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
         ApplyCalculatedColumnsProtection ws, lastRow
@@ -290,6 +293,7 @@ EH:
         RemoveEmbeddedPptArtifacts ws, targetRow
     End If
     If wasProtected Then
+        If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
         lastRow = GetLastDataRow(ws)
         If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
         ApplyCalculatedColumnsProtection ws, lastRow
@@ -369,7 +373,7 @@ Private Sub CreateGanttActionButton(ByVal ws As Worksheet, _
 
     If ws Is Nothing Then Exit Sub
 
-    If ws.Name = CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
         MsgBox "config 시트에는 버튼을 생성할 수 없습니다.", vbExclamation
         Exit Sub
     End If
@@ -433,6 +437,7 @@ Private Sub CreateGanttActionButton(ByVal ws As Worksheet, _
     End With
 
     If wasProtected Then
+        If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
         lastRow = GetLastDataRow(ws)
         If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
         ApplyCalculatedColumnsProtection ws, lastRow
@@ -446,6 +451,7 @@ Private Sub CreateGanttActionButton(ByVal ws As Worksheet, _
 EH:
     If wasProtected Then
         On Error Resume Next
+        If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
         lastRow = GetLastDataRow(ws)
         If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
         ApplyCalculatedColumnsProtection ws, lastRow
@@ -607,6 +613,7 @@ Private Sub ClearOrphanGanttPptCellIcons(ByVal ws As Worksheet)
     Dim r As Long
     Dim noteCell As Range
 
+    If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then Exit Sub
 

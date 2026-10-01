@@ -5,7 +5,7 @@ Private Const TASK_VALIDATION_MIN_LAST_ROW As Long = 5000
 Private Const TASK_VALIDATION_EXTRA_ROWS As Long = 1000
 
 Public Sub SetupDataHeaders(ws As Worksheet)
-    NormalizeSheetStructure ws
+    EnsureTaskSheetLayout ws
 
     ws.Cells(HEADER_ROW, COL_NO).Value = "No."
     ws.Cells(HEADER_ROW, COL_LEVEL).Value = "Level"
@@ -13,7 +13,8 @@ Public Sub SetupDataHeaders(ws As Worksheet)
     ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value = "대분류"
     ws.Cells(HEADER_ROW, COL_MIDDLE_CATEGORY).Value = "중분류"
     ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value = "소분류"
-    ws.Cells(HEADER_ROW, COL_TASK).Value = "내용"
+    ws.Cells(HEADER_ROW, COL_REQUEST).Value = "요청 내용"
+    ws.Cells(HEADER_ROW, COL_MODIFICATION).Value = "수정 내용"
     ws.Cells(HEADER_ROW, COL_OWNER).Value = "담당"
     ws.Cells(HEADER_ROW, COL_NOTE).Value = "비고"
     ws.Cells(HEADER_ROW, COL_PLAN_START).Value = "계획 시작일"
@@ -24,7 +25,7 @@ Public Sub SetupDataHeaders(ws As Worksheet)
     ws.Cells(HEADER_ROW, COL_NORMAL_PROGRESS).Value = "정상 진행률"
     ws.Cells(HEADER_ROW, COL_MANUAL_PROGRESS).Value = "진행률 수동"
     ws.Cells(HEADER_ROW, COL_MANUAL_STATUS).Value = "상태 수동"
-    ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value = "주간보고"
+    ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value = "보고 상태"
     ws.Cells(HEADER_ROW, COL_PLAN_DAYS).Value = "계획일수"
     ws.Cells(HEADER_ROW, COL_ACTUAL_DAYS).Value = "실소요일수"
     ws.Cells(HEADER_ROW, COL_STATUS).Value = "상태"
@@ -68,21 +69,37 @@ Public Sub UpdateTaskNumbers(ws As Worksheet, ByVal lastRow As Long)
     Next r
 End Sub
 
-Private Sub NormalizeSheetStructure(ws As Worksheet)
+Public Sub EnsureTaskSheetLayout(ByVal ws As Worksheet)
     Dim i As Long
     Dim r As Long
     Dim lastMigrationRow As Long
     Dim manualStatusText As String
     Dim targetRange As Range
     Dim lo As ListObject
+    Dim previousEnableEvents As Boolean
+    Dim wasProtected As Boolean
+    Dim errorNumber As Long
+    Dim errorDescription As String
+
+    If ws Is Nothing Then Exit Sub
+    If ws.Name = CONFIG_SHEET_NAME Or _
+       ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
+
+    previousEnableEvents = Application.EnableEvents
+    wasProtected = (ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios)
+    On Error GoTo MigrationError
+    Application.EnableEvents = False
+    If wasProtected Then ws.Unprotect
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_NO).Value)) <> "No." Then
         ws.Columns(COL_NO).Insert Shift:=xlToRight
     End If
+    ws.Cells(HEADER_ROW, COL_NO).Value = "No."
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_TYPE).Value)) <> "타입" Then
         ws.Columns(COL_TYPE).Insert Shift:=xlToRight
     End If
+    ws.Cells(HEADER_ROW, COL_TYPE).Value = "타입"
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value)) <> "대분류" Then
         If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value)) = "모듈" Then
@@ -91,10 +108,12 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
             ws.Columns(COL_MAJOR_CATEGORY).Insert Shift:=xlToRight
         End If
     End If
+    ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value = "대분류"
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MIDDLE_CATEGORY).Value)) <> "중분류" Then
         ws.Columns(COL_MIDDLE_CATEGORY).Insert Shift:=xlToRight
     End If
+    ws.Cells(HEADER_ROW, COL_MIDDLE_CATEGORY).Value = "중분류"
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value)) <> "소분류" Then
         If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value)) = "프로그램" Then
@@ -103,28 +122,47 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
             ws.Columns(COL_MINOR_CATEGORY).Insert Shift:=xlToRight
         End If
     End If
+    ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value = "소분류"
+
+    ' Insert the second content column once. Excel shifts values, formulas and
+    ' cell-anchored embedded objects together; the old H content remains intact.
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MODIFICATION).Value)) <> "수정 내용" Then
+        ws.Columns(COL_MODIFICATION).Insert Shift:=xlToRight
+        ws.Columns(COL_MODIFICATION).ColumnWidth = ws.Columns(COL_REQUEST).ColumnWidth
+        On Error Resume Next
+        ws.Columns(COL_MODIFICATION).Validation.Delete
+        On Error GoTo MigrationError
+    End If
+    ws.Cells(HEADER_ROW, COL_REQUEST).Value = "요청 내용"
+    ws.Cells(HEADER_ROW, COL_MODIFICATION).Value = "수정 내용"
 
     If Trim$(CStr(ws.Cells(HEADER_ROW, COL_OWNER).Value)) <> "담당" Then
         ws.Columns(COL_OWNER).Insert Shift:=xlToRight
     End If
+    ws.Cells(HEADER_ROW, COL_OWNER).Value = "담당"
 
     ' Newly inserted classification columns can inherit validation from adjacent cells.
     On Error Resume Next
     ws.Range(COL_TYPE & DATA_START_ROW & ":" & _
              COL_MINOR_CATEGORY & ws.Rows.Count).Validation.Delete
-    On Error GoTo 0
+    On Error GoTo MigrationError
+    EnsureTaskTypeConfig
+    ApplyTaskTypeValidation ws
 
     ' Remove the retired development-report column from existing workbooks.
     If Trim$(CStr(ws.Range(COL_WEEKLY_REPORT & HEADER_ROW).Value)) = "개발진행" Then
         ws.Columns(COL_WEEKLY_REPORT).Delete Shift:=xlToLeft
     End If
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" Then
+    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "보고 상태" And _
+       Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" Then
         ws.Columns(COL_WEEKLY_REPORT).Insert Shift:=xlToRight
     End If
+    ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value = "보고 상태"
 
     lastMigrationRow = Application.Max( _
-        ws.Cells(ws.Rows.Count, COL_TASK).End(xlUp).Row, _
+        ws.Cells(ws.Rows.Count, COL_REQUEST).End(xlUp).Row, _
+        ws.Cells(ws.Rows.Count, COL_MODIFICATION).End(xlUp).Row, _
         ws.Cells(ws.Rows.Count, COL_MANUAL_STATUS).End(xlUp).Row)
 
     For r = DATA_START_ROW To lastMigrationRow
@@ -143,7 +181,7 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
 
     On Error Resume Next
     If ws.AutoFilterMode Then ws.AutoFilterMode = False
-    On Error GoTo 0
+    On Error GoTo MigrationError
 
     For i = ws.ListObjects.Count To 1 Step -1
         Set lo = ws.ListObjects(i)
@@ -151,6 +189,27 @@ Private Sub NormalizeSheetStructure(ws As Worksheet)
             lo.Unlist
         End If
     Next i
+
+    If wasProtected Then
+        lastMigrationRow = GetLastDataRow(ws)
+        If lastMigrationRow < DATA_START_ROW Then lastMigrationRow = DATA_START_ROW
+        ApplyCalculatedColumnsProtection ws, lastMigrationRow
+    End If
+    Application.EnableEvents = previousEnableEvents
+    Exit Sub
+
+MigrationError:
+    errorNumber = Err.Number
+    errorDescription = Err.Description
+    On Error Resume Next
+    If wasProtected Then
+        ws.Protect DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+                   UserInterfaceOnly:=True, AllowFiltering:=True, _
+                   AllowInsertingRows:=True, AllowDeletingRows:=True
+    End If
+    Application.EnableEvents = previousEnableEvents
+    On Error GoTo 0
+    Err.Raise errorNumber, "EnsureTaskSheetLayout", errorDescription
 End Sub
 
 Public Sub ClearCalculatedArea(ws As Worksheet, ByVal lastRow As Long)
@@ -875,6 +934,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
             baseTaskText = RemoveTaskLevelPrefix(CStr(ws.Cells(r, COL_TASK).Value))
             ws.Cells(r, COL_TASK).Value = BuildTaskDisplayText(baseTaskText, levelValue)
             ws.Cells(r, COL_TASK).HorizontalAlignment = xlLeft
+            ws.Cells(r, COL_MODIFICATION).HorizontalAlignment = xlLeft
             
             ws.Cells(r, COL_NO).HorizontalAlignment = xlCenter
             ws.Cells(r, COL_NO).VerticalAlignment = xlCenter
@@ -951,12 +1011,12 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
 
     ws.Columns(COL_NO).ColumnWidth = 6
     ws.Columns(COL_LEVEL).ColumnWidth = 7
-    ws.Columns(COL_TASK).WrapText = False
+    ws.Range(COL_REQUEST & ":" & COL_MODIFICATION).WrapText = False
     ws.Columns(COL_TYPE).ColumnWidth = 12
     ws.Columns(COL_MAJOR_CATEGORY).ColumnWidth = 14
     ws.Columns(COL_MIDDLE_CATEGORY).ColumnWidth = 14
     ws.Columns(COL_MINOR_CATEGORY).ColumnWidth = 14
-    ws.Columns(COL_TASK).AutoFit
+    ws.Range(COL_REQUEST & ":" & COL_MODIFICATION).Columns.AutoFit
     ws.Columns(COL_OWNER).ColumnWidth = 12
     ws.Columns(COL_NOTE).ColumnWidth = 4.5
     ws.Columns(COL_PLAN_START).ColumnWidth = 11
@@ -975,7 +1035,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ' 새로고침 후 화면의 문자열이 열 너비 때문에 잘리지 않도록
     ' 분류, 업무명, 담당자 및 상태 열을 실제 내용에 맞춘다.
     ws.Range(COL_NO & HEADER_ROW & ":" & _
-             COL_TASK & lastRow).Columns.AutoFit
+             COL_MODIFICATION & lastRow).Columns.AutoFit
     ws.Range(COL_OWNER & HEADER_ROW & ":" & _
              COL_OWNER & lastRow).Columns.AutoFit
     ws.Range(COL_MANUAL_STATUS & HEADER_ROW & ":" & _
@@ -1005,12 +1065,13 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
     Dim changedClassificationOrLevel As Boolean
 
     If ws Is Nothing Or Target Is Nothing Then Exit Sub
-    If ws.Name = CONFIG_SHEET_NAME Then Exit Sub
+    If ws.Name = CONFIG_SHEET_NAME Or _
+       ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
 
     Set watchedRange = Union( _
         ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
         ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_MINOR_CATEGORY & ws.Rows.Count), _
-        ws.Range(COL_TASK & DATA_START_ROW & ":" & COL_TASK & ws.Rows.Count), _
+        ws.Range(COL_REQUEST & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count), _
         ws.Range(COL_OWNER & DATA_START_ROW & ":" & COL_OWNER & ws.Rows.Count))
     Set changedRange = Intersect(Target, watchedRange)
     If changedRange Is Nothing Then Exit Sub
@@ -1168,7 +1229,7 @@ Public Sub ShowTaskInputErrorReasons(ByVal ws As Worksheet, ByVal lastRow As Lon
             If errorCount <= MAX_DISPLAY_ERROR_COUNT Then
                 taskText = Trim$(CStr(ws.Cells(r, COL_TASK).Value2))
                 taskNo = Trim$(CStr(ws.Cells(r, COL_NO).Value2))
-                If Len(taskText) = 0 Then taskText = "내용 미입력"
+                If Len(taskText) = 0 Then taskText = "요청 내용 미입력"
                 If Len(taskNo) = 0 Then taskNo = "-"
 
                 If Len(errorText) > 0 Then errorText = errorText & vbCrLf
@@ -1289,7 +1350,7 @@ Private Sub AppendModuleConsistencyIssue(ByRef issueMessages As String, _
                                          ByVal rowNum As Long, _
                                          ByVal taskText As String, _
                                          ByVal reasonText As String)
-    If Len(taskText) = 0 Then taskText = "내용 미입력"
+    If Len(taskText) = 0 Then taskText = "요청 내용 미입력"
     If Len(issueMessages) > 0 Then issueMessages = issueMessages & vbCrLf
     issueMessages = issueMessages & "- 행 " & rowNum & " [" & taskText & "]: " & reasonText
 End Sub
@@ -1311,6 +1372,8 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
     rngClassification.Validation.Delete
     On Error GoTo 0
 
+    EnsureTaskTypeConfig
+    ApplyTaskTypeValidation ws
     ApplyTaskTextLengthValidation ws
     
     Set rngDate = Union( _
@@ -1407,7 +1470,7 @@ Public Sub ApplyTaskInputValidation(ws As Worksheet)
                                    Formula1:=REPORT_STATUS_PLANNED & "," & REPORT_STATUS_IN_PROGRESS & "," & REPORT_STATUS_COMPLETED
     rngWeeklyReport.Validation.IgnoreBlank = True
     rngWeeklyReport.Validation.InCellDropdown = True
-    rngWeeklyReport.Validation.InputTitle = "주간보고 상태"
+    rngWeeklyReport.Validation.InputTitle = "보고 상태"
     rngWeeklyReport.Validation.InputMessage = "Planned, In Progress, Completed를 선택하세요."
     rngWeeklyReport.Validation.ErrorTitle = "입력 오류"
     rngWeeklyReport.Validation.ErrorMessage = "Planned, In Progress, Completed만 입력할 수 있습니다."
@@ -1418,6 +1481,8 @@ End Sub
 Public Sub ApplyTaskTextLengthValidation(ByVal ws As Worksheet)
     Dim lastValidationRow As Long
     Dim rngTask As Range
+    Dim contentColumn As Variant
+    Dim contentLabel As String
     Dim validationFormula As String
 
     If ws Is Nothing Then Exit Sub
@@ -1428,34 +1493,41 @@ Public Sub ApplyTaskTextLengthValidation(ByVal ws As Worksheet)
     End If
     If lastValidationRow > ws.Rows.Count Then lastValidationRow = ws.Rows.Count
 
-    Set rngTask = ws.Range(COL_TASK & DATA_START_ROW & ":" & _
-                           COL_TASK & lastValidationRow)
+    For Each contentColumn In Array(COL_REQUEST, COL_MODIFICATION)
+        Set rngTask = ws.Range(CStr(contentColumn) & DATA_START_ROW & ":" & _
+                               CStr(contentColumn) & lastValidationRow)
 
-    On Error Resume Next
-    rngTask.Validation.Delete
-    On Error GoTo 0
+        On Error Resume Next
+        rngTask.Validation.Delete
+        On Error GoTo 0
 
-    validationFormula = "=LEN(" & COL_TASK & DATA_START_ROW & ")<=" & _
-        "IF(" & COL_LEVEL & DATA_START_ROW & "=2," & _
-        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
-        TASK_MAX_LENGTH_LEVEL2_VALUE_CELL & """)," & _
-        "IF(" & COL_LEVEL & DATA_START_ROW & "=3," & _
-        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
-        TASK_MAX_LENGTH_LEVEL3_VALUE_CELL & """)," & _
-        "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
-        TASK_MAX_LENGTH_LEVEL1_VALUE_CELL & """)))"
+        validationFormula = "=LEN(" & CStr(contentColumn) & DATA_START_ROW & ")<=" & _
+            "IF($" & COL_LEVEL & DATA_START_ROW & "=2," & _
+            "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+            TASK_MAX_LENGTH_LEVEL2_VALUE_CELL & """)," & _
+            "IF($" & COL_LEVEL & DATA_START_ROW & "=3," & _
+            "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+            TASK_MAX_LENGTH_LEVEL3_VALUE_CELL & """)," & _
+            "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
+            TASK_MAX_LENGTH_LEVEL1_VALUE_CELL & """)))"
 
-    rngTask.Validation.Add Type:=xlValidateCustom, _
-                           AlertStyle:=xlValidAlertStop, _
-                           Formula1:=validationFormula
-    rngTask.Validation.IgnoreBlank = True
-    rngTask.Validation.InputTitle = "내용 입력"
-    rngTask.Validation.InputMessage = _
-        "내용은 config 시트의 Level별 최대 글자 수 이내로 입력하세요."
-    rngTask.Validation.ErrorTitle = "내용 글자 수 초과"
-    rngTask.Validation.ErrorMessage = _
-        "입력한 내용이 현재 Level에 설정된 최대 글자 수를 초과했습니다. " & _
-        "config 시트의 입력 제한 설정을 확인하세요."
+        If CStr(contentColumn) = COL_REQUEST Then
+            contentLabel = "요청 내용"
+        Else
+            contentLabel = "수정 내용"
+        End If
+        rngTask.Validation.Add Type:=xlValidateCustom, _
+                               AlertStyle:=xlValidAlertStop, _
+                               Formula1:=validationFormula
+        rngTask.Validation.IgnoreBlank = True
+        rngTask.Validation.InputTitle = contentLabel & " 입력"
+        rngTask.Validation.InputMessage = _
+            contentLabel & "은 config 시트의 Level별 최대 글자 수 이내로 입력하세요."
+        rngTask.Validation.ErrorTitle = contentLabel & " 글자 수 초과"
+        rngTask.Validation.ErrorMessage = _
+            "입력한 " & contentLabel & "이 현재 Level에 설정된 최대 글자 수를 초과했습니다. " & _
+            "config 시트의 입력 제한 설정을 확인하세요."
+    Next contentColumn
 End Sub
 
 Private Sub ApplyManualStatusValidation(ws As Worksheet, ByVal lastSheetRow As Long)

@@ -10,7 +10,8 @@ Public Function GetLastDataRow(ws As Worksheet) As Long
     lastRow = HEADER_ROW
 
     For Each colAddr In Array(COL_LEVEL, COL_TYPE, COL_MAJOR_CATEGORY, _
-                              COL_MIDDLE_CATEGORY, COL_MINOR_CATEGORY, COL_TASK, _
+                              COL_MIDDLE_CATEGORY, COL_MINOR_CATEGORY, COL_REQUEST, _
+                              COL_MODIFICATION, _
                               COL_NOTE, COL_PLAN_START, COL_PLAN_END, _
                               COL_ACTUAL_START, COL_ACTUAL_END, _
                               COL_MANUAL_STATUS, COL_WEEKLY_REPORT)
@@ -124,7 +125,8 @@ Public Function CountWorkingDaysInclusive(ByVal startDate As Variant, ByVal endD
 End Function
 
 Public Function HasTaskContent(ws As Worksheet, ByVal rowNum As Long) As Boolean
-    HasTaskContent = Len(Trim$(CStr(ws.Cells(rowNum, COL_TASK).Value))) > 0
+    HasTaskContent = (Len(Trim$(CStr(ws.Cells(rowNum, COL_REQUEST).Value))) > 0 Or _
+                      Len(Trim$(CStr(ws.Cells(rowNum, COL_MODIFICATION).Value))) > 0)
 End Function
 
 Public Function HasAnyTaskDate(ws As Worksheet, ByVal rowNum As Long) As Boolean
@@ -143,6 +145,7 @@ Public Function HasAnyTaskInput(ws As Worksheet, ByVal rowNum As Long) As Boolea
         Len(Trim$(CStr(ws.Cells(rowNum, COL_MIDDLE_CATEGORY).Value))) > 0 Or _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_MINOR_CATEGORY).Value))) > 0 Or _
         HasTaskContent(ws, rowNum) Or _
+        Len(Trim$(CStr(ws.Cells(rowNum, COL_MODIFICATION).Value))) > 0 Or _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_NOTE).Value))) > 0 Or _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value))) > 0 Or _
         Len(Trim$(CStr(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value))) > 0 Or _
@@ -225,6 +228,7 @@ Public Function GetTaskErrorReason(ws As Worksheet, ByVal rowNum As Long) As Str
     Dim hasActS As Boolean
     Dim hasActE As Boolean
     Dim taskText As String
+    Dim modificationText As String
     Dim rawLevel As Variant
     Dim taskLevel As Long
     Dim parentRow As Long
@@ -237,7 +241,8 @@ Public Function GetTaskErrorReason(ws As Worksheet, ByVal rowNum As Long) As Str
     planE = ws.Cells(rowNum, COL_PLAN_END).Value
     actS = ws.Cells(rowNum, COL_ACTUAL_START).Value
     actE = ws.Cells(rowNum, COL_ACTUAL_END).Value
-    taskText = CStr(ws.Cells(rowNum, COL_TASK).Value2)
+    taskText = CStr(ws.Cells(rowNum, COL_REQUEST).Value2)
+    modificationText = CStr(ws.Cells(rowNum, COL_MODIFICATION).Value2)
     rawLevel = ws.Cells(rowNum, COL_LEVEL).Value2
     
     If Not HasAnyTaskInput(ws, rowNum) Then
@@ -260,14 +265,23 @@ Public Function GetTaskErrorReason(ws As Worksheet, ByVal rowNum As Long) As Str
     maxTaskLength = GetTaskMaxLength(taskLevel)
     If Len(taskText) > maxTaskLength Then
         GetTaskErrorReason = "Level " & taskLevel & _
-                             " 내용이 config 시트의 최대 글자 수(" & _
+                             " 요청 내용이 config 시트의 최대 글자 수(" & _
                              maxTaskLength & "자)를 초과했습니다. 현재 " & _
                              Len(taskText) & "자입니다."
         Exit Function
     End If
     
-    If Not HasTaskContent(ws, rowNum) And HasAnyTaskDate(ws, rowNum) Then
-        GetTaskErrorReason = "날짜가 입력되어 있지만 내용이 비어 있습니다."
+    If Len(modificationText) > maxTaskLength Then
+        GetTaskErrorReason = "Level " & taskLevel & _
+                             " 수정 내용이 config 시트의 최대 글자 수(" & _
+                             maxTaskLength & "자)를 초과했습니다. 현재 " & _
+                             Len(modificationText) & "자입니다."
+        Exit Function
+    End If
+
+    If Not HasTaskContent(ws, rowNum) And _
+       (HasAnyTaskDate(ws, rowNum) Or Len(Trim$(modificationText)) > 0) Then
+        GetTaskErrorReason = "날짜 또는 수정 내용이 입력되어 있지만 요청 내용이 비어 있습니다."
         Exit Function
     End If
     
