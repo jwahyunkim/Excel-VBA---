@@ -38,7 +38,8 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
            Not Intersect(Target, Sh.Range(TASK_MAX_LENGTH_VALUE_RANGE)) Is Nothing Then
             Application.enableEvents = False
             RefreshTaskTextLengthValidation
-        ElseIf Not Intersect( _
+        ElseIf Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME And _
+               Not Intersect( _
                        Target, _
                        Sh.Range(WR_CUSTOM_PATH_COLUMN & _
                                 CStr(WR_CUSTOM_START_ROW) & ":" & _
@@ -83,7 +84,7 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     On Error GoTo SafeExit
 
     If Not TypeOf Sh Is Worksheet Then Exit Sub
-    If Sh.Name <> CONFIG_SHEET_NAME Then Exit Sub
+    If Sh.Name <> WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
 
     Application.enableEvents = False
     RefreshWeeklyReportModuleDropdown
