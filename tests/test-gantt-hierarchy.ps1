@@ -236,6 +236,20 @@ End Function
     $taskExcel.EnableEvents = $true
     $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
     $taskSheet = $taskBook.Worksheets.Item('Sheet1')
+    if (-not $taskBook.Saved) {
+        throw 'Opening the workbook dirtied it during hierarchy initialization'
+    }
+    # An actual unsaved input edit must remain unsaved after initialization.
+    $taskExcel.EnableEvents = $false
+    $taskOwnerBefore = $taskSheet.Range('J52').Value2
+    $taskSheet.Range('J52').Value2 = [string]$taskOwnerBefore + ' regression edit'
+    $taskExcel.Run("'$($taskBook.Name)'!InitializeTaskHierarchyOutlines")
+    if ($taskBook.Saved) {
+        throw 'Hierarchy initialization hid an existing unsaved input edit'
+    }
+    $taskSheet.Range('J52').Value2 = $taskOwnerBefore
+    $taskBook.Saved = $true
+    $taskExcel.EnableEvents = $true
     if (-not $taskSheet.ProtectContents -or -not $taskSheet.EnableOutlining) {
         throw 'Saved workbook did not restore protected outlines on open'
     }
@@ -273,7 +287,7 @@ End Function
     $taskBook.Close($false)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
     $taskBook = $null
-    Write-Output 'PASS: reopen, protected collapse/expand and full Gantt refresh'
+    Write-Output 'PASS: clean reopen, preserved unsaved edits, protected collapse/expand and full Gantt refresh'
     if ($SavePath) {
         Copy-Item -LiteralPath $taskTemp -Destination ([IO.Path]::GetFullPath($SavePath))
         Write-Output ('UPDATED COPY: ' + [IO.Path]::GetFullPath($SavePath))

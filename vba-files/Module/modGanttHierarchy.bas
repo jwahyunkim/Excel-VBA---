@@ -3,6 +3,8 @@ Option Explicit
 
 Public Sub InitializeTaskHierarchyOutlines()
     Dim ws As Worksheet
+    Dim wasSaved As Boolean
+    wasSaved = ThisWorkbook.Saved
     For Each ws In ThisWorkbook.Worksheets
         If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) = "No." And _
            CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) = "Level" Then
@@ -12,6 +14,8 @@ Public Sub InitializeTaskHierarchyOutlines()
             ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
         End If
     Next ws
+    ' Session-only protection restoration must not dirty a saved workbook.
+    If wasSaved Then ThisWorkbook.Saved = True
 End Sub
 
 ' Visual hierarchy and native outlines share the same subtree boundaries as
