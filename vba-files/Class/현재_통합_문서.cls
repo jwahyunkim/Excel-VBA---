@@ -12,10 +12,13 @@ Option Explicit
 Private Sub Workbook_Open()
     InitializeReleaseSecurity
     InitializeTaskHierarchyOutlines
+    StartTaskOutlineViewMonitor
 End Sub
 
 Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+    StopTaskOutlineViewMonitor
     PrepareReleaseForSave SaveAsUI, Cancel
+    If Cancel Then StartTaskOutlineViewMonitor
 End Sub
 
 Private Sub Workbook_SheetDeactivate(ByVal Sh As Object)
@@ -35,6 +38,11 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
 
     If Sh.Name = CONFIG_SHEET_NAME Or _
        Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
+        If Sh.Name = CONFIG_SHEET_NAME And _
+           Not Intersect(Target, Sh.Range(TASK_FOLD_SETTING_VALUE_RANGE)) Is Nothing Then
+            Application.enableEvents = False
+            ApplyTaskDetailColumnSettings
+        End If
         If Sh.Name = CONFIG_SHEET_NAME And _
            Not Intersect(Target, Sh.Range(TASK_TYPE_CONFIG_RANGE)) Is Nothing Then
             Application.enableEvents = False
@@ -103,6 +111,7 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     On Error GoTo SafeExit
 
     If Not TypeOf Sh Is Worksheet Then Exit Sub
+    StartTaskOutlineViewMonitor
     If Sh.Name <> WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
 
     Application.enableEvents = False
@@ -129,4 +138,24 @@ Private Sub Workbook_SheetFollowHyperlink(ByVal Sh As Object, ByVal Target As Hy
     칸트차트_PPT셀아이콘열기 Sh, anchorCell.Row
 
 SafeExit:
+End Sub
+
+Private Sub Workbook_Activate()
+    StartTaskOutlineViewMonitor
+End Sub
+
+Private Sub Workbook_Deactivate()
+    StopTaskOutlineViewMonitor
+End Sub
+
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    StopTaskOutlineViewMonitor
+End Sub
+
+Private Sub Workbook_AfterSave(ByVal Success As Boolean)
+    StartTaskOutlineViewMonitor
+End Sub
+
+Private Sub Workbook_SheetSelectionChange(ByVal Sh As Object, ByVal Target As Range)
+    StartTaskOutlineViewMonitor
 End Sub
