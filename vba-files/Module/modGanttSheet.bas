@@ -250,6 +250,7 @@ Public Sub ClearGanttArea(ws As Worksheet)
     Dim startCol As Long
     Dim lastCol As Long
 
+    ClearTaskBarVisuals ws
     startCol = ws.Range(COL_GANTT_START & "1").Column
     lastCol = ws.Columns.Count
 

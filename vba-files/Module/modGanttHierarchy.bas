@@ -139,6 +139,7 @@ NextGroup:
     Next r
 
     RebuildTaskHierarchyOutline ws, lastRow
+    RenderHierarchyTaskBars ws, lastRow, startCol, endCol
 End Sub
 
 Private Sub SetHierarchyRule(ByVal target As Range, ByVal edge As XlBordersIndex, _
