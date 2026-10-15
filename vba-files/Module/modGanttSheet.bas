@@ -932,7 +932,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
             
             levelValue = GetTaskLevel(ws, r)
             baseTaskText = RemoveTaskLevelPrefix(CStr(ws.Cells(r, COL_TASK).Value))
-            ws.Cells(r, COL_TASK).Value = BuildTaskDisplayText(baseTaskText, levelValue)
+            ws.Cells(r, COL_TASK).Value = baseTaskText
             ws.Cells(r, COL_TASK).HorizontalAlignment = xlLeft
             ws.Cells(r, COL_MODIFICATION).HorizontalAlignment = xlLeft
             
@@ -1052,6 +1052,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Range(COL_PLAN_START & DATA_START_ROW & ":" & COL_ACTUAL_END & lastRow).NumberFormat = "yyyy-mm-dd"
     ws.Range(COL_PROGRESS & DATA_START_ROW & ":" & COL_PROGRESS & lastRow).NumberFormat = "0%"
     ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).NumberFormat = "0%"
+    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol
     ActiveWindow.DisplayGridlines = False
 End Sub
 
@@ -1756,6 +1757,7 @@ Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Lo
     ws.Protect DrawingObjects:=False, Contents:=True, Scenarios:=True, _
                UserInterfaceOnly:=True, AllowFiltering:=True, _
                AllowInsertingRows:=True, AllowDeletingRows:=True
+    ws.EnableOutlining = True
 End Sub
 
 Public Sub UnprotectTaskSheet(ws As Worksheet)
