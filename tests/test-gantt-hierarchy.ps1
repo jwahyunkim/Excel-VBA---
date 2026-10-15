@@ -87,6 +87,7 @@ Public Function RunGanttHierarchyRegression() As String
     Dim holidays As Object, workdays As Object, firstDate As Date, lastDate As Date
     Dim lastRow As Long, lastCol As Long, taskCol As Long
     Dim existingShape As Shape, unrelatedShapeCount As Long
+    Dim edge As Variant, edgeColor As Long
     On Error GoTo Failed
     Application.EnableEvents = False
     Set original = ThisWorkbook.Worksheets("Sheet1")
@@ -171,11 +172,34 @@ Public Function RunGanttHierarchyRegression() As String
     Check original.Range("AL53").Interior.Color = RGB(52, 120, 212), "53 child cell"
     Check original.Range("AL61").Interior.Color = RGB(0, 140, 134), "61 detail cell"
     Check original.Range("AJ52").Interior.Color = RGB(203, 213, 225), "52 plan cell"
-    Check CStr(original.Range("AL52").Value2) = "1", "52 level caption"
-    Check CStr(original.Range("AL53").Value2) = "2", "53 level caption"
-    Check CStr(original.Range("AL61").Value2) = "3", "61 level caption"
+    Check Application.CountA(original.Range("X5:BA" & lastRow)) = 0, "timeline captions remain"
+    Check Application.CountA(original.Range("L3:W3")) = 0, "legend remains"
+    Check original.Range("AL52").Borders(xlEdgeRight).Color = RGB(22, 163, 74), "52 right status"
+    Check original.Range("AL52").Borders(xlEdgeBottom).Color <> RGB(22, 163, 74), "52 bottom status remains"
+    Check original.Range("AJ59").Borders(xlEdgeTop).Color = RGB(99, 102, 241), "combined group top"
+    Check original.Range("AK59").Borders(xlEdgeTop).Color = RGB(99, 102, 241), "combined frame bridges plan/actual gap"
+    Check original.Range("AK74").Borders(xlEdgeBottom).Color = RGB(99, 102, 241), "combined group bottom bridges gap"
+    Check original.Range("AJ64").Borders(xlEdgeLeft).Color = RGB(99, 102, 241), "combined group left"
+    For r = 60 To 73
+        Check original.Cells(r, "AK").Borders(xlEdgeTop).Color <> RGB(99, 102, 241), "internal child top frame remains row " & r
+        Check original.Cells(r, "AK").Borders(xlEdgeBottom).Color <> RGB(99, 102, 241), "internal child bottom frame remains row " & r
+        Check original.Cells(r, "AL").Borders(xlEdgeRight).Color = RGB(22, 163, 74), "descendant status right lost row " & r
+    Next r
+    Check original.Range("AL61").Borders(xlEdgeLeft).Color <> RGB(99, 102, 241), "separate actual outline remains"
+    ' The removed table boxes must not return in task columns or unused dates.
+    For r = 52 To 74
+        For c = 2 To lastCol
+            If c < taskCol Or c <= original.Range("AH1").Column Or c >= original.Range("AN1").Column Then
+                For Each edge In Array(xlEdgeTop, xlEdgeBottom, xlEdgeLeft, xlEdgeRight)
+                    edgeColor = original.Cells(r, c).Borders(edge).Color
+                    Check edgeColor <> RGB(124, 58, 237) And edgeColor <> RGB(6, 182, 212) And _
+                          edgeColor <> RGB(13, 148, 136) And edgeColor <> RGB(99, 102, 241), "bar outline outside its dates row " & r & " col " & c
+                Next edge
+            End If
+        Next c
+    Next r
     Check original.Shapes.Count = unrelatedShapeCount, "new drawing objects remain or existing buttons lost"
-    RunGanttHierarchyRegression = "PASS: nested outlines, protected collapse/expand, input preservation, cell hierarchy, calendar and no inserted drawing objects"
+    RunGanttHierarchyRegression = "PASS: one frame per level-1 task with all descendants, no child frames, combined plan/actual gap coverage, right status, no legend/captions, protected outlines and input preservation"
     Exit Function
 Failed:
     RunGanttHierarchyRegression = "FAIL: " & Err.Description
@@ -224,6 +248,22 @@ End Function
     $taskExcel.Run("'$($taskBook.Name)'!RefreshGanttSheet", $false)
     if ($taskSheet.Rows.Item(53).OutlineLevel -ne 2 -or $taskSheet.Rows.Item(61).OutlineLevel -ne 3) {
         throw 'Refresh changed the outline depth'
+    }
+    if ($taskExcel.WorksheetFunction.CountA($taskSheet.Range('L3:W3')) -ne 0 -or
+        $taskExcel.WorksheetFunction.CountA($taskSheet.Range('X5:BA74')) -ne 0) {
+        throw 'Refresh restored a legend or timeline caption'
+    }
+    if ($taskSheet.Range('AL52').Borders.Item(10).Color -ne 4891414 -or
+        $taskSheet.Range('AK59').Borders.Item(8).Color -ne 15820387 -or
+        $taskSheet.Range('AK74').Borders.Item(9).Color -ne 15820387) {
+        throw 'Refresh changed status or combined plan/actual frames'
+    }
+    for ($taskRow = 60; $taskRow -le 73; $taskRow++) {
+        if ($taskSheet.Cells.Item($taskRow, 37).Borders.Item(8).Color -eq 15820387 -or
+            $taskSheet.Cells.Item($taskRow, 37).Borders.Item(9).Color -eq 15820387 -or
+            $taskSheet.Cells.Item($taskRow, 38).Borders.Item(10).Color -ne 4891414) {
+            throw "Refresh restored a child frame or lost status at row $taskRow"
+        }
     }
     foreach ($taskShape in $taskSheet.Shapes) {
         if ($taskShape.Name.StartsWith('gtBar_') -or $taskShape.Name.StartsWith('gtKey_')) {

@@ -21,7 +21,6 @@ Public Sub ApplyTaskHierarchyAppearance(ByVal ws As Worksheet, ByVal lastRow As 
     Dim r As Long
     Dim c As Long
     Dim taskLevel As Long
-    Dim groupEnd As Long
     Dim hasChildren As Boolean
     Dim inRootGroup As Boolean
     Dim isWarning As Boolean
@@ -114,29 +113,6 @@ NextTask:
 
     ' Fit the final bold text and native indentation, not the old text prefixes.
     ws.Range(COL_REQUEST & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
-
-    ' Draw enclosing rails after all individual row borders are in place.
-    For r = DATA_START_ROW To lastRow
-        If Not HasTaskContent(ws, r) Then GoTo NextGroup
-        If Not HasChildTask(ws, r, lastRow) Then GoTo NextGroup
-        groupEnd = GetVisibleTaskSubtreeEnd(ws, r, lastRow)
-        taskLevel = GetTaskLevel(ws, r)
-
-        If taskLevel = 1 Then
-            Set rowRange = ws.Range(COL_NO & r & ":" & COL_NO & groupEnd)
-            SetHierarchyRule rowRange, xlEdgeLeft, RGB(68, 96, 122), xlMedium
-            Set rowRange = ws.Range(ws.Cells(groupEnd, ws.Range(COL_NO & "1").Column), _
-                                    ws.Cells(groupEnd, endCol))
-            SetHierarchyRule rowRange, xlEdgeBottom, RGB(68, 96, 122), xlMedium
-        ElseIf taskLevel = 2 Then
-            Set rowRange = ws.Range(COL_REQUEST & r & ":" & COL_REQUEST & groupEnd)
-            SetHierarchyRule rowRange, xlEdgeLeft, RGB(143, 166, 187), xlMedium
-            Set rowRange = ws.Range(ws.Cells(r, ws.Range(COL_REQUEST & "1").Column), _
-                                    ws.Cells(r, endCol))
-            SetHierarchyRule rowRange, xlEdgeTop, RGB(164, 183, 201), xlThin
-        End If
-NextGroup:
-    Next r
 
     RebuildTaskHierarchyOutline ws, lastRow
     RenderHierarchyTaskBars ws, lastRow, startCol, endCol

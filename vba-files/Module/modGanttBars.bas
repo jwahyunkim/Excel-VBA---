@@ -3,6 +3,7 @@ Option Explicit
 
 Private Const BAR_PREFIX As String = "gtBar_"
 Private Const KEY_PREFIX As String = "gtKey_"
+Private Const FRAME_COLOR As Long = 15820387 ' RGB(99, 102, 241)
 
 ' Remove objects left by the previous implementation. All current output
 ' uses native cells and formatting; no drawing objects are created.
@@ -26,9 +27,11 @@ Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long,
     Dim inRootGroup As Boolean, hasChildren As Boolean
     Dim planStart As Variant, planEnd As Variant
     Dim actualStart As Variant, actualEnd As Variant, drawEnd As Variant
-    Dim actualMarker As Variant, planMarker As Variant
+    Dim statusDate As Variant
     Dim blankFill As Long
     Dim cell As Range, timeline As Range
+    Dim barMask() As Boolean
+    Dim statusCols() As Long
 
     ClearTaskBarVisuals ws
     If lastRow < DATA_START_ROW Or endCol < startCol Then Exit Sub
@@ -43,6 +46,8 @@ Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long,
         Set workdays = workdayDict
     End If
     ws.Range(ws.Cells(1, startCol), ws.Cells(lastRow, endCol)).EntireColumn.ColumnWidth = 4.5
+    ReDim barMask(DATA_START_ROW To lastRow, startCol To endCol)
+    ReDim statusCols(DATA_START_ROW To lastRow)
 
     For r = DATA_START_ROW To lastRow
         level = GetTaskLevel(ws, r)
@@ -68,14 +73,7 @@ Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long,
             d = firstDate + c - startCol
             Set cell = ws.Cells(r, c)
             cell.Interior.Color = blankFill
-            ' Preserve structural group/month rules while clearing stale status borders.
-            If IsStatusBorder(cell.Borders(xlEdgeBottom).Color) Then
-                With cell.Borders(xlEdgeBottom)
-                    .LineStyle = xlContinuous
-                    .Weight = xlThin
-                    .Color = RGB(221, 229, 237)
-                End With
-            End If
+            ClearOwnedTaskBarBorders cell, d, c > startCol, c < endCol
             If Not IsWorkingDay(d, holidays, workdays) Then
                 cell.Interior.Color = RGB(245, 245, 245)
             ElseIf d = Date Then
@@ -97,69 +95,148 @@ Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long,
                 drawEnd = Date
             End If
         End If
-        actualMarker = FirstVisibleWorkingDate(actualStart, drawEnd, firstDate, lastDate, holidays, workdays)
-        planMarker = FirstVisibleWorkingDate(planStart, planEnd, firstDate, lastDate, holidays, workdays)
+        statusDate = LastVisibleWorkingDate(actualStart, drawEnd, firstDate, lastDate, holidays, workdays)
+        If Not IsEmpty(statusDate) Then statusCols(r) = startCol + CLng(statusDate - firstDate)
 
         For c = startCol To endCol
             d = firstDate + c - startCol
             If Not IsWorkingDay(d, holidays, workdays) Then GoTo NextDate
             Set cell = ws.Cells(r, c)
             If DateFallsInPeriod(d, planStart, planEnd) Then
+                barMask(r, c) = True
                 cell.Interior.Color = RGB(203, 213, 225)
                 cell.Font.Color = RGB(71, 85, 105)
-                If IsEmpty(actualMarker) And Not IsEmpty(planMarker) Then
-                    If d = planMarker Then SetLevelCaption cell, level, False
-                End If
             End If
             If DateFallsInPeriod(d, actualStart, drawEnd) Then
+                barMask(r, c) = True
                 cell.Interior.Color = LevelBarColor(level)
                 cell.Font.Color = RGB(255, 255, 255)
-                With cell.Borders(xlEdgeBottom)
-                    .LineStyle = xlContinuous
-                    .Weight = xlMedium
-                    .Color = StatusBorderColor(CStr(ws.Cells(r, COL_STATUS).Value))
-                End With
-                If Not IsEmpty(actualMarker) Then
-                    If d = actualMarker Then SetLevelCaption cell, level, True
-                End If
             End If
 NextDate:
         Next c
 NextTask:
     Next r
-    DrawCellLegend ws
+
+    DrawTaskBarFrames ws, barMask, lastRow, startCol, endCol
+    ' Status always wins at the actual bar's right edge, including group edges.
+    For r = DATA_START_ROW To lastRow
+        If statusCols(r) > 0 Then
+            SetTaskBarBorder ws.Cells(r, statusCols(r)), xlEdgeRight, _
+                             StatusBorderColor(CStr(ws.Cells(r, COL_STATUS).Value)), xlMedium
+        End If
+    Next r
 End Sub
+
+Private Sub ClearOwnedTaskBarBorders(ByVal cell As Range, ByVal d As Date, _
+                                    ByVal hasPreviousDate As Boolean, ByVal hasNextDate As Boolean)
+    Dim edge As Variant
+    Dim color As Long, weight As XlBorderWeight
+    For Each edge In Array(xlEdgeLeft, xlEdgeTop, xlEdgeBottom, xlEdgeRight)
+        color = cell.Borders(CLng(edge)).Color
+        If IsStatusBorder(color) Or IsHierarchyBarBorder(color) Then
+            color = RGB(221, 229, 237)
+            weight = xlThin
+            If CLng(edge) = xlEdgeLeft And hasPreviousDate Then
+                If Month(d) <> Month(d - 1) Or Year(d) <> Year(d - 1) Then
+                    color = RGB(160, 160, 160)
+                    weight = xlMedium
+                End If
+            ElseIf CLng(edge) = xlEdgeRight And hasNextDate Then
+                If Month(d) <> Month(d + 1) Or Year(d) <> Year(d + 1) Then
+                    color = RGB(160, 160, 160)
+                    weight = xlMedium
+                End If
+            End If
+            SetTaskBarBorder cell, CLng(edge), color, weight
+        End If
+    Next edge
+End Sub
+
+Private Sub DrawTaskBarFrames(ByVal ws As Worksheet, ByRef barMask() As Boolean, _
+                              ByVal lastRow As Long, ByVal startCol As Long, ByVal endCol As Long)
+    Dim r As Long, groupEnd As Long
+    ' One level-1 task and every descendant form exactly one frame.
+    ' Level-2/3 rows never add internal group or individual frames.
+    For r = DATA_START_ROW To lastRow
+        If HasTaskContent(ws, r) Then
+            If GetTaskLevel(ws, r) = 1 Then
+                groupEnd = GetTaskSubtreeEndRow(ws, r, lastRow)
+                Do While groupEnd > r
+                    If HasTaskContent(ws, groupEnd) Then Exit Do
+                    groupEnd = groupEnd - 1
+                Loop
+                DrawCombinedTaskFrame ws, barMask, r, groupEnd, startCol, endCol, xlMedium
+            End If
+        End If
+    Next r
+End Sub
+
+Private Sub DrawCombinedTaskFrame(ByVal ws As Worksheet, ByRef barMask() As Boolean, _
+                                   ByVal firstRow As Long, ByVal lastRow As Long, _
+                                   ByVal startCol As Long, ByVal endCol As Long, _
+                                   ByVal weight As XlBorderWeight)
+    Dim r As Long, c As Long, firstBarCol As Long, lastBarCol As Long
+    Dim edge As Variant, frame As Range
+    ' Use the union of visible plan/actual cells to find one enclosing rectangle.
+    ' Gaps and holidays between the periods remain inside the same frame.
+    For r = firstRow To lastRow
+        For c = startCol To endCol
+            If barMask(r, c) Then
+                If firstBarCol = 0 Or c < firstBarCol Then firstBarCol = c
+                If c > lastBarCol Then lastBarCol = c
+            End If
+        Next c
+    Next r
+    If firstBarCol = 0 Then Exit Sub
+    Set frame = ws.Range(ws.Cells(firstRow, firstBarCol), ws.Cells(lastRow, lastBarCol))
+    For Each edge In Array(xlEdgeLeft, xlEdgeTop, xlEdgeBottom, xlEdgeRight)
+        With frame.Borders(CLng(edge))
+            .LineStyle = xlContinuous
+            .Weight = weight
+            .Color = FRAME_COLOR
+        End With
+    Next edge
+End Sub
+
+Private Sub SetTaskBarBorder(ByVal cell As Range, ByVal edge As XlBordersIndex, _
+                             ByVal color As Long, ByVal weight As XlBorderWeight)
+    With cell.Borders(edge)
+        .LineStyle = xlContinuous
+        .Weight = weight
+        .Color = color
+    End With
+End Sub
+
+Private Function IsHierarchyBarBorder(ByVal color As Long) As Boolean
+    Select Case color
+        Case FRAME_COLOR, RGB(124, 58, 237), RGB(6, 182, 212), RGB(13, 148, 136)
+            IsHierarchyBarBorder = True
+    End Select
+End Function
 
 Private Function DateFallsInPeriod(ByVal d As Date, ByVal first As Variant, ByVal last As Variant) As Boolean
     If Not IsDate(first) Or Not IsDate(last) Then Exit Function
     DateFallsInPeriod = (d >= DateValue(first) And d <= DateValue(last))
 End Function
 
-Private Function FirstVisibleWorkingDate(ByVal periodStart As Variant, ByVal periodEnd As Variant, _
+Private Function LastVisibleWorkingDate(ByVal periodStart As Variant, ByVal periodEnd As Variant, _
                                          ByVal firstDate As Date, ByVal lastDate As Date, _
                                          ByVal holidays As Object, ByVal workdays As Object) As Variant
     Dim d As Date, first As Date, last As Date
-    FirstVisibleWorkingDate = Empty
+    LastVisibleWorkingDate = Empty
     If Not IsDate(periodStart) Or Not IsDate(periodEnd) Then Exit Function
     first = DateValue(periodStart)
     last = DateValue(periodEnd)
     If first < firstDate Then first = firstDate
     If last > lastDate Then last = lastDate
     If first > last Then Exit Function
-    For d = first To last
+    For d = last To first Step -1
         If IsWorkingDay(d, holidays, workdays) Then
-            FirstVisibleWorkingDate = d
+            LastVisibleWorkingDate = d
             Exit Function
         End If
     Next d
 End Function
-
-Private Sub SetLevelCaption(ByVal cell As Range, ByVal level As Long, ByVal actual As Boolean)
-    cell.Value2 = CStr(level)
-    cell.Font.Bold = True
-    cell.Font.Size = 14
-    If actual Then cell.Font.Color = RGB(255, 255, 255)
-End Sub
 
 Private Function TimelineBackground(ByVal level As Long, ByVal hasChildren As Boolean, _
                                      ByVal inRootGroup As Boolean) As Long
@@ -221,33 +298,4 @@ Private Sub ClearCellLegend(ByVal ws As Worksheet)
             cell.ClearFormats
         End If
     Next i
-End Sub
-
-Private Sub DrawCellLegend(ByVal ws As Worksheet)
-    Dim addresses As Variant, i As Long, cell As Range
-    If Application.CountA(ws.Range("L3:W3")) > 0 Then Exit Sub
-    addresses = Array("L3", "N3", "P3", "R3", "T3")
-    For i = 0 To 4
-        Set cell = ws.Range(addresses(i))
-        With cell
-            .NumberFormat = "@"
-            .Value2 = LegendCaption(i + 1)
-            .Font.Size = 9
-            .Font.Bold = (i < 3)
-            .VerticalAlignment = xlCenter
-            .HorizontalAlignment = xlCenter
-            .WrapText = False
-        End With
-        If i < 3 Then
-            cell.Interior.Color = LevelBarColor(i + 1)
-            cell.Font.Color = RGB(255, 255, 255)
-        ElseIf i = 3 Then
-            cell.Interior.Color = RGB(203, 213, 225)
-            cell.Font.Color = RGB(71, 85, 105)
-        Else
-            cell.HorizontalAlignment = xlLeft
-            cell.Font.Color = RGB(51, 65, 85)
-        End If
-    Next i
-    If ws.Rows(3).RowHeight < 24 Then ws.Rows(3).RowHeight = 24
 End Sub
