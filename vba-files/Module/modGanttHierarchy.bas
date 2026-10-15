@@ -3,11 +3,177 @@ Option Explicit
 
 Private mTaskOutlineViewEvents As CGanttOutlineView
 Private mTaskOutlineViewStarting As Boolean
+Private mTaskViewResetSheets As Object
+Private Const TASK_FOLD_RANGE_NAME As String = "_GanttDetailFoldRange"
+
+Private Function TaskFoldColumnNumber(ByVal value As Variant, ByVal columnCount As Long) As Long
+    Dim letters As String, i As Long, code As Long, result As Long
+    If IsError(value) Then Exit Function
+    letters = UCase$(Trim$(CStr(value)))
+    If Len(letters) = 0 Or Len(letters) > 3 Then Exit Function
+    For i = 1 To Len(letters)
+        code = AscW(Mid$(letters, i, 1))
+        If code < 65 Or code > 90 Then Exit Function
+        result = result * 26 + code - 64
+    Next i
+    If result <= columnCount Then TaskFoldColumnNumber = result
+End Function
+
+Public Function GetTaskDetailColumnBounds(ByVal ws As Worksheet, ByRef firstCol As Long, _
+                                          ByRef lastCol As Long) As Boolean
+    Dim configWs As Worksheet
+    On Error Resume Next
+    Set configWs = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If configWs Is Nothing Then
+        firstCol = ws.Range(COL_REQUEST & "1").Column + 1
+        lastCol = ws.Range(COL_GANTT_START & "1").Column - 1
+    Else
+        firstCol = TaskFoldColumnNumber(configWs.Range(TASK_FOLD_START_VALUE_CELL).Value2, ws.Columns.Count)
+        lastCol = TaskFoldColumnNumber(configWs.Range(TASK_FOLD_END_VALUE_CELL).Value2, ws.Columns.Count)
+    End If
+    GetTaskDetailColumnBounds = (firstCol > 0 And firstCol <= lastCol And lastCol < ws.Columns.Count - 1)
+End Function
+
+Private Function GetTaskViewStartColumn(ByVal ws As Worksheet, ByVal firstCol As Long, _
+                                        ByVal lastCol As Long) As Long
+    Dim configWs As Worksheet, viewCol As Long
+    If firstCol < 1 Or lastCol < firstCol Then Exit Function
+    On Error Resume Next
+    Set configWs = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If configWs Is Nothing Then
+        viewCol = ws.Range(COL_REQUEST & "1").Column
+    Else
+        viewCol = TaskFoldColumnNumber(configWs.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2, ws.Columns.Count - 1)
+    End If
+    If viewCol < 1 Then Exit Function
+    ' Visibility and grouping are independent: skip columns hidden by the fold.
+    If viewCol >= firstCol And viewCol <= lastCol Then viewCol = lastCol + 1
+    If viewCol < ws.Columns.Count Then GetTaskViewStartColumn = viewCol
+End Function
+
+Private Sub UpdateTaskFoldHint(ByVal configWs As Worksheet, ByVal valid As Boolean)
+    With configWs.Range(TASK_FOLD_HINT_CELL)
+        If valid Then
+            .Value2 = "화면 시작 열과 접기 범위는 별도 설정" & vbLf & "숨겨진 열은 건너뜀 · 펼치면 A열"
+            .Font.Color = RGB(89, 89, 89)
+        Else
+            .Value2 = "접기 시작 ≤ 끝 · 열 문자를 확인하세요." & vbLf & "화면 시작 열도 열 문자로 입력 (예: F)"
+            .Font.Color = RGB(192, 0, 0)
+        End If
+    End With
+End Sub
+
+Public Sub EnsureTaskDetailFoldConfig(ByVal ws As Worksheet)
+    Dim cell As Range, formula As String, firstCol As Long, lastCol As Long
+    If ws.Range("I15").MergeArea.Address = "$I$15:$J$16" Then
+        ws.Range("I15:J16").UnMerge
+        ws.Range("I15:J16").Clear
+    End If
+    ws.Range(TASK_FOLD_TITLE_CELL).Value2 = "간트 - 열 접기 설정"
+    ws.Range("I13").Value2 = "접기 시작 열"
+    ws.Range("I14").Value2 = "접기 끝 열"
+    ws.Range("I15").Value2 = "접힌 화면 시작 열"
+    If Len(Trim$(CStr(ws.Range(TASK_FOLD_START_VALUE_CELL).Value2))) = 0 Then
+        ws.Range(TASK_FOLD_START_VALUE_CELL).Value2 = "I"
+    End If
+    If Len(Trim$(CStr(ws.Range(TASK_FOLD_END_VALUE_CELL).Value2))) = 0 Then
+        ws.Range(TASK_FOLD_END_VALUE_CELL).Value2 = "W"
+    End If
+    If Len(Trim$(CStr(ws.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2))) = 0 Then
+        ws.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = "H"
+    End If
+    With ws.Range("I12:J12")
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 235, 247)
+        .Borders.LineStyle = xlContinuous
+    End With
+    ws.Range("I13:J15").Borders.LineStyle = xlContinuous
+    ws.Range("I13:J15").Font.Size = 11
+    ws.Range("I13:J15").WrapText = False
+    With ws.Range(TASK_FOLD_SETTING_VALUE_RANGE)
+        .NumberFormat = "@"
+        .Interior.Color = RGB(255, 249, 219)
+        .Font.Color = RGB(0, 102, 204)
+        .HorizontalAlignment = xlCenter
+    End With
+    With ws.Range("I17:J18")
+        .Merge
+        .WrapText = True
+        .VerticalAlignment = xlCenter
+        .Font.Size = 9
+    End With
+    For Each cell In ws.Range(TASK_FOLD_SETTING_VALUE_RANGE).Cells
+        formula = "=IFERROR(SUBSTITUTE(ADDRESS(1,COLUMN(INDIRECT(UPPER(TRIM(" & _
+                  cell.Address(False, False) & "))&""1"")),4),""1"","""")=UPPER(TRIM(" & _
+                  cell.Address(False, False) & ")),FALSE)"
+        cell.Validation.Delete
+        cell.Validation.Add Type:=xlValidateCustom, AlertStyle:=xlValidAlertStop, Formula1:=formula
+        cell.Validation.IgnoreBlank = False
+        cell.Validation.InputTitle = "접을 열 범위"
+        cell.Validation.InputMessage = "열 문자만 입력하세요. 예: I, W, AA"
+        cell.Validation.ErrorTitle = "열 문자 입력 오류"
+        cell.Validation.ErrorMessage = "숫자나 셀 주소 대신 열 문자를 입력하세요. 예: I, W"
+        cell.Validation.ShowError = True
+    Next cell
+    If GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then
+        UpdateTaskFoldHint ws, (GetTaskViewStartColumn(ws, firstCol, lastCol) > 0)
+    Else
+        UpdateTaskFoldHint ws, False
+    End If
+End Sub
+
+Public Sub ApplyTaskDetailColumnSettings()
+    Dim configWs As Worksheet, ws As Worksheet, cell As Range
+    Dim firstCol As Long, lastCol As Long, number As Long
+    Dim previousEvents As Boolean, previousScreenUpdating As Boolean
+    Dim settingError As Long, settingErrorText As String
+    Set configWs = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    previousEvents = Application.EnableEvents
+    previousScreenUpdating = Application.ScreenUpdating
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    For Each cell In configWs.Range(TASK_FOLD_SETTING_VALUE_RANGE).Cells
+        number = TaskFoldColumnNumber(cell.Value2, configWs.Columns.Count)
+        If number > 0 Then cell.Value2 = UCase$(Trim$(CStr(cell.Value2)))
+    Next cell
+    If Not GetTaskDetailColumnBounds(configWs, firstCol, lastCol) Then
+        UpdateTaskFoldHint configWs, False
+        GoTo Finished
+    End If
+    UpdateTaskFoldHint configWs, (GetTaskViewStartColumn(configWs, firstCol, lastCol) > 0)
+    For Each ws In ThisWorkbook.Worksheets
+        If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) = "No." And _
+           CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) = "Level" Then
+            UnprotectTaskSheet ws
+            EnsureTaskDetailColumnOutline ws
+            EnsureTaskRequestFreeze ws
+            ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+        End If
+    Next ws
+Finished:
+    Application.EnableEvents = previousEvents
+    Application.ScreenUpdating = previousScreenUpdating
+    Exit Sub
+Failed:
+    settingError = Err.Number
+    settingErrorText = Err.Description
+    Application.EnableEvents = previousEvents
+    Application.ScreenUpdating = previousScreenUpdating
+    Err.Raise settingError, "ApplyTaskDetailColumnSettings", settingErrorText
+End Sub
 
 Public Sub InitializeTaskHierarchyOutlines()
     Dim ws As Worksheet
+    Dim configWs As Worksheet
     Dim wasSaved As Boolean
     wasSaved = ThisWorkbook.Saved
+    On Error Resume Next
+    Set configWs = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If Not configWs Is Nothing Then EnsureTaskDetailFoldConfig configWs
     For Each ws In ThisWorkbook.Worksheets
         If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) = "No." And _
            CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) = "Level" Then
@@ -25,7 +191,8 @@ End Sub
 
 Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
     Dim taskWindow As Window, requestCol As Long, previousRow As Long, c As Long
-    Dim wasSaved As Boolean, collapsed As Boolean
+    Dim firstCol As Long, lastCol As Long, freezeColumns As Long, nextVisibleCol As Long
+    Dim wasSaved As Boolean, collapsed As Boolean, resetView As Boolean
     Dim detailColumns As Range, wasScreenUpdating As Boolean
     Dim viewError As Long, viewErrorText As String
     If ActiveWindow Is Nothing Then Exit Sub
@@ -35,9 +202,19 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
        CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) <> "Level" Then Exit Sub
 
     Set taskWindow = ActiveWindow
-    requestCol = ws.Range(COL_REQUEST & "1").Column
+    If Not GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then Exit Sub
+    requestCol = GetTaskViewStartColumn(ws, firstCol, lastCol)
+    If requestCol = 0 Then Exit Sub
+    Do While requestCol < ws.Columns.Count
+        If Not ws.Columns(requestCol).Hidden Then Exit Do
+        requestCol = requestCol + 1
+    Loop
+    If requestCol >= ws.Columns.Count Then Exit Sub
+    If Not mTaskViewResetSheets Is Nothing Then resetView = mTaskViewResetSheets.Exists(ws.CodeName)
+    ' Start the collapsed viewport here; the fold range is configured separately.
+    freezeColumns = 1
     collapsed = True
-    For c = requestCol + 1 To ws.Range(COL_GANTT_START & "1").Column - 1
+    For c = firstCol To lastCol
         If Not ws.Columns(c).Hidden Then
             collapsed = False
             Exit For
@@ -45,8 +222,10 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
     Next c
     With taskWindow
         If collapsed Then
-            If .FreezePanes And .SplitColumn = 1 And .SplitRow = HEADER_ROW Then
-                If .Panes(1).ScrollColumn = requestCol Then Exit Sub
+            If Not resetView Then
+                If .FreezePanes And .SplitColumn = freezeColumns And .SplitRow = HEADER_ROW Then
+                    If .Panes(1).ScrollColumn = requestCol Then Exit Sub
+                End If
             End If
         ElseIf Not .FreezePanes And .SplitColumn = 0 And .SplitRow = 0 Then
             ' Restore A only on the transition; leave normal expanded scrolling free.
@@ -62,22 +241,32 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
         .SplitRow = 0
         If collapsed Then
             ' Excel counts hidden columns differently when creating a split.
-            ' Build the H-only freeze with details visible, then restore the fold.
-            Set detailColumns = ws.Range(ws.Cells(1, requestCol + 1), _
-                ws.Cells(1, ws.Range(COL_GANTT_START & "1").Column - 1)).EntireColumn
-            detailColumns.Hidden = False
+            ' Build the freeze with details visible, then restore the fold.
+            Set detailColumns = ws.Range(ws.Cells(1, firstCol), ws.Cells(1, lastCol)).EntireColumn
+            For c = firstCol To lastCol
+                If ws.Columns(c).Hidden Then ws.Columns(c).Hidden = False
+            Next c
             .ScrollColumn = requestCol
             .ScrollRow = 1
-            .SplitColumn = 1
+            .SplitColumn = freezeColumns
             .SplitRow = HEADER_ROW
             .FreezePanes = True
-            detailColumns.Hidden = True
+            For c = firstCol To lastCol
+                If Not ws.Columns(c).Hidden Then ws.Columns(c).Hidden = True
+            Next c
+            nextVisibleCol = requestCol + 1
+            Do While nextVisibleCol < ws.Columns.Count
+                If Not ws.Columns(nextVisibleCol).Hidden Then Exit Do
+                nextVisibleCol = nextVisibleCol + 1
+            Loop
+            .Panes(.Panes.Count).ScrollColumn = nextVisibleCol
             .Panes(.Panes.Count).ScrollRow = Application.Max(DATA_START_ROW, previousRow)
         Else
             .ScrollColumn = 1
             .ScrollRow = Application.Max(1, previousRow)
         End If
     End With
+    If resetView Then mTaskViewResetSheets.Remove ws.CodeName
     If wasSaved Then ws.Parent.Saved = True
     Application.ScreenUpdating = wasScreenUpdating
     Exit Sub
@@ -85,7 +274,11 @@ Failed:
     viewError = Err.Number
     viewErrorText = Err.Description
     On Error Resume Next
-    If Not detailColumns Is Nothing Then detailColumns.Hidden = True
+    If Not detailColumns Is Nothing Then
+        For c = firstCol To lastCol
+            ws.Columns(c).Hidden = True
+        Next c
+    End If
     Application.ScreenUpdating = wasScreenUpdating
     If wasSaved Then ws.Parent.Saved = True
     On Error GoTo 0
@@ -141,9 +334,7 @@ End Sub
 Public Function CaptureTaskDetailColumnHidden(ByVal ws As Worksheet) As Variant
     Dim firstCol As Long, lastCol As Long, c As Long
     Dim hidden() As Boolean
-    firstCol = ws.Range(COL_REQUEST & "1").Column + 1
-    lastCol = ws.Range(COL_GANTT_START & "1").Column - 1
-    If lastCol < firstCol Then Exit Function
+    If Not GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then Exit Function
     ReDim hidden(firstCol To lastCol)
     For c = firstCol To lastCol
         hidden(c) = ws.Columns(c).Hidden
@@ -182,19 +373,51 @@ End Sub
 
 Public Sub EnsureTaskDetailColumnOutline(ByVal ws As Worksheet)
     Dim firstCol As Long, lastCol As Long, c As Long
-    Dim needsGroup As Boolean, hidden As Variant, detailColumns As Range
-    firstCol = ws.Range(COL_REQUEST & "1").Column + 1
-    lastCol = ws.Range(COL_GANTT_START & "1").Column - 1
-    If lastCol < firstCol Then Exit Sub
+    Dim needsGroup As Boolean, hidden As Variant, detailColumns As Range, oldColumns As Range
+    Dim boundsChanged As Boolean, wasCollapsed As Boolean, rangeName As Name
+    If Not GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then Exit Sub
     Set detailColumns = ws.Range(ws.Cells(1, firstCol), ws.Cells(1, lastCol)).EntireColumn
+    On Error Resume Next
+    Set rangeName = ws.Names(TASK_FOLD_RANGE_NAME)
+    If Not rangeName Is Nothing Then Set oldColumns = rangeName.RefersToRange
+    On Error GoTo 0
+    If oldColumns Is Nothing Then Set oldColumns = ws.Range("I:W")
+    boundsChanged = (oldColumns.Column <> firstCol Or oldColumns.Columns.Count <> lastCol - firstCol + 1)
+    needsGroup = boundsChanged
     For c = firstCol To lastCol
         If ws.Columns(c).OutlineLevel <> 2 Then needsGroup = True
     Next c
     If needsGroup Then
-        hidden = CaptureTaskDetailColumnHidden(ws)
-        UngroupTaskOutline detailColumns
+        If boundsChanged Then
+            wasCollapsed = True
+            For c = oldColumns.Column To oldColumns.Column + oldColumns.Columns.Count - 1
+                If Not ws.Columns(c).Hidden Then wasCollapsed = False
+            Next c
+            For c = oldColumns.Column To oldColumns.Column + oldColumns.Columns.Count - 1
+                If ws.Columns(c).Hidden Then ws.Columns(c).Hidden = False
+            Next c
+        Else
+            hidden = CaptureTaskDetailColumnHidden(ws)
+        End If
+        UngroupTaskOutline oldColumns
+        If boundsChanged Then UngroupTaskOutline detailColumns
         detailColumns.Group
-        RestoreTaskDetailColumnHidden ws, hidden
+        If boundsChanged Then
+            For c = firstCol To lastCol
+                If ws.Columns(c).Hidden <> wasCollapsed Then ws.Columns(c).Hidden = wasCollapsed
+            Next c
+        Else
+            RestoreTaskDetailColumnHidden ws, hidden
+        End If
+    End If
+    If rangeName Is Nothing Or boundsChanged Then
+        If Not rangeName Is Nothing Then rangeName.Delete
+        ws.Names.Add Name:="'" & Replace(ws.Name, "'", "''") & "'!" & TASK_FOLD_RANGE_NAME, _
+                     RefersTo:="='" & Replace(ws.Name, "'", "''") & "'!" & detailColumns.Address, Visible:=False
+    End If
+    If boundsChanged Then
+        If mTaskViewResetSheets Is Nothing Then Set mTaskViewResetSheets = CreateObject("Scripting.Dictionary")
+        mTaskViewResetSheets(ws.CodeName) = True
     End If
     ws.Outline.SummaryColumn = xlRight
     ws.EnableOutlining = True

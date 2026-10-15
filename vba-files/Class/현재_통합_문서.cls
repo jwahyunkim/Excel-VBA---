@@ -39,6 +39,11 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     If Sh.Name = CONFIG_SHEET_NAME Or _
        Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
         If Sh.Name = CONFIG_SHEET_NAME And _
+           Not Intersect(Target, Sh.Range(TASK_FOLD_SETTING_VALUE_RANGE)) Is Nothing Then
+            Application.enableEvents = False
+            ApplyTaskDetailColumnSettings
+        End If
+        If Sh.Name = CONFIG_SHEET_NAME And _
            Not Intersect(Target, Sh.Range(TASK_TYPE_CONFIG_RANGE)) Is Nothing Then
             Application.enableEvents = False
             RefreshTaskTypeValidation

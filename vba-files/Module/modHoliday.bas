@@ -230,6 +230,7 @@ Public Sub EnsureConfigSheet()
     ws.Range("O1:X203").Clear
     ws.Range("AA1:AA203").Clear
     EnsureTaskTypeConfig
+    EnsureTaskDetailFoldConfig ws
 End Sub
 
 Private Function GetWeeklyReportConfigSheet() As Worksheet
