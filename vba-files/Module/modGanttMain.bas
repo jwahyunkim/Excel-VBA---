@@ -19,6 +19,8 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     Dim previousScreenUpdating As Boolean
     Dim previousEnableEvents As Boolean
     Dim errorText As String
+    Dim detailColumnHidden As Variant
+    Dim detailScrollColumn As Long, detailScrollRow As Long
 
     previousScreenUpdating = Application.ScreenUpdating
     previousEnableEvents = Application.EnableEvents
@@ -26,6 +28,11 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     On Error GoTo EH
 
     Set ws = ActiveSheet
+    detailColumnHidden = CaptureTaskDetailColumnHidden(ws)
+    If Not ActiveWindow Is Nothing Then
+        detailScrollColumn = ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollColumn
+        detailScrollRow = ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollRow
+    End If
 
     If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
         If Not showCompletionMessage Then Err.Raise vbObjectError + 2120, , "config 시트에서는 실행할 수 없습니다."
@@ -79,6 +86,11 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     ShowAllDateColumns ws
     ApplyDisplayTaskRowFilter ws, lastRow, chartStartDate, chartEndDate
+    RestoreTaskDetailColumnHidden ws, detailColumnHidden
+    If detailScrollColumn > 0 And Not ActiveWindow Is Nothing Then
+        ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollColumn = detailScrollColumn
+        ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollRow = detailScrollRow
+    End If
     ApplyCalculatedColumnsProtection ws, lastRow
 
     Application.EnableEvents = previousEnableEvents
