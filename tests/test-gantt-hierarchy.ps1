@@ -47,9 +47,42 @@ try {
         if ($text.Contains('BuildTaskDisplayText(baseTaskText, levelValue)')) {
             $code.ReplaceLine($line, $text.Replace('BuildTaskDisplayText(baseTaskText, levelValue)', 'baseTaskText'))
         }
-        if ($text.Trim() -eq 'ActiveWindow.DisplayGridlines = False' -and
-            -not ([string]$code.Lines($line - 1, 1)).Contains('ApplyTaskHierarchyAppearance')) {
-            $code.InsertLines($line, '    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol')
+    }
+    $start = $code.ProcStartLine('FormatBaseArea', 0)
+    $count = $code.ProcCountLines('FormatBaseArea', 0)
+    if (-not ([string]$code.Lines($start, $count)).Contains('ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol')) {
+        for ($line = $start; $line -lt $start + $count; $line++) {
+            if (([string]$code.Lines($line, 1)).Trim() -eq 'ActiveWindow.DisplayGridlines = False') {
+                $code.InsertLines($line, '    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol')
+                break
+            }
+        }
+    }
+    $count = $code.ProcCountLines('FormatBaseArea', 0)
+    if (-not ([string]$code.Lines($start, $count)).Contains('Dim detailColumnHidden As Variant')) {
+        for ($line = $start; $line -lt $start + $count; $line++) {
+            if (([string]$code.Lines($line, 1)).Trim() -eq 'Dim baseTaskText As String') {
+                $code.InsertLines($line + 1, '    Dim detailColumnHidden As Variant')
+                break
+            }
+        }
+    }
+    $count = $code.ProcCountLines('FormatBaseArea', 0)
+    if (-not ([string]$code.Lines($start, $count)).Contains('detailColumnHidden = CaptureTaskDetailColumnHidden(ws)')) {
+        for ($line = $start; $line -lt $start + $count; $line++) {
+            if (([string]$code.Lines($line, 1)).Trim() -eq 'dataLastCol = COL_STATUS') {
+                $code.InsertLines($line, '    detailColumnHidden = CaptureTaskDetailColumnHidden(ws)')
+                break
+            }
+        }
+    }
+    $count = $code.ProcCountLines('FormatBaseArea', 0)
+    if (-not ([string]$code.Lines($start, $count)).Contains('RestoreTaskDetailColumnHidden ws, detailColumnHidden')) {
+        for ($line = $start; $line -lt $start + $count; $line++) {
+            if (([string]$code.Lines($line, 1)).Trim() -eq 'ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol') {
+                $code.InsertLines($line + 1, '    RestoreTaskDetailColumnHidden ws, detailColumnHidden')
+                break
+            }
         }
     }
     $start = $code.ProcStartLine('ApplyCalculatedColumnsProtection', 0)
@@ -112,6 +145,11 @@ Public Function RunGanttHierarchyRegression() As String
     Check ws.Rows(9).OutlineLevel = 2, "sibling group boundary"
     Check ws.Rows(10).OutlineLevel = 1, "next root grouped"
     Check ws.Rows(12).OutlineLevel = 2, "skipped level group"
+    For c = 9 To 23
+        Check ws.Columns(c).OutlineLevel = 2, "detail column outline depth " & c
+    Next c
+    Check ws.Columns("H").OutlineLevel = 1 And ws.Columns("X").OutlineLevel = 1, "request or Gantt grouped"
+    Check ws.Outline.SummaryColumn = xlRight, "column summary position"
     Check ws.Range("H5").Font.Bold And ws.Range("H6").Font.Bold, "summary emphasis"
     Check Not ws.Range("H7").Font.Bold, "leaf emphasis"
     Check ws.Range("H7").IndentLevel = 2 And ws.Range("I7").IndentLevel = 2, "content indentation"
@@ -122,10 +160,23 @@ Public Function RunGanttHierarchyRegression() As String
     Check ws.Range("H9").Interior.Color = RGB(255, 235, 235), "warning overwritten"
     ApplyCalculatedColumnsProtection ws, 12
     Check ws.EnableOutlining And ws.ProtectContents, "protected outline disabled"
+    ws.Columns("X").ShowDetail = False
+    For c = 9 To 23
+        Check ws.Columns(c).Hidden, "protected column collapse failed " & c
+    Next c
+    Check Not ws.Columns("H").Hidden And Not ws.Columns("X").Hidden, "column collapse hid request or Gantt"
+    Check Not ws.Rows(6).Hidden And ws.Rows(7).OutlineLevel = 3, "column collapse changed row outline"
     ws.Outline.ShowLevels 1
     Check ws.Rows(6).Hidden And Not ws.Rows(5).Hidden, "collapse failed"
     ws.Outline.ShowLevels 3
     Check Not ws.Rows(7).Hidden, "expand failed"
+    For c = 9 To 23
+        Check ws.Columns(c).Hidden, "row outline expansion changed column collapse " & c
+    Next c
+    ws.Columns("X").ShowDetail = True
+    For c = 9 To 23
+        Check Not ws.Columns(c).Hidden, "protected column expansion failed " & c
+    Next c
     UnprotectTaskSheet ws
     ws.Cells(6, COL_LEVEL).Value = 1
     RebuildTaskHierarchyOutline ws, 12
@@ -199,7 +250,7 @@ Public Function RunGanttHierarchyRegression() As String
         Next c
     Next r
     Check original.Shapes.Count = unrelatedShapeCount, "new drawing objects remain or existing buttons lost"
-    RunGanttHierarchyRegression = "PASS: one frame per level-1 task with all descendants, no child frames, combined plan/actual gap coverage, right status, no legend/captions, protected outlines and input preservation"
+    RunGanttHierarchyRegression = "PASS: protected column collapse/expand, independent row outlines, one frame per level-1 task, right status, no legend/captions and input preservation"
     Exit Function
 Failed:
     RunGanttHierarchyRegression = "FAIL: " & Err.Description
@@ -253,6 +304,24 @@ End Function
     if (-not $taskSheet.ProtectContents -or -not $taskSheet.EnableOutlining) {
         throw 'Saved workbook did not restore protected outlines on open'
     }
+    for ($taskColumn = 9; $taskColumn -le 23; $taskColumn++) {
+        if ($taskSheet.Columns.Item($taskColumn).OutlineLevel -ne 2) {
+            throw "Reopening changed the detail column outline depth at column $taskColumn"
+        }
+    }
+    if ($taskSheet.Columns.Item(8).OutlineLevel -ne 1 -or
+        $taskSheet.Columns.Item(24).OutlineLevel -ne 1 -or $taskSheet.Outline.SummaryColumn -ne -4152) {
+        throw 'Request/Gantt columns or column summary position are incorrect'
+    }
+    $taskSheet.Columns.Item(24).ShowDetail = $false
+    for ($taskColumn = 9; $taskColumn -le 23; $taskColumn++) {
+        if (-not $taskSheet.Columns.Item($taskColumn).Hidden) {
+            throw "Protected column collapse failed at column $taskColumn"
+        }
+    }
+    if ($taskSheet.Columns.Item(8).Hidden -or $taskSheet.Columns.Item(24).Hidden) {
+        throw 'Column collapse hid the request or Gantt column'
+    }
     $taskSheet.Rows.Item(59).ShowDetail = $false
     if (-not $taskSheet.Rows.Item(60).Hidden -or $taskSheet.Rows.Item(59).Hidden) {
         throw 'Collapse after reopening failed'
@@ -262,6 +331,15 @@ End Function
     $taskExcel.Run("'$($taskBook.Name)'!RefreshGanttSheet", $false)
     if ($taskSheet.Rows.Item(53).OutlineLevel -ne 2 -or $taskSheet.Rows.Item(61).OutlineLevel -ne 3) {
         throw 'Refresh changed the outline depth'
+    }
+    for ($taskColumn = 9; $taskColumn -le 23; $taskColumn++) {
+        if (-not $taskSheet.Columns.Item($taskColumn).Hidden -or
+            $taskSheet.Columns.Item($taskColumn).OutlineLevel -ne 2) {
+            throw "Refresh expanded or duplicated the detail column group at column $taskColumn"
+        }
+    }
+    if ($taskSheet.Columns.Item(8).Hidden -or $taskSheet.Columns.Item(24).Hidden) {
+        throw 'Refresh hid the request or Gantt column'
     }
     if ($taskExcel.WorksheetFunction.CountA($taskSheet.Range('L3:W3')) -ne 0 -or
         $taskExcel.WorksheetFunction.CountA($taskSheet.Range('X5:BA74')) -ne 0) {
@@ -284,10 +362,37 @@ End Function
             throw 'Refresh inserted a Gantt drawing object'
         }
     }
+    # Persist a collapsed column outline and exercise Workbook_Open again.
+    $taskBook.Save()
+    $taskBook.Close($false)
+    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
+    $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
+    $taskSheet = $taskBook.Worksheets.Item('Sheet1')
+    if (-not $taskBook.Saved -or -not $taskSheet.ProtectContents -or -not $taskSheet.EnableOutlining) {
+        throw 'Collapsed reopen did not retain clean state and protected outlines'
+    }
+    for ($taskColumn = 9; $taskColumn -le 23; $taskColumn++) {
+        if (-not $taskSheet.Columns.Item($taskColumn).Hidden -or
+            $taskSheet.Columns.Item($taskColumn).OutlineLevel -ne 2) {
+            throw "Collapsed reopen expanded or duplicated the detail group at column $taskColumn"
+        }
+    }
+    if ($taskSheet.Columns.Item(8).Hidden -or $taskSheet.Columns.Item(24).Hidden -or
+        $taskSheet.Rows.Item(53).OutlineLevel -ne 2 -or $taskSheet.Rows.Item(61).OutlineLevel -ne 3) {
+        throw 'Collapsed reopen changed request/Gantt visibility or row outlines'
+    }
+    $taskSheet.Columns.Item(24).ShowDetail = $true
+    for ($taskColumn = 9; $taskColumn -le 23; $taskColumn++) {
+        if ($taskSheet.Columns.Item($taskColumn).Hidden) {
+            throw "Column expansion after reopening failed at column $taskColumn"
+        }
+    }
+    # Deliver the workbook expanded, matching its original view.
+    $taskBook.Save()
     $taskBook.Close($false)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
     $taskBook = $null
-    Write-Output 'PASS: clean reopen, preserved unsaved edits, protected collapse/expand and full Gantt refresh'
+    Write-Output 'PASS: clean and collapsed reopen, preserved unsaved edits, protected row/column collapse/expand and collapsed full Gantt refresh'
     if ($SavePath) {
         Copy-Item -LiteralPath $taskTemp -Destination ([IO.Path]::GetFullPath($SavePath))
         Write-Output ('UPDATED COPY: ' + [IO.Path]::GetFullPath($SavePath))

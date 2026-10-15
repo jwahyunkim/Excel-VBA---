@@ -11,11 +11,74 @@ Public Sub InitializeTaskHierarchyOutlines()
             ' UserInterfaceOnly and EnableOutlining are session settings;
             ' restore them when a saved, protected workbook is opened.
             UnprotectTaskSheet ws
+            EnsureTaskDetailColumnOutline ws
             ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
         End If
     Next ws
     ' Session-only protection restoration must not dirty a saved workbook.
     If wasSaved Then ThisWorkbook.Saved = True
+End Sub
+
+Public Function CaptureTaskDetailColumnHidden(ByVal ws As Worksheet) As Variant
+    Dim firstCol As Long, lastCol As Long, c As Long
+    Dim hidden() As Boolean
+    firstCol = ws.Range(COL_REQUEST & "1").Column + 1
+    lastCol = ws.Range(COL_GANTT_START & "1").Column - 1
+    If lastCol < firstCol Then Exit Function
+    ReDim hidden(firstCol To lastCol)
+    For c = firstCol To lastCol
+        hidden(c) = ws.Columns(c).Hidden
+    Next c
+    CaptureTaskDetailColumnHidden = hidden
+End Function
+
+Public Sub RestoreTaskDetailColumnHidden(ByVal ws As Worksheet, ByVal hidden As Variant)
+    Dim c As Long
+    If Not IsArray(hidden) Then Exit Sub
+    For c = LBound(hidden) To UBound(hidden)
+        If ws.Columns(c).Hidden <> CBool(hidden(c)) Then
+            ws.Columns(c).Hidden = CBool(hidden(c))
+        End If
+    Next c
+End Sub
+
+Private Sub UngroupTaskOutline(ByVal target As Range)
+    Dim pass As Long, errorNumber As Long, errorText As String
+    ' ClearOutline also clears the other axis. Ungroup respects full rows/columns.
+    ' Excel supports at most eight levels, including the ungrouped base level.
+    For pass = 1 To 7
+        On Error Resume Next
+        target.Ungroup
+        errorNumber = Err.Number
+        errorText = Err.Description
+        Err.Clear
+        On Error GoTo 0
+        If errorNumber <> 0 Then
+            If errorNumber <> 1004 Then Err.Raise errorNumber, "UngroupTaskOutline", errorText
+            Exit For
+        End If
+    Next pass
+End Sub
+
+Public Sub EnsureTaskDetailColumnOutline(ByVal ws As Worksheet)
+    Dim firstCol As Long, lastCol As Long, c As Long
+    Dim needsGroup As Boolean, hidden As Variant, detailColumns As Range
+    firstCol = ws.Range(COL_REQUEST & "1").Column + 1
+    lastCol = ws.Range(COL_GANTT_START & "1").Column - 1
+    If lastCol < firstCol Then Exit Sub
+    Set detailColumns = ws.Range(ws.Cells(1, firstCol), ws.Cells(1, lastCol)).EntireColumn
+    For c = firstCol To lastCol
+        If ws.Columns(c).OutlineLevel <> 2 Then needsGroup = True
+    Next c
+    If needsGroup Then
+        hidden = CaptureTaskDetailColumnHidden(ws)
+        UngroupTaskOutline detailColumns
+        detailColumns.Group
+        RestoreTaskDetailColumnHidden ws, hidden
+    End If
+    ws.Outline.SummaryColumn = xlRight
+    ws.EnableOutlining = True
+    If Not ActiveWindow Is Nothing Then ActiveWindow.DisplayOutline = True
 End Sub
 
 ' Visual hierarchy and native outlines share the same subtree boundaries as
@@ -35,6 +98,7 @@ Public Sub ApplyTaskHierarchyAppearance(ByVal ws As Worksheet, ByVal lastRow As 
     Dim taskRange As Range
     Dim chartCell As Range
 
+    EnsureTaskDetailColumnOutline ws
     If lastRow < DATA_START_ROW Or endCol < startCol Then Exit Sub
 
     With ws.Range(COL_NO & DATA_START_ROW & ":" & COL_STATUS & lastRow).Font
@@ -151,7 +215,7 @@ Public Sub RebuildTaskHierarchyOutline(ByVal ws As Worksheet, ByVal lastRow As L
     If lastRow < DATA_START_ROW Then Exit Sub
     ' Include rows left behind when the last tasks have been removed.
     outlineLastRow = Application.Max(lastRow, ws.UsedRange.Row + ws.UsedRange.Rows.Count - 1)
-    ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(outlineLastRow)).ClearOutline
+    UngroupTaskOutline ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(outlineLastRow))
     ws.Outline.SummaryRow = xlAbove
 
     ' Inner groups first; the outer group adds one level to all descendants.

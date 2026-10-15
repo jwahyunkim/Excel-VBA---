@@ -887,6 +887,9 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     Dim levelValue As Long
     Dim baseTaskText As String
     
+    Dim detailColumnHidden As Variant
+
+    detailColumnHidden = CaptureTaskDetailColumnHidden(ws)
     dataLastCol = COL_STATUS
     startCol = ws.Range(COL_GANTT_START & "1").Column
     endCol = startCol + CLng(chartEndDate - chartStartDate)
@@ -1054,6 +1057,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Range(COL_PROGRESS & DATA_START_ROW & ":" & COL_PROGRESS & lastRow).NumberFormat = "0%"
     ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).NumberFormat = "0%"
     ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol
+    RestoreTaskDetailColumnHidden ws, detailColumnHidden
     ActiveWindow.DisplayGridlines = False
 End Sub
 
