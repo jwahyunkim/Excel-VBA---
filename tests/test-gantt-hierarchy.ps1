@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$WorkbookPath, [string]$SavePath)
 
 $ErrorActionPreference = 'Stop'
@@ -11,13 +11,63 @@ $taskTemp = Join-Path ([IO.Path]::GetTempPath()) ('gantt-hierarchy-' + [guid]::N
 Copy-Item -LiteralPath $WorkbookPath -Destination $taskTemp
 $taskExcel = $null
 $taskBook = $null
+function Open-TaskTestWorkbook($Excel, [string]$Path) {
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        try { return $Excel.Workbooks.Open($Path, 0, $false) }
+        catch {
+            $openError = $_.Exception
+            while ($null -ne $openError -and $openError.HResult -ne -2146777998) {
+                $openError = $openError.InnerException
+            }
+            if ($null -eq $openError -or $attempt -eq 4) { throw }
+            # Excel may still be completing Close; retry only 0x800AC472.
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+function Assert-TaskExpandedView($Window, [string]$Context, [int]$FirstColumn = 1) {
+    if ($Window.FreezePanes -or $Window.SplitColumn -ne 0 -or $Window.SplitRow -ne 0 -or
+        $Window.Panes.Count -ne 1 -or $Window.ScrollColumn -ne $FirstColumn) {
+        throw "$Context did not restore the expanded view without splits at column $FirstColumn"
+    }
+}
+function Ensure-TaskWorkbookEventCall($Code, [string]$Name, [string]$Signature,
+                                      [string]$Statement, [string]$BeforeStatement = '') {
+    try { $start = $Code.ProcStartLine($Name, 0) }
+    catch {
+        $Code.AddFromString($Signature + "`r`n    " + $Statement + "`r`nEnd Sub")
+        return
+    }
+    $count = $Code.ProcCountLines($Name, 0)
+    if (([string]$Code.Lines($start, $count)).Contains($Statement)) { return }
+    for ($line = $start; $line -lt $start + $count; $line++) {
+        $current = ([string]$Code.Lines($line, 1)).Trim()
+        if (($BeforeStatement -and $current -eq $BeforeStatement) -or
+            (-not $BeforeStatement -and $current -eq 'End Sub')) {
+            $Code.InsertLines($line, '    ' + $Statement)
+            return
+        }
+    }
+    throw "Could not patch workbook event $Name"
+}
+function Assert-TaskRequestFreeze($Window, [string]$Context) {
+    if (-not $Window.FreezePanes -or $Window.SplitColumn -ne 1 -or $Window.SplitRow -ne 4 -or
+        $Window.Panes.Count -ne 4 -or $Window.Panes.Item(1).ScrollColumn -ne 8 -or
+        $Window.Panes.Item(3).ScrollColumn -ne 8) {
+        throw "$Context did not retain H-only request and four-row header freeze"
+    }
+}
 try {
     $taskExcel = New-Object -ComObject Excel.Application
-    $taskExcel.Visible = $false
+    # CommandBars.OnUpdate is a native UI event; minimized keeps the test unobtrusive.
+    $taskExcel.WindowState = -4143
+    $taskExcel.Visible = $true
     $taskExcel.DisplayAlerts = $false
     $taskExcel.EnableEvents = $false
     $taskExcel.AutomationSecurity = 1
-    $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
+    $taskBook = Open-TaskTestWorkbook $taskExcel $taskTemp
+    $taskInitialWindow = $taskBook.Windows.Item(1)
+    $taskOriginalScrollRow = [int]$taskInitialWindow.Panes.Item($taskInitialWindow.Panes.Count).ScrollRow
     $taskComponents = $taskBook.VBProject.VBComponents
     foreach ($taskModuleName in @('modGanttBars', 'modGanttHierarchy')) {
         try { $component = $taskComponents.Item($taskModuleName) }
@@ -28,6 +78,16 @@ try {
         if ($code.CountOfLines -gt 0) { $code.DeleteLines(1, $code.CountOfLines) }
         $code.AddFromString($source)
     }
+
+    try { $component = $taskComponents.Item('CGanttOutlineView') }
+    catch { $component = $taskComponents.Add(2); $component.Name = 'CGanttOutlineView' }
+    $source = [IO.File]::ReadAllText((Join-Path $taskRoot 'vba-files/Class/CGanttOutlineView.cls'))
+    $classCodeStart = $source.IndexOf('Option Explicit')
+    if ($classCodeStart -lt 0) { throw 'CGanttOutlineView is missing its VBA code section' }
+    $source = $source.Substring($classCodeStart)
+    $code = $component.CodeModule
+    if ($code.CountOfLines -gt 0) { $code.DeleteLines(1, $code.CountOfLines) }
+    $code.AddFromString($source)
 
     # Patch only the changed routines; retain the existing workbook's VBA text
     # and unrelated modules, including modules with legacy Korean encodings.
@@ -96,16 +156,23 @@ try {
         }
     }
     $code = $taskComponents.Item([string]$taskBook.CodeName).CodeModule
-    $start = $code.ProcStartLine('Workbook_Open', 0)
-    $count = $code.ProcCountLines('Workbook_Open', 0)
-    if (-not ([string]$code.Lines($start, $count)).Contains('InitializeTaskHierarchyOutlines')) {
-        for ($line = $start + $count - 1; $line -ge $start; $line--) {
-            if (([string]$code.Lines($line, 1)).Trim() -eq 'End Sub') {
-                $code.InsertLines($line, '    InitializeTaskHierarchyOutlines')
-                break
-            }
+    Ensure-TaskWorkbookEventCall $code 'Workbook_Open' 'Private Sub Workbook_Open()' 'InitializeTaskHierarchyOutlines'
+    Ensure-TaskWorkbookEventCall $code 'Workbook_Open' 'Private Sub Workbook_Open()' 'StartTaskOutlineViewMonitor'
+    $start = $code.ProcStartLine('Workbook_SheetActivate', 0)
+    $count = $code.ProcCountLines('Workbook_SheetActivate', 0)
+    for ($line = $start; $line -lt $start + $count; $line++) {
+        if (([string]$code.Lines($line, 1)).Trim() -eq 'EnsureTaskRequestFreeze Sh') {
+            $code.ReplaceLine($line, '    StartTaskOutlineViewMonitor')
         }
     }
+    Ensure-TaskWorkbookEventCall $code 'Workbook_SheetActivate' 'Private Sub Workbook_SheetActivate(ByVal Sh As Object)' 'StartTaskOutlineViewMonitor' 'If Sh.Name <> WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub'
+    Ensure-TaskWorkbookEventCall $code 'Workbook_Activate' 'Private Sub Workbook_Activate()' 'StartTaskOutlineViewMonitor'
+    Ensure-TaskWorkbookEventCall $code 'Workbook_Deactivate' 'Private Sub Workbook_Deactivate()' 'StopTaskOutlineViewMonitor'
+    Ensure-TaskWorkbookEventCall $code 'Workbook_BeforeClose' 'Private Sub Workbook_BeforeClose(Cancel As Boolean)' 'StopTaskOutlineViewMonitor'
+    Ensure-TaskWorkbookEventCall $code 'Workbook_BeforeSave' 'Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)' 'StopTaskOutlineViewMonitor' 'PrepareReleaseForSave SaveAsUI, Cancel'
+    Ensure-TaskWorkbookEventCall $code 'Workbook_BeforeSave' 'Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)' 'If Cancel Then StartTaskOutlineViewMonitor'
+    Ensure-TaskWorkbookEventCall $code 'Workbook_AfterSave' 'Private Sub Workbook_AfterSave(ByVal Success As Boolean)' 'StartTaskOutlineViewMonitor'
+    Ensure-TaskWorkbookEventCall $code 'Workbook_SheetSelectionChange' 'Private Sub Workbook_SheetSelectionChange(ByVal Sh As Object, ByVal Target As Range)' 'StartTaskOutlineViewMonitor'
 
     $harness = $taskComponents.Add(1)
     $harness.Name = 'GanttHierarchyRegression'
@@ -202,7 +269,10 @@ Public Function RunGanttHierarchyRegression() As String
     lastCol = original.Cells(GANTT_HEADER_ROW_DATE, original.Columns.Count).End(xlToLeft).Column
     firstDate = original.Cells(GANTT_HEADER_ROW_DATE, taskCol).Value
     lastDate = original.Cells(GANTT_HEADER_ROW_DATE, lastCol).Value
+    original.Outline.ShowLevels ColumnLevels:=2
     FormatBaseArea original, lastRow, firstDate, lastDate, holidays, workdays
+    Check Not ActiveWindow.FreezePanes And ActiveWindow.SplitColumn = 0 And ActiveWindow.SplitRow = 0, "expanded task view retained freeze/splits"
+    Check ActiveWindow.ScrollColumn = 1, "expanded task view does not start at A"
     For r = DATA_START_ROW To lastRow
         For c = 1 To UBound(dataBefore, 2)
             If c + 2 <> original.Range(COL_REQUEST & "1").Column Then
@@ -267,7 +337,8 @@ End Function
     $taskBook.Save()
     $taskBook.Close($false)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
-    $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
+    $taskBook = $null
+    $taskBook = Open-TaskTestWorkbook $taskExcel $taskTemp
     $taskComponents = $taskBook.VBProject.VBComponents
     $harness = $taskComponents.Item('GanttHierarchyRegression')
     $barRegression = $taskComponents.Item('GanttBarsRegression')
@@ -285,10 +356,27 @@ End Function
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
     $taskBook = $null
     $taskExcel.EnableEvents = $true
-    $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
+    $taskBook = Open-TaskTestWorkbook $taskExcel $taskTemp
     $taskSheet = $taskBook.Worksheets.Item('Sheet1')
     if (-not $taskBook.Saved) {
         throw 'Opening the workbook dirtied it during hierarchy initialization'
+    }
+    $taskWindow = $taskExcel.ActiveWindow
+    Assert-TaskExpandedView $taskWindow 'Initial expanded reopen'
+    # Expanded sheet activation must clear a previous request/header freeze.
+    $taskWindow.FreezePanes = $false
+    $taskWindow.SplitColumn = 0
+    $taskWindow.SplitRow = 0
+    $taskWindow.ScrollColumn = 8
+    $taskWindow.SplitColumn = 1
+    $taskWindow.SplitRow = 4
+    $taskWindow.FreezePanes = $true
+    $taskBook.Saved = $true
+    $taskBook.Worksheets.Item('config').Activate()
+    $taskSheet.Activate()
+    Assert-TaskExpandedView $taskWindow 'Expanded task sheet activation'
+    if (-not $taskBook.Saved) {
+        throw 'Task sheet activation dirtied a clean workbook while restoring the expanded view'
     }
     # An actual unsaved input edit must remain unsaved after initialization.
     $taskExcel.EnableEvents = $false
@@ -313,7 +401,10 @@ End Function
         $taskSheet.Columns.Item(24).OutlineLevel -ne 1 -or $taskSheet.Outline.SummaryColumn -ne -4152) {
         throw 'Request/Gantt columns or column summary position are incorrect'
     }
-    $taskSheet.Columns.Item(24).ShowDetail = $false
+    # Native outline levels update command state; the UI event synchronizes the view.
+    $taskSheet.Outline.ShowLevels([Type]::Missing, 1)
+    Start-Sleep -Seconds 2
+    Assert-TaskRequestFreeze $taskWindow 'Native column level 1 collapse'
     for ($taskColumn = 9; $taskColumn -le 23; $taskColumn++) {
         if (-not $taskSheet.Columns.Item($taskColumn).Hidden) {
             throw "Protected column collapse failed at column $taskColumn"
@@ -322,6 +413,11 @@ End Function
     if ($taskSheet.Columns.Item(8).Hidden -or $taskSheet.Columns.Item(24).Hidden) {
         throw 'Column collapse hid the request or Gantt column'
     }
+    $taskWindow.Panes.Item(4).ScrollColumn = 30
+    $taskWindow.Panes.Item(4).ScrollRow = 59
+    Assert-TaskRequestFreeze $taskWindow 'Collapsed horizontal scroll'
+    $taskScrollColumn = $taskWindow.Panes.Item(4).ScrollColumn
+    $taskScrollRow = $taskWindow.Panes.Item(4).ScrollRow
     $taskSheet.Rows.Item(59).ShowDetail = $false
     if (-not $taskSheet.Rows.Item(60).Hidden -or $taskSheet.Rows.Item(59).Hidden) {
         throw 'Collapse after reopening failed'
@@ -329,6 +425,11 @@ End Function
     $taskSheet.Rows.Item(59).ShowDetail = $true
     $taskSheet.Activate()
     $taskExcel.Run("'$($taskBook.Name)'!RefreshGanttSheet", $false)
+    Assert-TaskRequestFreeze $taskWindow 'Collapsed refresh'
+    if ($taskWindow.Panes.Item(4).ScrollColumn -ne $taskScrollColumn -or
+        $taskWindow.Panes.Item(4).ScrollRow -ne $taskScrollRow) {
+        throw 'Refresh moved the scrolling Gantt pane away from its current date or task row'
+    }
     if ($taskSheet.Rows.Item(53).OutlineLevel -ne 2 -or $taskSheet.Rows.Item(61).OutlineLevel -ne 3) {
         throw 'Refresh changed the outline depth'
     }
@@ -366,10 +467,17 @@ End Function
     $taskBook.Save()
     $taskBook.Close($false)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
-    $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
+    $taskBook = $null
+    $taskBook = Open-TaskTestWorkbook $taskExcel $taskTemp
     $taskSheet = $taskBook.Worksheets.Item('Sheet1')
     if (-not $taskBook.Saved -or -not $taskSheet.ProtectContents -or -not $taskSheet.EnableOutlining) {
         throw 'Collapsed reopen did not retain clean state and protected outlines'
+    }
+    $taskWindow = $taskExcel.ActiveWindow
+    Assert-TaskRequestFreeze $taskWindow 'Collapsed reopen'
+    if ($taskWindow.Panes.Item(4).ScrollColumn -ne $taskScrollColumn -or
+        $taskWindow.Panes.Item(4).ScrollRow -ne $taskScrollRow) {
+        throw 'Collapsed reopen moved the scrolling Gantt pane away from its saved position'
     }
     for ($taskColumn = 9; $taskColumn -le 23; $taskColumn++) {
         if (-not $taskSheet.Columns.Item($taskColumn).Hidden -or
@@ -381,26 +489,67 @@ End Function
         $taskSheet.Rows.Item(53).OutlineLevel -ne 2 -or $taskSheet.Rows.Item(61).OutlineLevel -ne 3) {
         throw 'Collapsed reopen changed request/Gantt visibility or row outlines'
     }
-    $taskSheet.Columns.Item(24).ShowDetail = $true
+    # Native outline level 2 must clear all freeze/splits and return to A once.
+    $taskSheet.Outline.ShowLevels([Type]::Missing, 2)
+    Start-Sleep -Seconds 2
     for ($taskColumn = 9; $taskColumn -le 23; $taskColumn++) {
         if ($taskSheet.Columns.Item($taskColumn).Hidden) {
             throw "Column expansion after reopening failed at column $taskColumn"
         }
     }
-    # Deliver the workbook expanded, matching its original view.
+    Assert-TaskExpandedView $taskWindow 'Native column level 2 expansion'
+    if ($taskWindow.ScrollRow -ne $taskScrollRow) {
+        throw 'Expansion changed the visible task row'
+    }
+    $taskWindow.ScrollColumn = 30
+    $taskExcel.Run("'$($taskBook.Name)'!TaskOutlineViewTick")
+    Assert-TaskExpandedView $taskWindow 'Expanded manual horizontal scroll' 30
+    # Restore the original view and verify the saved expanded state on reopen.
+    $taskWindow.ScrollColumn = 1
+    $taskWindow.ScrollRow = [Math]::Max(1, $taskOriginalScrollRow)
     $taskBook.Save()
     $taskBook.Close($false)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
     $taskBook = $null
-    Write-Output 'PASS: clean and collapsed reopen, preserved unsaved edits, protected row/column collapse/expand and collapsed full Gantt refresh'
+    $taskBook = Open-TaskTestWorkbook $taskExcel $taskTemp
+    $taskSheet = $taskBook.Worksheets.Item('Sheet1')
+    $taskWindow = $taskExcel.ActiveWindow
+    Assert-TaskExpandedView $taskWindow 'Final expanded reopen'
+    if (-not $taskBook.Saved -or $taskWindow.ScrollRow -ne [Math]::Max(1, $taskOriginalScrollRow)) {
+        throw 'Expanded reopen did not retain clean state and original task row'
+    }
+    $taskBook.Close($false)
+    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
+    $taskBook = $null
+    Start-Sleep -Seconds 3
+    if ($taskExcel.Workbooks.Count -ne 0) {
+        throw 'Outline event cleanup left a workbook open after closing'
+    }
+    Write-Output 'PASS: native levels 1/2 synchronize collapse freeze and expanded A view, manual expanded scrolling, clean reopen, saved row/date positions, protected outlines, full refresh and outline event close cleanup'
     if ($SavePath) {
         Copy-Item -LiteralPath $taskTemp -Destination ([IO.Path]::GetFullPath($SavePath))
         Write-Output ('UPDATED COPY: ' + [IO.Path]::GetFullPath($SavePath))
     }
 }
+catch {
+    Write-Output ('REGRESSION FAILURE: ' + $_.Exception.ToString())
+    Write-Output ('SCRIPT STACK: ' + $_.ScriptStackTrace)
+    throw
+}
 finally {
-    if ($null -ne $taskBook) { try { $taskBook.Close($false) } catch {}; [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook) }
-    if ($null -ne $taskExcel) { try { $taskExcel.Quit() } catch {}; [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskExcel) }
+    if ($null -ne $taskBook) {
+        try { $taskBook.Close($false) } catch {}
+        try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook) } catch {}
+        $taskBook = $null
+    }
+    if ($null -ne $taskExcel) {
+        try { $taskExcel.Quit() } catch {}
+        try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskExcel) } catch {}
+        $taskExcel = $null
+    }
     [GC]::Collect()
-    if (Test-Path -LiteralPath $taskTemp) { Remove-Item -LiteralPath $taskTemp -Force }
+    if (Test-Path -LiteralPath $taskTemp) {
+        try { Remove-Item -LiteralPath $taskTemp -Force }
+        catch { Write-Warning ('Could not remove the temporary workbook: ' + $taskTemp + ' (' + $_.Exception.Message + ')') }
+    }
 }

@@ -1,6 +1,9 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
 
+Private mTaskOutlineViewEvents As CGanttOutlineView
+Private mTaskOutlineViewStarting As Boolean
+
 Public Sub InitializeTaskHierarchyOutlines()
     Dim ws As Worksheet
     Dim wasSaved As Boolean
@@ -12,11 +15,127 @@ Public Sub InitializeTaskHierarchyOutlines()
             ' restore them when a saved, protected workbook is opened.
             UnprotectTaskSheet ws
             EnsureTaskDetailColumnOutline ws
+            EnsureTaskRequestFreeze ws
             ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
         End If
     Next ws
     ' Session-only protection restoration must not dirty a saved workbook.
     If wasSaved Then ThisWorkbook.Saved = True
+End Sub
+
+Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
+    Dim taskWindow As Window, requestCol As Long, previousRow As Long, c As Long
+    Dim wasSaved As Boolean, collapsed As Boolean
+    Dim detailColumns As Range, wasScreenUpdating As Boolean
+    Dim viewError As Long, viewErrorText As String
+    If ActiveWindow Is Nothing Then Exit Sub
+    If Not (ActiveWorkbook Is ws.Parent) Then Exit Sub
+    If Not (ActiveSheet Is ws) Then Exit Sub
+    If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) <> "No." Or _
+       CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) <> "Level" Then Exit Sub
+
+    Set taskWindow = ActiveWindow
+    requestCol = ws.Range(COL_REQUEST & "1").Column
+    collapsed = True
+    For c = requestCol + 1 To ws.Range(COL_GANTT_START & "1").Column - 1
+        If Not ws.Columns(c).Hidden Then
+            collapsed = False
+            Exit For
+        End If
+    Next c
+    With taskWindow
+        If collapsed Then
+            If .FreezePanes And .SplitColumn = 1 And .SplitRow = HEADER_ROW Then
+                If .Panes(1).ScrollColumn = requestCol Then Exit Sub
+            End If
+        ElseIf Not .FreezePanes And .SplitColumn = 0 And .SplitRow = 0 Then
+            ' Restore A only on the transition; leave normal expanded scrolling free.
+            Exit Sub
+        End If
+        wasSaved = ws.Parent.Saved
+        wasScreenUpdating = Application.ScreenUpdating
+        previousRow = .Panes(.Panes.Count).ScrollRow
+        On Error GoTo Failed
+        Application.ScreenUpdating = False
+        .FreezePanes = False
+        .SplitColumn = 0
+        .SplitRow = 0
+        If collapsed Then
+            ' Excel counts hidden columns differently when creating a split.
+            ' Build the H-only freeze with details visible, then restore the fold.
+            Set detailColumns = ws.Range(ws.Cells(1, requestCol + 1), _
+                ws.Cells(1, ws.Range(COL_GANTT_START & "1").Column - 1)).EntireColumn
+            detailColumns.Hidden = False
+            .ScrollColumn = requestCol
+            .ScrollRow = 1
+            .SplitColumn = 1
+            .SplitRow = HEADER_ROW
+            .FreezePanes = True
+            detailColumns.Hidden = True
+            .Panes(.Panes.Count).ScrollRow = Application.Max(DATA_START_ROW, previousRow)
+        Else
+            .ScrollColumn = 1
+            .ScrollRow = Application.Max(1, previousRow)
+        End If
+    End With
+    If wasSaved Then ws.Parent.Saved = True
+    Application.ScreenUpdating = wasScreenUpdating
+    Exit Sub
+Failed:
+    viewError = Err.Number
+    viewErrorText = Err.Description
+    On Error Resume Next
+    If Not detailColumns Is Nothing Then detailColumns.Hidden = True
+    Application.ScreenUpdating = wasScreenUpdating
+    If wasSaved Then ws.Parent.Saved = True
+    On Error GoTo 0
+    Err.Raise viewError, "EnsureTaskRequestFreeze", viewErrorText
+End Sub
+
+Private Function ActiveTaskOutlineSheet() As Worksheet
+    If ActiveWindow Is Nothing Or ActiveWorkbook Is Nothing Then Exit Function
+    If Not (ActiveWorkbook Is ThisWorkbook) Then Exit Function
+    If Not TypeOf ActiveSheet Is Worksheet Then Exit Function
+    If CStr(ActiveSheet.Cells(HEADER_ROW, COL_NO).Value2) <> "No." Or _
+       CStr(ActiveSheet.Cells(HEADER_ROW, COL_LEVEL).Value2) <> "Level" Then Exit Function
+    Set ActiveTaskOutlineSheet = ActiveSheet
+End Function
+
+Public Sub StartTaskOutlineViewMonitor()
+    Dim ws As Worksheet
+    If mTaskOutlineViewStarting Then Exit Sub
+    mTaskOutlineViewStarting = True
+    On Error GoTo Failed
+    Set ws = ActiveTaskOutlineSheet()
+    If ws Is Nothing Then
+        StopTaskOutlineViewMonitor
+        GoTo Finished
+    End If
+    If mTaskOutlineViewEvents Is Nothing Then
+        Set mTaskOutlineViewEvents = New CGanttOutlineView
+        mTaskOutlineViewEvents.StartListening
+    End If
+    EnsureTaskRequestFreeze ws
+Finished:
+    mTaskOutlineViewStarting = False
+    Exit Sub
+Failed:
+    StopTaskOutlineViewMonitor
+    Resume Finished
+End Sub
+
+Public Sub StopTaskOutlineViewMonitor()
+    If Not mTaskOutlineViewEvents Is Nothing Then
+        mTaskOutlineViewEvents.StopListening
+        Set mTaskOutlineViewEvents = Nothing
+    End If
+End Sub
+
+Public Sub TaskOutlineViewTick()
+    Dim ws As Worksheet
+    If mTaskOutlineViewStarting Then Exit Sub
+    Set ws = ActiveTaskOutlineSheet()
+    If Not ws Is Nothing Then EnsureTaskRequestFreeze ws
 End Sub
 
 Public Function CaptureTaskDetailColumnHidden(ByVal ws As Worksheet) As Variant
@@ -40,6 +159,7 @@ Public Sub RestoreTaskDetailColumnHidden(ByVal ws As Worksheet, ByVal hidden As 
             ws.Columns(c).Hidden = CBool(hidden(c))
         End If
     Next c
+    EnsureTaskRequestFreeze ws
 End Sub
 
 Private Sub UngroupTaskOutline(ByVal target As Range)
