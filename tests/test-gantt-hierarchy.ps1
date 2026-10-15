@@ -19,17 +19,29 @@ try {
     $taskExcel.AutomationSecurity = 1
     $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
     $taskComponents = $taskBook.VBProject.VBComponents
-    try { $component = $taskComponents.Item('modGanttHierarchy') }
-    catch { $component = $taskComponents.Add(1); $component.Name = 'modGanttHierarchy' }
-    $source = [IO.File]::ReadAllText((Join-Path $taskRoot 'vba-files/Module/modGanttHierarchy.bas'))
-    $source = $source -replace '(?m)^Attribute VB_Name = .*\r?\n', ''
-    $code = $component.CodeModule
-    if ($code.CountOfLines -gt 0) { $code.DeleteLines(1, $code.CountOfLines) }
-    $code.AddFromString($source)
+    foreach ($taskModuleName in @('modGanttBars', 'modGanttHierarchy')) {
+        try { $component = $taskComponents.Item($taskModuleName) }
+        catch { $component = $taskComponents.Add(1); $component.Name = $taskModuleName }
+        $source = [IO.File]::ReadAllText((Join-Path $taskRoot ('vba-files/Module/' + $taskModuleName + '.bas')))
+        $source = $source -replace '(?m)^Attribute VB_Name = .*\r?\n', ''
+        $code = $component.CodeModule
+        if ($code.CountOfLines -gt 0) { $code.DeleteLines(1, $code.CountOfLines) }
+        $code.AddFromString($source)
+    }
 
     # Patch only the changed routines; retain the existing workbook's VBA text
     # and unrelated modules, including modules with legacy Korean encodings.
     $code = $taskComponents.Item('modGanttSheet').CodeModule
+    $start = $code.ProcStartLine('ClearGanttArea', 0)
+    $count = $code.ProcCountLines('ClearGanttArea', 0)
+    if (-not ([string]$code.Lines($start, $count)).Contains('ClearTaskBarVisuals ws')) {
+        for ($line = $start; $line -lt $start + $count; $line++) {
+            if (([string]$code.Lines($line, 1)).Trim().StartsWith('startCol =')) {
+                $code.InsertLines($line, '    ClearTaskBarVisuals ws')
+                break
+            }
+        }
+    }
     for ($line = $code.CountOfLines; $line -ge 1; $line--) {
         $text = [string]$code.Lines($line, 1)
         if ($text.Contains('BuildTaskDisplayText(baseTaskText, levelValue)')) {
@@ -74,6 +86,8 @@ Public Function RunGanttHierarchyRegression() As String
     Dim levels As Variant, dataBefore As Variant, hiddenBefore() As Boolean
     Dim holidays As Object, workdays As Object, firstDate As Date, lastDate As Date
     Dim lastRow As Long, lastCol As Long, taskCol As Long
+    Dim existingShape As Shape, unrelatedShapeCount As Long
+    Dim edge As Variant, edgeColor As Long
     On Error GoTo Failed
     Application.EnableEvents = False
     Set original = ThisWorkbook.Worksheets("Sheet1")
@@ -120,6 +134,11 @@ Public Function RunGanttHierarchyRegression() As String
     Set ws = Nothing
 
     original.Activate
+    For Each existingShape In original.Shapes
+        If Left$(existingShape.Name, 6) <> "gtBar_" And Left$(existingShape.Name, 6) <> "gtKey_" Then
+            unrelatedShapeCount = unrelatedShapeCount + 1
+        End If
+    Next existingShape
     lastRow = GetLastDataRow(original)
     dataBefore = original.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_STATUS & lastRow).Value2
     ReDim hiddenBefore(DATA_START_ROW To lastRow)
@@ -149,9 +168,38 @@ Public Function RunGanttHierarchyRegression() As String
     Check original.Range("H52").Font.Bold, "52 root emphasis"
     Check original.Rows(53).OutlineLevel = 2, "52 group children"
     Check original.Rows(61).OutlineLevel = 3, "59 group grandchildren"
-    Check original.Range("AL52").Interior.Color = RGB(102, 255, 51), "52 actual bar changed"
-    Check original.Range("AJ52").Interior.Color = RGB(180, 180, 180), "52 plan bar changed"
-    RunGanttHierarchyRegression = "PASS: nested outlines, collapse/expand under protection, idempotence, indentation, input preservation, bars, holidays, today and warning colors"
+    Check original.Range("AL52").Interior.Color = RGB(36, 59, 83), "52 summary cell"
+    Check original.Range("AL53").Interior.Color = RGB(52, 120, 212), "53 child cell"
+    Check original.Range("AL61").Interior.Color = RGB(0, 140, 134), "61 detail cell"
+    Check original.Range("AJ52").Interior.Color = RGB(203, 213, 225), "52 plan cell"
+    Check Application.CountA(original.Range("X5:BA" & lastRow)) = 0, "timeline captions remain"
+    Check Application.CountA(original.Range("L3:W3")) = 0, "legend remains"
+    Check original.Range("AL52").Borders(xlEdgeRight).Color = RGB(22, 163, 74), "52 right status"
+    Check original.Range("AL52").Borders(xlEdgeBottom).Color <> RGB(22, 163, 74), "52 bottom status remains"
+    Check original.Range("AJ59").Borders(xlEdgeTop).Color = RGB(99, 102, 241), "combined group top"
+    Check original.Range("AK59").Borders(xlEdgeTop).Color = RGB(99, 102, 241), "combined frame bridges plan/actual gap"
+    Check original.Range("AK74").Borders(xlEdgeBottom).Color = RGB(99, 102, 241), "combined group bottom bridges gap"
+    Check original.Range("AJ64").Borders(xlEdgeLeft).Color = RGB(99, 102, 241), "combined group left"
+    For r = 60 To 73
+        Check original.Cells(r, "AK").Borders(xlEdgeTop).Color <> RGB(99, 102, 241), "internal child top frame remains row " & r
+        Check original.Cells(r, "AK").Borders(xlEdgeBottom).Color <> RGB(99, 102, 241), "internal child bottom frame remains row " & r
+        Check original.Cells(r, "AL").Borders(xlEdgeRight).Color = RGB(22, 163, 74), "descendant status right lost row " & r
+    Next r
+    Check original.Range("AL61").Borders(xlEdgeLeft).Color <> RGB(99, 102, 241), "separate actual outline remains"
+    ' The removed table boxes must not return in task columns or unused dates.
+    For r = 52 To 74
+        For c = 2 To lastCol
+            If c < taskCol Or c <= original.Range("AH1").Column Or c >= original.Range("AN1").Column Then
+                For Each edge In Array(xlEdgeTop, xlEdgeBottom, xlEdgeLeft, xlEdgeRight)
+                    edgeColor = original.Cells(r, c).Borders(edge).Color
+                    Check edgeColor <> RGB(124, 58, 237) And edgeColor <> RGB(6, 182, 212) And _
+                          edgeColor <> RGB(13, 148, 136) And edgeColor <> RGB(99, 102, 241), "bar outline outside its dates row " & r & " col " & c
+                Next edge
+            End If
+        Next c
+    Next r
+    Check original.Shapes.Count = unrelatedShapeCount, "new drawing objects remain or existing buttons lost"
+    RunGanttHierarchyRegression = "PASS: one frame per level-1 task with all descendants, no child frames, combined plan/actual gap coverage, right status, no legend/captions, protected outlines and input preservation"
     Exit Function
 Failed:
     RunGanttHierarchyRegression = "FAIL: " & Err.Description
@@ -159,10 +207,28 @@ Failed:
     If Not ws Is Nothing Then ws.Delete
 End Function
 '@)
+    $barRegression = $taskComponents.Add(1)
+    $barRegression.Name = 'GanttBarsRegression'
+    $source = [IO.File]::ReadAllText((Join-Path $taskRoot 'tests/GanttBarsRegression.bas'))
+    $source = $source -replace '(?m)^Attribute VB_Name = .*\r?\n', ''
+    $barRegression.CodeModule.AddFromString($source)
+    # Reload the edited VBA before execution so Excel rebuilds its compile cache.
+    $taskBook.Save()
+    $taskBook.Close($false)
+    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
+    $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
+    $taskComponents = $taskBook.VBProject.VBComponents
+    $harness = $taskComponents.Item('GanttHierarchyRegression')
+    $barRegression = $taskComponents.Item('GanttBarsRegression')
+    Write-Output 'Running native hierarchy and bar regression'
+    $barResult = [string]$taskExcel.Run("'$($taskBook.Name)'!RunGanttBarsRegression")
+    if (-not $barResult.StartsWith('PASS:')) { throw $barResult }
+    Write-Output $barResult
     $result = [string]$taskExcel.Run("'$($taskBook.Name)'!RunGanttHierarchyRegression")
     if (-not $result.StartsWith('PASS:')) { throw $result }
     Write-Output $result
     $taskComponents.Remove($harness)
+    $taskComponents.Remove($barRegression)
     $taskBook.Save()
     $taskBook.Close($false)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
@@ -170,6 +236,20 @@ End Function
     $taskExcel.EnableEvents = $true
     $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
     $taskSheet = $taskBook.Worksheets.Item('Sheet1')
+    if (-not $taskBook.Saved) {
+        throw 'Opening the workbook dirtied it during hierarchy initialization'
+    }
+    # An actual unsaved input edit must remain unsaved after initialization.
+    $taskExcel.EnableEvents = $false
+    $taskOwnerBefore = $taskSheet.Range('J52').Value2
+    $taskSheet.Range('J52').Value2 = [string]$taskOwnerBefore + ' regression edit'
+    $taskExcel.Run("'$($taskBook.Name)'!InitializeTaskHierarchyOutlines")
+    if ($taskBook.Saved) {
+        throw 'Hierarchy initialization hid an existing unsaved input edit'
+    }
+    $taskSheet.Range('J52').Value2 = $taskOwnerBefore
+    $taskBook.Saved = $true
+    $taskExcel.EnableEvents = $true
     if (-not $taskSheet.ProtectContents -or -not $taskSheet.EnableOutlining) {
         throw 'Saved workbook did not restore protected outlines on open'
     }
@@ -183,10 +263,31 @@ End Function
     if ($taskSheet.Rows.Item(53).OutlineLevel -ne 2 -or $taskSheet.Rows.Item(61).OutlineLevel -ne 3) {
         throw 'Refresh changed the outline depth'
     }
+    if ($taskExcel.WorksheetFunction.CountA($taskSheet.Range('L3:W3')) -ne 0 -or
+        $taskExcel.WorksheetFunction.CountA($taskSheet.Range('X5:BA74')) -ne 0) {
+        throw 'Refresh restored a legend or timeline caption'
+    }
+    if ($taskSheet.Range('AL52').Borders.Item(10).Color -ne 4891414 -or
+        $taskSheet.Range('AK59').Borders.Item(8).Color -ne 15820387 -or
+        $taskSheet.Range('AK74').Borders.Item(9).Color -ne 15820387) {
+        throw 'Refresh changed status or combined plan/actual frames'
+    }
+    for ($taskRow = 60; $taskRow -le 73; $taskRow++) {
+        if ($taskSheet.Cells.Item($taskRow, 37).Borders.Item(8).Color -eq 15820387 -or
+            $taskSheet.Cells.Item($taskRow, 37).Borders.Item(9).Color -eq 15820387 -or
+            $taskSheet.Cells.Item($taskRow, 38).Borders.Item(10).Color -ne 4891414) {
+            throw "Refresh restored a child frame or lost status at row $taskRow"
+        }
+    }
+    foreach ($taskShape in $taskSheet.Shapes) {
+        if ($taskShape.Name.StartsWith('gtBar_') -or $taskShape.Name.StartsWith('gtKey_')) {
+            throw 'Refresh inserted a Gantt drawing object'
+        }
+    }
     $taskBook.Close($false)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
     $taskBook = $null
-    Write-Output 'PASS: reopen, protected collapse/expand and full Gantt refresh'
+    Write-Output 'PASS: clean reopen, preserved unsaved edits, protected collapse/expand and full Gantt refresh'
     if ($SavePath) {
         Copy-Item -LiteralPath $taskTemp -Destination ([IO.Path]::GetFullPath($SavePath))
         Write-Output ('UPDATED COPY: ' + [IO.Path]::GetFullPath($SavePath))
@@ -196,6 +297,5 @@ finally {
     if ($null -ne $taskBook) { try { $taskBook.Close($false) } catch {}; [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook) }
     if ($null -ne $taskExcel) { try { $taskExcel.Quit() } catch {}; [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskExcel) }
     [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
     if (Test-Path -LiteralPath $taskTemp) { Remove-Item -LiteralPath $taskTemp -Force }
 }
