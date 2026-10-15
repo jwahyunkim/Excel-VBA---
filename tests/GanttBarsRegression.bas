@@ -212,7 +212,7 @@ Public Function RunGanttBarsRegression() As String
     ClearTaskBarVisuals ws
     Check ws.Shapes.Count = 1, "repeated cleanup changed unrelated object"
     VerifyLegendCleared ws
-    result = "PASS: one combined planned/actual rectangle per Level 1 subtree, no inner Level 2 or Level 3 outlines, bridged calendar gaps, right status priority, all-edge stale cleanup, no legend or markers, input preservation, hide/outline restore and no inserted objects"
+    result = "PASS: one combined rectangle per Level 1 with children, no standalone frame, no inner Level 2 or Level 3 outlines, bridged calendar gaps, right status priority, all-edge stale cleanup, no legend or markers, input preservation, hide/outline restore and no inserted objects"
     GoTo Cleanup
 Failed:
     result = "FAIL: " & Err.Description
@@ -402,7 +402,7 @@ Private Sub VerifyCombinedFrameEdges(ByVal ws As Worksheet, Optional ByVal hiera
     Dim edge As Variant, frames As Variant, frame As Variant, permitted As Boolean
     Dim minCols() As Long, maxCols() As Long, actualCol As Long
     If hierarchyFixture Then
-        frames = Array(Array(5, 10), Array(11, 11))
+        frames = Array(Array(5, 10))
     Else
         frames = Array(Array(5, 11), Array(12, 19))
     End If
@@ -498,7 +498,7 @@ Private Sub VerifyCombinedHierarchyFrames(ByVal ws As Worksheet, ByVal holidays 
     SetFixturePlan ws, 8, DateSerial(2026, 10, 16), DateSerial(2026, 10, 19)
     SetFixturePlan ws, 9, DateSerial(2026, 10, 12), DateSerial(2026, 10, 13)
     SetFixturePlan ws, 10, DateSerial(2026, 10, 13), DateSerial(2026, 10, 13)
-    ' A separate Level 1 task must enclose plan and actual in its own rectangle.
+    ' A standalone Level 1 task has no frame, but its right status remains.
     SetFixturePlan ws, 11, DateSerial(2026, 10, 12), DateSerial(2026, 10, 13)
     ws.Range("N11").Value = DateSerial(2026, 10, 22)
     ws.Range("O11").Value = DateSerial(2026, 10, 23)
@@ -513,10 +513,10 @@ Private Sub VerifyCombinedHierarchyFrames(ByVal ws As Worksheet, ByVal holidays 
     CheckBarBorder ws.Range("AD10"), xlEdgeBottom, frameColor, xlMedium, "root bottom bridges Sunday"
     CheckBarBorder ws.Range("X7"), xlEdgeLeft, frameColor, xlMedium, "root left encloses Level 3 rows"
     CheckBarBorder ws.Range("AG8"), xlEdgeRight, frameColor, xlMedium, "root right encloses shorter child periods"
-    CheckBarBorder ws.Range("AH11"), xlEdgeTop, frameColor, xlMedium, "separate Level 1 top bridges plan actual gap"
-    CheckBarBorder ws.Range("Z11"), xlEdgeBottom, frameColor, xlMedium, "separate Level 1 bottom bridges holiday"
-    CheckBarBorder ws.Range("AG11"), xlEdgeBottom, frameColor, xlMedium, "separate Level 1 bottom bridges empty date"
-    CheckBarBorder ws.Range("X11"), xlEdgeLeft, frameColor, xlMedium, "separate Level 1 left starts at plan"
+    Check Not HasOwnedBarBorder(ws.Range("AH11"), xlEdgeTop), "standalone Level 1 has a top frame"
+    Check Not HasOwnedBarBorder(ws.Range("Z11"), xlEdgeBottom), "standalone Level 1 has a bottom frame across holiday"
+    Check Not HasOwnedBarBorder(ws.Range("AG11"), xlEdgeBottom), "standalone Level 1 has a bottom frame across empty date"
+    Check Not HasOwnedBarBorder(ws.Range("X11"), xlEdgeLeft), "standalone Level 1 has a left frame"
     CheckBarBorder ws.Range("AF7"), xlEdgeRight, RGB(22, 163, 74), xlMedium, "child right status survives outer frame"
     CheckBarBorder ws.Range("AI11"), xlEdgeRight, RGB(22, 163, 74), xlMedium, "standalone status right"
     Check Not HasOwnedBarBorder(ws.Range("Y7"), xlEdgeRight), "plan end gained a separate vertical outline"

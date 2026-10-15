@@ -155,11 +155,11 @@ End Sub
 Private Sub DrawTaskBarFrames(ByVal ws As Worksheet, ByRef barMask() As Boolean, _
                               ByVal lastRow As Long, ByVal startCol As Long, ByVal endCol As Long)
     Dim r As Long, groupEnd As Long
-    ' One level-1 task and every descendant form exactly one frame.
+    ' A level-1 task with descendants forms one frame; standalone tasks have none.
     ' Level-2/3 rows never add internal group or individual frames.
     For r = DATA_START_ROW To lastRow
         If HasTaskContent(ws, r) Then
-            If GetTaskLevel(ws, r) = 1 Then
+            If GetTaskLevel(ws, r) = 1 And HasChildTask(ws, r, lastRow) Then
                 groupEnd = GetTaskSubtreeEndRow(ws, r, lastRow)
                 Do While groupEnd > r
                     If HasTaskContent(ws, groupEnd) Then Exit Do
