@@ -457,6 +457,7 @@ Public Sub ApplyTaskHierarchyAppearance(ByVal ws As Worksheet, ByVal lastRow As 
         If taskLevel = 1 Then inRootGroup = hasChildren
         statusText = CStr(ws.Cells(r, COL_STATUS).Value)
         isWarning = (statusText = STATUS_HOLD Or statusText = STATUS_DELAY Or _
+                     statusText = STATUS_TODAY Or _
                      statusText = STATUS_ERROR)
 
         Set rowRange = ws.Range(ws.Cells(r, ws.Range(COL_NO & "1").Column), _

@@ -454,6 +454,12 @@ Public Function GetTaskStatus(ws As Worksheet, ByVal rowNum As Long, ByVal holid
         Exit Function
     End If
     
+    '2026-10-16 김종현 수정 : 오늘 시작해 오늘 끝내야 하는 미완료 업무는 지연 대신 당일로 표시
+    If DateValue(CDate(planS)) = Date And DateValue(CDate(planE)) = Date Then
+        GetTaskStatus = STATUS_TODAY
+        Exit Function
+    End If
+
     expectedProgress = GetExpectedProgress(CDate(planS), CDate(planE), holidayDict, workdayDict)
     progressGap = expectedProgress - actualProgress
     

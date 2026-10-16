@@ -207,6 +207,7 @@ Public Const HIDE_EXCLUDE_DATE_START_CELL As String = "G6"
 
 Public Const STATUS_NORMAL As String = "정상"
 Public Const STATUS_CAUTION As String = "주의"
+Public Const STATUS_TODAY As String = "당일"
 Public Const STATUS_DELAY As String = "지연"
 Public Const STATUS_DONE As String = "완료"
 Public Const STATUS_HOLD As String = "보류"
