@@ -744,6 +744,7 @@ Private Function BuildParentStatusFromChildren(ws As Worksheet, ByVal rowNum As 
     Dim hasError As Boolean
     Dim hasDelay As Boolean
     Dim hasCaution As Boolean
+    Dim hasToday As Boolean
     Dim hasHold As Boolean
     Dim allDone As Boolean
     
@@ -774,6 +775,9 @@ Private Function BuildParentStatusFromChildren(ws As Worksheet, ByVal rowNum As 
                     Case STATUS_CAUTION
                         hasCaution = True
                         allDone = False
+                    Case STATUS_TODAY
+                        hasToday = True
+                        allDone = False
                     Case Else
                         allDone = False
                 End Select
@@ -802,6 +806,8 @@ Private Function BuildParentStatusFromChildren(ws As Worksheet, ByVal rowNum As 
         BuildParentStatusFromChildren = STATUS_CAUTION
     ElseIf hasHold Then
         BuildParentStatusFromChildren = STATUS_HOLD
+    ElseIf hasToday Then
+        BuildParentStatusFromChildren = STATUS_TODAY
     Else
         BuildParentStatusFromChildren = STATUS_NORMAL
     End If
@@ -818,6 +824,8 @@ Private Function GetTaskStatusFillColor(ByVal statusText As String) As Long
             GetTaskStatusFillColor = RGB(91, 155, 213)
         Case STATUS_CAUTION
             GetTaskStatusFillColor = RGB(255, 192, 0)
+        Case STATUS_TODAY
+            GetTaskStatusFillColor = RGB(45, 160, 155)
         Case STATUS_HOLD
             GetTaskStatusFillColor = RGB(153, 102, 204)
         Case STATUS_DELAY
@@ -955,6 +963,9 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
                         ws.Cells(r, COL_STATUS).Interior.Color = RGB(221, 235, 247)
                     Case STATUS_CAUTION
                         ws.Cells(r, COL_STATUS).Interior.Color = RGB(255, 235, 156)
+                    Case STATUS_TODAY
+                        ws.Range(COL_NO & r & ":" & dataLastCol & r).Interior.Color = RGB(229, 247, 245)
+                        ws.Cells(r, COL_STATUS).Interior.Color = RGB(158, 225, 219)
                     Case STATUS_HOLD
                         ws.Range(COL_NO & r & ":" & dataLastCol & r).Interior.Color = RGB(217, 210, 233)
                         ws.Cells(r, COL_STATUS).Interior.Color = RGB(180, 167, 214)

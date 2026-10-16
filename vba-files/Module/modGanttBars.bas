@@ -263,6 +263,7 @@ Private Function StatusBorderColor(ByVal status As String) As Long
     Select Case status
         Case STATUS_NORMAL: StatusBorderColor = RGB(37, 99, 235)
         Case STATUS_CAUTION: StatusBorderColor = RGB(245, 158, 11)
+        Case STATUS_TODAY: StatusBorderColor = RGB(13, 148, 136)
         Case STATUS_HOLD: StatusBorderColor = RGB(139, 92, 246)
         Case STATUS_DELAY: StatusBorderColor = RGB(220, 38, 38)
         Case STATUS_ERROR: StatusBorderColor = RGB(234, 88, 12)
@@ -273,7 +274,8 @@ End Function
 Private Function IsStatusBorder(ByVal color As Long) As Boolean
     Select Case color
         Case RGB(22, 163, 74), RGB(37, 99, 235), RGB(245, 158, 11), _
-             RGB(139, 92, 246), RGB(220, 38, 38), RGB(234, 88, 12), RGB(100, 116, 139)
+             RGB(13, 148, 136), RGB(139, 92, 246), RGB(220, 38, 38), _
+             RGB(234, 88, 12), RGB(100, 116, 139)
             IsStatusBorder = True
     End Select
 End Function
