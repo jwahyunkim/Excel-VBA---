@@ -1,4 +1,6 @@
 ' Append to modTextReport only in a disposable workbook copy.
+' 2026-10-16 김좌현 수정 : 실제/계획 기간 및 상위 집계 TXT 회귀 검증
+' 2026-10-16 김좌현 수정 : 출력 기간 밖 업무를 상위 집계에서 제외하는지 검증
 Public Function RunTextReportRegression(ByVal outputDirectory As String) As String
     Dim configWs As Worksheet, taskWs As Worksheet
     Dim files As Collection, rows As Collection, items As Collection, dates As Collection
@@ -254,12 +256,81 @@ Public Function RunTextReportRegression(ByVal outputDirectory As String) As Stri
     On Error GoTo Failed
     TextRegressionAssert errorsExpected And Not Application.EnableEvents, "failure must preserve disabled events", checked
 
+    stage = "descendant period and completion labels"
+    TextRegressionPeriods configWs, outputDirectory, checked
     RunTextReportRegression = "PASS: " & CStr(checked) & " assertions; " & outputDirectory
     Exit Function
 Failed:
     RunTextReportRegression = "FAIL: " & stage & " (" & CStr(Err.Number) & "): " & Err.Description
     Application.EnableEvents = False
 End Function
+
+Private Sub TextRegressionPeriods(ByVal configWs As Worksheet, ByVal outputDirectory As String, _
+                                  ByRef checked As Long)
+    Dim ws As Worksheet, r As Long, i As Long, files As Collection, text As String
+    Dim names As Variant, levelValues As Variant, path As String
+    Set ws = ThisWorkbook.Worksheets.Add
+    ws.Name = "PeriodFixture"
+    SetupDataHeaders ws
+    configWs.Range("B17").Value = DateSerial(2026, 10, 1)
+    configWs.Range("B18").Value = DateSerial(2026, 10, 16)
+    configWs.Range("C2:F2").Value2 = "Y"
+    configWs.Range("C5:F5").Value2 = "Y"
+    configWs.Range("G5").Value2 = "전체"
+    configWs.Range("F12:F14").Value2 = "기호"
+    names = Array("혼합상위", "실제완료", "진행일정", "기간밖계획", _
+                  "완료상위", "완료자식1", "완료자식2", "계획부모", "계획자식", "미정업무")
+    levelValues = Array(1, 2, 2, 2, 1, 2, 2, 1, 2, 1)
+    For i = 0 To UBound(names)
+        r = DATA_START_ROW + i
+        ws.Cells(r, COL_LEVEL).Value2 = levelValues(i)
+        ws.Cells(r, COL_TYPE).Value2 = "개발"
+        ws.Cells(r, COL_MAJOR_CATEGORY).Value2 = "기간대"
+        ws.Cells(r, COL_MIDDLE_CATEGORY).Value2 = "기간중"
+        ws.Cells(r, COL_MINOR_CATEGORY).Value2 = "기간소"
+        ws.Cells(r, COL_TASK).Value2 = names(i)
+    Next i
+    r = DATA_START_ROW
+    ws.Cells(r, COL_PLAN_START).Value = DateSerial(2025, 1, 1)
+    ws.Cells(r, COL_PLAN_END).Value = DateSerial(2027, 1, 1)
+    For i = 1 To 6
+        If i <> 2 And i <> 3 And i <> 4 Then
+            ws.Cells(r + i, COL_ACTUAL_START).Value = DateSerial(2026, 10, IIf(i = 1, 2, i - 2))
+            ws.Cells(r + i, COL_ACTUAL_END).Value = DateSerial(2026, 10, IIf(i = 1, 4, i + 2))
+            ws.Cells(r + i, COL_PLAN_START).Value = DateSerial(2025, 1, 1)
+            ws.Cells(r + i, COL_PLAN_END).Value = DateSerial(2027, 1, 1)
+        End If
+    Next i
+    ws.Cells(r + 2, COL_ACTUAL_START).Value = DateSerial(2026, 9, 28)
+    ws.Cells(r + 2, COL_PLAN_START).Value = DateSerial(2026, 10, 1)
+    ws.Cells(r + 2, COL_PLAN_END).Value = DateSerial(2026, 10, 10)
+    ws.Cells(r + 3, COL_PLAN_START).Value = DateSerial(2026, 11, 1)
+    ws.Cells(r + 3, COL_PLAN_END).Value = DateSerial(2026, 11, 15)
+    ws.Cells(r + 8, COL_PLAN_START).Value = DateSerial(2026, 10, 9)
+    ws.Cells(r + 8, COL_PLAN_END).Value = DateSerial(2026, 10, 12)
+    path = outputDirectory & Application.PathSeparator & "periods"
+    EnsureReportOutputDirectory path
+    Set files = ExportPeriodTextReport(ws, path)
+    text = ReadTextRegressionUtf8(CStr(files(1)))
+    TextRegressionContains text, "혼합상위" & vbTab & "9/28~10/10 예정", "only report-period descendants", checked
+    TextRegressionContains text, "실제완료" & vbTab & "10/2~10/4 완료", "completed uses actual only", checked
+    TextRegressionContains text, "진행일정" & vbTab & "9/28~10/10 예정", "union of planned and actual", checked
+    TextRegressionContains text, "완료상위" & vbTab & "10/3~10/8 완료", "all completed children actual range", checked
+    TextRegressionContains text, "기간대" & vbTab & "9/28~10/12 예정", "major report-period range", checked
+    TextRegressionContains text, "기간중" & vbTab & "9/28~10/12 예정", "middle report-period range", checked
+    TextRegressionContains text, "기간소" & vbTab & "9/28~10/12 예정", "minor report-period range", checked
+    TextRegressionContains text, "계획부모" & vbTab & "10/9~10/12 예정", "planned ancestor range", checked
+    TextRegressionContains text, "계획자식" & vbTab & "10/9~10/12 예정", "planned leaf range", checked
+    TextRegressionContains text, "미정업무" & vbTab & "미정~미정 예정", "unknown dates", checked
+    TextRegressionAbsent text, "기간밖계획", "report filter retained", checked
+    TextRegressionAbsent text, "11/15", "excluded task must not extend ancestor dates", checked
+    configWs.Range("C5:F5").Value2 = "N"
+    Set files = ExportPeriodTextReport(ws, path)
+    text = ReadTextRegressionUtf8(CStr(files(1)))
+    TextRegressionAbsent text, "9/28~10/12 예정", "date visibility off for categories", checked
+    TextRegressionAbsent text, "9/28~10/10 예정", "date visibility off for tasks", checked
+    TextRegressionAbsent text, "10/9~10/12 예정", "date visibility off for plans", checked
+End Sub
 
 Private Sub BuildTextRegressionFixture(ByVal ws As Worksheet, ByVal firstDate As Date, ByVal lastDate As Date)
     Dim names As Variant, i As Long, r As Long
