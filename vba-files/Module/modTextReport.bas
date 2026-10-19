@@ -1,11 +1,14 @@
 Attribute VB_Name = "modTextReport"
 Option Explicit
+' 2026-10-16 김좌현 수정 : 하위 업무 전체 기간 집계 및 예정/완료 표시
+' 2026-10-16 김좌현 수정 : 상단 출력 기간에 해당하는 하위 업무만 기간 집계
 
 Private Const REPORT_OUTPUT_FOLDER As String = "기간보고"
 Private Const WEEKLY_UNASSIGNED_MODULE As String = "대분류 미지정"
 Private Const WEEKLY_UNASSIGNED_PROGRAM As String = "소분류 미지정"
 ' Path token -> modification. Rebuilt for each export; includes ancestor rows.
 Private mReportModifications As Object
+Private mReportPeriods As Object
 
 Public Sub 기간보고TXT_생성()
     Dim files As Collection
@@ -85,6 +88,8 @@ Public Function ExportPeriodTextReport(ByVal ws As Worksheet, _
 
     Set mReportModifications = CreateObject("Scripting.Dictionary")
     mReportModifications.CompareMode = vbTextCompare
+    Set mReportPeriods = CreateObject("Scripting.Dictionary")
+    mReportPeriods.CompareMode = vbTextCompare
     categoryDepth = GetWeeklyReportVisibleCategoryCount()
     pageMode = GetWeeklyReportPageMode()
     If pageMode = WEEKLY_REPORT_PAGE_MODE_CUSTOM Then _
@@ -110,14 +115,12 @@ Public Function ExportPeriodTextReport(ByVal ws As Worksheet, _
                             rowData(2) = 1
                             rowData(3) = GetWeeklySortDate(ws.Cells(r, COL_ACTUAL_END).Value, _
                                 ws.Cells(r, COL_PLAN_END).Value)
-                            rowData(4) = BuildCompletedEndDateText(ws, r)
                             AddSortedWeeklyRow currentRows, rowData
                         End If
                     Case UCase$(REPORT_STATUS_IN_PROGRESS)
                         If IsInProgressInReportPeriod(ws, r, reportStart, reportEnd) Then
                             rowData(2) = 2
                             rowData(3) = GetWeeklySortDate(ws.Cells(r, COL_PLAN_END).Value, Empty)
-                            rowData(4) = BuildInProgressEndDateText(ws.Cells(r, COL_PLAN_END).Value)
                             AddSortedWeeklyRow currentRows, rowData
                         End If
                     Case UCase$(REPORT_STATUS_PLANNED)
@@ -128,6 +131,8 @@ Public Function ExportPeriodTextReport(ByVal ws As Worksheet, _
                             AddSortedWeeklyRow plannedRows, rowData
                         End If
                 End Select
+                If CLng(rowData(2)) > 0 Then _
+                    CollectReportPeriods ws, r, statusText, moduleText, programText, hierarchyPath
             End If
         End If
     Next r
@@ -651,7 +656,6 @@ Private Function BuildWeeklyHierarchyDateMap(ByVal rows As Collection, _
     Dim rowItem As Variant
     Dim itemPath As Variant
     Dim pathToken As String
-    Dim dateValue As Variant
     Dim depth As Long
 
     Set hierarchyDates = CreateObject("Scripting.Dictionary")
@@ -659,21 +663,11 @@ Private Function BuildWeeklyHierarchyDateMap(ByVal rows As Collection, _
 
     For Each rowItem In rows
         If WeeklyRowMatchesGroup( _
-               rowItem, moduleName, programName, filterByProgram) And _
-           Len(CStr(rowItem(4))) > 0 Then
+               rowItem, moduleName, programName, filterByProgram) Then
             itemPath = rowItem(9)
             For depth = LBound(itemPath) To UBound(itemPath)
                 pathToken = CStr(itemPath(depth))
-                If Not hierarchyDates.Exists(pathToken) Then
-                    hierarchyDates.Add pathToken, _
-                        Array(CDbl(rowItem(3)), CStr(rowItem(4)))
-                Else
-                    dateValue = hierarchyDates(pathToken)
-                    If CDbl(rowItem(3)) > CDbl(dateValue(0)) Then
-                        hierarchyDates(pathToken) = _
-                            Array(CDbl(rowItem(3)), CStr(rowItem(4)))
-                    End If
-                End If
+                hierarchyDates(pathToken) = Array(0, GetReportPeriodText("H" & pathToken))
             Next depth
         End If
     Next rowItem
@@ -1036,6 +1030,9 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
                                    CStr(categoryParts(categoryIndex)), _
                                    GetWeeklyModuleOwnerText(rows, CStr(moduleName)), _
                                    GetWeeklyReportShowCategoryOwnerFlag(categoryIndex + 1))
+                If GetWeeklyReportShowExpectedDateFlag(categoryIndex + 1) Then _
+                    categoryText = categoryText & vbTab & _
+                        GetWeeklyCategoryExpectedDateText(rows, categoryParts, categoryIndex)
                 categoryText = FormatWeeklyReportLine( _
                                    GetWeeklyReportVisibleCategoryPosition(categoryIndex + 1) - 1, _
                                    GetWeeklyReportCategoryBullet(categoryIndex + 1), categoryText, _
@@ -1048,14 +1045,15 @@ Private Sub BuildWeeklyGroupedPlanItems(ByVal rows As Collection, _
         If groupByProgram Then
             Set programNames = CollectWeeklyProgramNames(rows, CStr(moduleName))
             For Each programName In programNames
+                categoryText = AppendWeeklyOwnerText( _
+                    CStr(programName), GetWeeklyProgramOwnerText(rows, CStr(moduleName), CStr(programName)), _
+                    GetWeeklyReportShowCategoryOwnerFlag(4))
+                If GetWeeklyReportShowExpectedDateFlag(4) Then _
+                    categoryText = categoryText & vbTab & _
+                        GetWeeklyProgramExpectedDateText(rows, CStr(moduleName), CStr(programName))
                 categoryText = FormatWeeklyReportLine( _
-                               GetWeeklyReportVisibleCategoryPosition(4) - 1, _
-                               GetWeeklyReportCategoryBullet(4), _
-                               AppendWeeklyOwnerText( _
-                                   CStr(programName), _
-                                   GetWeeklyProgramOwnerText( _
-                                       rows, CStr(moduleName), CStr(programName)), _
-                                   GetWeeklyReportShowCategoryOwnerFlag(4)), 4)
+                    GetWeeklyReportVisibleCategoryPosition(4) - 1, _
+                    GetWeeklyReportCategoryBullet(4), categoryText, 4)
                 If Len(blockText) = 0 Then
                     blockText = categoryText
                 Else
@@ -1154,6 +1152,9 @@ Private Sub AppendWeeklyPlanHierarchyPath(ByRef blockText As String, _
                           JoinOwnerNameSet(hierarchyOwners(pathToken), ", ") & ")"
         End If
 
+        If GetWeeklyReportShowTaskExpectedDateFlag(depth + 1) Then _
+            displayText = displayText & vbTab & GetReportPeriodText("H" & pathToken)
+
         lineText = FormatWeeklyReportLine(depth + levelOffset, _
                        GetWeeklyReportLevelBullet(depth + 1), displayText, depth + 5)
         If Len(blockText) = 0 Then
@@ -1175,57 +1176,16 @@ Private Function GetWeeklyCategoryExpectedDateText( _
                          ByVal rows As Collection, _
                          ByVal categoryParts As Variant, _
                          ByVal categoryIndex As Long) As String
-    Dim rowItem As Variant
-    Dim rowParts As Variant
-    Dim compareIndex As Long
-    Dim pathMatches As Boolean
-    Dim dateSerial As Double
-    Dim latestDateSerial As Double
-
-    latestDateSerial = -1
-    For Each rowItem In rows
-        rowParts = Split(GetWeeklyRowModuleName(rowItem), " > ")
-        pathMatches = (UBound(rowParts) >= categoryIndex)
-        If pathMatches Then
-            For compareIndex = LBound(categoryParts) To categoryIndex
-                If StrComp(CStr(rowParts(compareIndex)), _
-                           CStr(categoryParts(compareIndex)), _
-                           vbTextCompare) <> 0 Then
-                    pathMatches = False
-                    Exit For
-                End If
-            Next compareIndex
-        End If
-        If pathMatches And Len(CStr(rowItem(4))) > 0 Then
-            dateSerial = CDbl(rowItem(3))
-            If dateSerial > latestDateSerial Then
-                latestDateSerial = dateSerial
-                GetWeeklyCategoryExpectedDateText = CStr(rowItem(4))
-            End If
-        End If
-    Next rowItem
+    GetWeeklyCategoryExpectedDateText = GetReportPeriodText( _
+        ReportCategoryPeriodKey(categoryParts, categoryIndex))
 End Function
 
 Private Function GetWeeklyProgramExpectedDateText( _
                          ByVal rows As Collection, _
                          ByVal moduleName As String, _
                          ByVal programName As String) As String
-    Dim rowItem As Variant
-    Dim dateSerial As Double
-    Dim latestDateSerial As Double
-
-    latestDateSerial = -1
-    For Each rowItem In rows
-        If WeeklyRowMatchesGroup( _
-               rowItem, moduleName, programName, True) And _
-           Len(CStr(rowItem(4))) > 0 Then
-            dateSerial = CDbl(rowItem(3))
-            If dateSerial > latestDateSerial Then
-                latestDateSerial = dateSerial
-                GetWeeklyProgramExpectedDateText = CStr(rowItem(4))
-            End If
-        End If
-    Next rowItem
+    GetWeeklyProgramExpectedDateText = GetReportPeriodText( _
+        "P" & moduleName & vbTab & programName)
 End Function
 
 Private Function AppendWeeklyOwnerText(ByVal displayText As String, _
@@ -1279,28 +1239,78 @@ Private Function GetWeeklyProgramOwnerText(ByVal rows As Collection, _
     GetWeeklyProgramOwnerText = JoinOwnerNameSet(ownerSeen, ", ")
 End Function
 
-Private Function BuildInProgressEndDateText(ByVal planEndValue As Variant) As String
-    If IsDate(planEndValue) Then
-        BuildInProgressEndDateText = "~" & FormatReportMonthDay(CDate(planEndValue))
-    Else
-        BuildInProgressEndDateText = "~미정"
+Private Sub CollectReportPeriods(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                                 ByVal statusText As String, ByVal moduleText As String, _
+                                 ByVal programText As String, ByVal hierarchyPath As Variant)
+    Dim period As Variant, parts As Variant, depth As Long
+    period = Array(0#, 0#, StrComp(statusText, REPORT_STATUS_COMPLETED, vbTextCompare) = 0)
+    IncludeReportPeriodDate period, ws.Cells(rowNum, COL_ACTUAL_START).Value, True
+    IncludeReportPeriodDate period, ws.Cells(rowNum, COL_ACTUAL_END).Value, False
+    If Not CBool(period(2)) Then
+        IncludeReportPeriodDate period, ws.Cells(rowNum, COL_PLAN_START).Value, True
+        IncludeReportPeriodDate period, ws.Cells(rowNum, COL_PLAN_END).Value, False
     End If
+    parts = Split(moduleText, " > ")
+    For depth = LBound(parts) To UBound(parts)
+        MergeReportPeriod ReportCategoryPeriodKey(parts, depth), period
+    Next depth
+    MergeReportPeriod "P" & moduleText & vbTab & programText, period
+    For depth = LBound(hierarchyPath) To UBound(hierarchyPath)
+        MergeReportPeriod "H" & CStr(hierarchyPath(depth)), period
+    Next depth
+End Sub
+
+Private Sub IncludeReportPeriodDate(ByRef period As Variant, ByVal value As Variant, _
+                                    ByVal isStart As Boolean)
+    Dim serial As Double, index As Long
+    If Not IsDate(value) Then Exit Sub
+    serial = CDbl(DateValue(CDate(value)))
+    If isStart Then index = 0 Else index = 1
+    If CDbl(period(index)) = 0 Then
+        period(index) = serial
+    ElseIf isStart And serial < CDbl(period(index)) Then
+        period(index) = serial
+    ElseIf Not isStart And serial > CDbl(period(index)) Then
+        period(index) = serial
+    End If
+End Sub
+
+Private Sub MergeReportPeriod(ByVal key As String, ByVal period As Variant)
+    Dim aggregate As Variant
+    If Not mReportPeriods.Exists(key) Then
+        mReportPeriods.Add key, period
+        Exit Sub
+    End If
+    aggregate = mReportPeriods(key)
+    If CDbl(period(0)) <> 0 Then
+        If CDbl(aggregate(0)) = 0 Or CDbl(period(0)) < CDbl(aggregate(0)) Then _
+            aggregate(0) = period(0)
+    End If
+    If CDbl(period(1)) > CDbl(aggregate(1)) Then aggregate(1) = period(1)
+    aggregate(2) = CBool(aggregate(2)) And CBool(period(2))
+    mReportPeriods(key) = aggregate
+End Sub
+
+Private Function ReportCategoryPeriodKey(ByVal parts As Variant, ByVal index As Long) As String
+    Dim i As Long, result As String
+    result = "C"
+    For i = LBound(parts) To index
+        result = result & vbTab & CStr(parts(i))
+    Next i
+    ReportCategoryPeriodKey = result
 End Function
 
-Private Function BuildCompletedEndDateText(ByVal ws As Worksheet, ByVal rowNum As Long) As String
-    Dim planEndDate As Variant
-    Dim completedDate As Variant
-
-    planEndDate = ws.Cells(rowNum, COL_PLAN_END).Value
-    completedDate = ws.Cells(rowNum, COL_ACTUAL_END).Value
-
-    If IsDate(completedDate) Then
-        BuildCompletedEndDateText = FormatReportMonthDay(CDate(completedDate))
-    ElseIf IsDate(planEndDate) Then
-        BuildCompletedEndDateText = FormatReportMonthDay(CDate(planEndDate))
-    Else
-        BuildCompletedEndDateText = ""
-    End If
+Private Function GetReportPeriodText(ByVal key As String) As String
+    Dim period As Variant, startText As String, endText As String, statusText As String
+    If mReportPeriods Is Nothing Then Exit Function
+    If Not mReportPeriods.Exists(key) Then Exit Function
+    period = mReportPeriods(key)
+    startText = "미정"
+    endText = "미정"
+    If CDbl(period(0)) <> 0 Then startText = FormatReportMonthDay(CDate(period(0)))
+    If CDbl(period(1)) <> 0 Then endText = FormatReportMonthDay(CDate(period(1)))
+    If CBool(period(2)) Then statusText = "완료" Else statusText = "예정"
+    GetReportPeriodText = startText & "~" & endText & " " & statusText
 End Function
 
 Private Function FormatReportMonthDay(ByVal targetDate As Date) As String
