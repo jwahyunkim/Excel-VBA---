@@ -1,4 +1,5 @@
 """Compare saved workbook data and formulas with the pre-edit workbook."""
+# 2026-10-20 김좌현 수정 : config 타입 목록의 새 위치와 이전 셀 정리 허용
 import posixpath
 import re
 import sys
@@ -53,7 +54,9 @@ for name in before:
     new_cells, new_validations, new_protection = after[name]
     for address in set(old_cells) | set(new_cells):
         permitted = name == "config" and (
-            address in {"L9", "M10"} or re.fullmatch(r"L(1[0-9]|2[0-9])", address)
+            address in {"E7", "E29", "E30", "L9", "M10"}
+            or re.fullmatch(r"E([89]|1[0-9]|2[0-7])", address)
+            or re.fullmatch(r"L(1[0-9]|2[0-9])", address)
             or re.fullmatch(r"AB([1-9]|1[0-9]|20)", address)
         )
         if not permitted:
@@ -63,5 +66,5 @@ for name in before:
 for name, reference in before_names.items():
     assert after_names[name] == reference, f"Existing name changed: {name}"
 assert after_names["GanttTaskTypes"].replace("'", "") == "config!$AB$1:$AB$4", "Wrong type list reference"
-assert [after["config"][0][f"L{r}"][2] for r in range(10, 14)] == ["개발", "ETC", "유지보수", "프로젝트"]
+assert [after["config"][0][f"E{r}"][2] for r in range(8, 12)] == ["개발", "ETC", "유지보수", "프로젝트"]
 print("PASS: saved defaults, sheet order, existing values/formulas, unrelated validations/names, protection")

@@ -10,7 +10,14 @@ Attribute VB_Exposed = True
 Option Explicit
 
 Private Sub Workbook_Open()
+    ' 2026-10-20 김좌현 수정 : 기존 생성 버튼을 새로고침으로 전환
+    Dim ws As Worksheet
+    ' 2026-10-20 김좌현 수정 : 저장된 완료 숨김 상태에 맞춰 버튼 문구 복원
     InitializeReleaseSecurity
+    For Each ws In ThisWorkbook.Worksheets
+        UpgradeGanttRefreshButtons ws
+        UpdateCompletedTaskButton ws
+    Next ws
     InitializeTaskHierarchyOutlines
     StartTaskOutlineViewMonitor
 End Sub

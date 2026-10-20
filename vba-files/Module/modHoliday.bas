@@ -1,5 +1,9 @@
 Attribute VB_Name = "modHoliday"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 휴일·근무일 표 제목 추가 및 기존 날짜 입력 보존 이전
+' 2026-10-20 김좌현 수정 : config 영역 정렬 및 입력/안내 서식 통일
+' 2026-10-20 김좌현 수정 : 간트 only/보고 only 설정 및 설정 읽기 함수 제거
+' 2026-10-20 김좌현 수정 : 미사용 완료 숨김/제외 설정 및 읽기 함수 제거
 
 Private weeklyReportNumbers(1 To 7) As Long
 
@@ -7,13 +11,8 @@ Public Sub EnsureConfigSheet()
     Dim ws As Worksheet
     Dim lastSheetRow As Long
     Dim rngType As Range
-    Dim rngHideLevel As Range
-    Dim rngExcludeNo As Range
-    Dim rngExcludeDate As Range
     Dim rngDisplayStart As Range
     Dim rngDisplayEnd As Range
-    Dim rngDisplayGanttOnly As Range
-    Dim rngDisplayReportOnly As Range
     Dim rngTaskMaxLength As Range
     Dim legacyTaskMaxLength As Variant
 
@@ -36,38 +35,27 @@ Public Sub EnsureConfigSheet()
         ws.Name = CONFIG_SHEET_NAME
     End If
 
+    MigrateHolidayTable ws
     ws.Range(HOLIDAY_COL_DATE & HOLIDAY_HEADER_ROW).Value = "날짜"
     ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_HEADER_ROW).Value = "구분"
     ws.Range(HOLIDAY_COL_DESC & HOLIDAY_HEADER_ROW).Value = "설명"
 
-    ws.Range("E1").Value = "간트 - 휴일 입력 예시"
-    ws.Range("E2").Value = "A열: 날짜"
-    ws.Range("E3").Value = "B열: 휴일 또는 근무일"
-    ws.Range("E4").Value = "C열: 설명(선택)"
+    ws.Range("E1").Value = "휴일 입력 안내"
+    ws.Range("E2").Value = "날짜: 실제 날짜로 입력"
+    ws.Range("E3").Value = "구분: 휴일 / 근무일"
+    ws.Range("E4").Value = "설명: 연차·공휴일 등 (선택)"
 
-    ws.Range(HIDE_SETTING_TITLE_CELL).Value = "간트 - 숨김 설정"
-    ws.Range(HIDE_SETTING_LEVEL_LABEL_CELL).Value = "완료 숨김 레벨"
-    ws.Range(DISPLAY_SETTING_TITLE_CELL).Value = "간트 - 표시 기간 설정"
+    ws.Range(DISPLAY_SETTING_TITLE_CELL).Value = "표시 기간"
     ws.Range(DISPLAY_SETTING_START_LABEL_CELL).Value = "표시 시작일"
     ws.Range(DISPLAY_SETTING_END_LABEL_CELL).Value = "표시 종료일"
-    ws.Range(DISPLAY_SETTING_GANTT_ONLY_LABEL_CELL).Value = "간트 only"
-    ws.Range(DISPLAY_SETTING_REPORT_ONLY_LABEL_CELL).Value = "보고 only"
-    If Trim$(CStr(ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).Value)) = "개발진행" Then
-        ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).ClearContents
-    End If
-    ws.Range(INPUT_SETTING_TITLE_CELL).Value = "간트 - 입력 제한 설정"
+    ws.Range(INPUT_SETTING_TITLE_CELL).Value = "내용 입력 제한"
     legacyTaskMaxLength = ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value
-    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 각 내용 최대 글자 수"
-    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 각 내용 최대 글자 수"
-    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 각 내용 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 최대 글자 수"
     ' Clear settings left by the retired development-report feature.
     ws.Range("L1:M7").Clear
-    ws.Range(HIDE_EXCLUDE_NO_HEADER_CELL).Value = "숨김 제외 No."
-    ws.Range(HIDE_EXCLUDE_DATE_HEADER_CELL).Value = "숨김 제외 날짜"
 
-    If Trim$(CStr(ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value)) = "" Then
-        ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value = 3
-    End If
     If Trim$(CStr(legacyTaskMaxLength)) = "" Then legacyTaskMaxLength = DEFAULT_TASK_MAX_LENGTH
     If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value)) = "" Then
         ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value = legacyTaskMaxLength
@@ -78,67 +66,19 @@ Public Sub EnsureConfigSheet()
     If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value)) = "" Then
         ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value = legacyTaskMaxLength
     End If
-    ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
-    ws.Columns(HOLIDAY_COL_TYPE).ColumnWidth = 12
-    ws.Columns(HOLIDAY_COL_DESC).ColumnWidth = 24
-    ws.Columns("E").ColumnWidth = 24
-    ws.Columns("F").ColumnWidth = 16
-    ws.Columns("G").ColumnWidth = 14
-    ws.Columns("I").ColumnWidth = 26
-    ws.Columns("J").ColumnWidth = 14
-    ws.Range("A1:C1").Font.Bold = True
-    ws.Range("A1:C1").Interior.Color = RGB(242, 242, 242)
-    ws.Range("A1:C1").Borders.LineStyle = xlContinuous
-
-    ws.Range("E1").Font.Bold = True
-    ws.Range("E1").Interior.Color = RGB(221, 235, 247)
-    ws.Range("E1").Borders.LineStyle = xlContinuous
-
-    ws.Range("F1:G1").Font.Bold = True
-    ws.Range("F1:G1").Interior.Color = RGB(221, 235, 247)
-    ws.Range("F1:G1").Borders.LineStyle = xlContinuous
-
-    ws.Range("I1:J1").Font.Bold = True
-    ws.Range("I1:J1").Interior.Color = RGB(221, 235, 247)
-    ws.Range("I1:J1").Borders.LineStyle = xlContinuous
-
-    ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Font.Bold = True
-    ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(221, 235, 247)
-    ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Borders.LineStyle = xlContinuous
-    ws.Range("I8:J10").Borders.LineStyle = xlContinuous
-    ws.Range("F2:G2").Borders.LineStyle = xlContinuous
-    ws.Range("I2:J5").Borders.LineStyle = xlContinuous
-    ws.Range("F5:G5").Font.Bold = True
-    ws.Range("F5:G5").Interior.Color = RGB(242, 242, 242)
-    ws.Range("F5:G5").Borders.LineStyle = xlContinuous
-    ws.Range("F6:G200").Borders.LineStyle = xlContinuous
-
     ws.Columns(HOLIDAY_COL_DATE).NumberFormat = "yyyy-mm-dd"
-    ws.Columns("G").NumberFormat = "General"
     ws.Range(DISPLAY_SETTING_START_VALUE_CELL).NumberFormat = "yyyy-mm-dd"
     ws.Range(DISPLAY_SETTING_END_VALUE_CELL).NumberFormat = "yyyy-mm-dd"
-    ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).NumberFormat = "General"
-    ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).NumberFormat = "0"
     lastSheetRow = ws.rows.Count
     Set rngType = ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_DATA_START_ROW & ":" & HOLIDAY_COL_TYPE & lastSheetRow)
-    Set rngHideLevel = ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL)
-    Set rngExcludeNo = ws.Range(HIDE_EXCLUDE_NO_START_CELL & ":F" & lastSheetRow)
-    Set rngExcludeDate = ws.Range(HIDE_EXCLUDE_DATE_START_CELL & ":G" & lastSheetRow)
     Set rngDisplayStart = ws.Range(DISPLAY_SETTING_START_VALUE_CELL)
     Set rngDisplayEnd = ws.Range(DISPLAY_SETTING_END_VALUE_CELL)
-    Set rngDisplayGanttOnly = ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL)
-    Set rngDisplayReportOnly = ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL)
     Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_RANGE)
     On Error Resume Next
     rngType.Validation.Delete
-    rngHideLevel.Validation.Delete
-    rngExcludeNo.Validation.Delete
-    rngExcludeDate.Validation.Delete
     rngDisplayStart.Validation.Delete
     rngDisplayEnd.Validation.Delete
-    rngDisplayGanttOnly.Validation.Delete
-    rngDisplayReportOnly.Validation.Delete
     rngTaskMaxLength.Validation.Delete
     On Error GoTo 0
 
@@ -153,27 +93,6 @@ Public Sub EnsureConfigSheet()
     rngType.Validation.InputMessage = "휴일 또는 근무일만 선택할 수 있습니다."
     rngType.Validation.ErrorTitle = "입력 오류"
     rngType.Validation.ErrorMessage = "휴일 또는 근무일만 입력할 수 있습니다."
-
-    rngHideLevel.Validation.Add Type:=xlValidateWholeNumber, _
-                                AlertStyle:=xlValidAlertStop, _
-                                Operator:=xlBetween, _
-                                Formula1:="1", _
-                                Formula2:="3"
-
-    rngExcludeNo.Validation.Add Type:=xlValidateWholeNumber, _
-                                AlertStyle:=xlValidAlertStop, _
-                                Operator:=xlBetween, _
-                                Formula1:="1", _
-                                Formula2:="100000"
-    rngExcludeNo.Validation.IgnoreBlank = True
-
-    rngExcludeDate.NumberFormat = "yyyy-mm-dd"
-    rngExcludeDate.Validation.Add Type:=xlValidateDate, _
-                                  AlertStyle:=xlValidAlertStop, _
-                                  Operator:=xlBetween, _
-                                  Formula1:="2000-01-01", _
-                                  Formula2:="2100-12-31"
-    rngExcludeDate.Validation.IgnoreBlank = True
 
     rngDisplayStart.Validation.Add Type:=xlValidateDate, _
                                    AlertStyle:=xlValidAlertStop, _
@@ -197,20 +116,6 @@ Public Sub EnsureConfigSheet()
     rngDisplayEnd.Validation.ErrorTitle = "입력 오류"
     rngDisplayEnd.Validation.ErrorMessage = "올바른 날짜를 입력하세요."
 
-    rngDisplayGanttOnly.Validation.Add Type:=xlValidateList, _
-                                        AlertStyle:=xlValidAlertStop, _
-                                        Operator:=xlBetween, _
-                                        Formula1:="Y,N"
-    rngDisplayGanttOnly.Validation.IgnoreBlank = True
-    rngDisplayGanttOnly.Validation.InCellDropdown = True
-
-    rngDisplayReportOnly.Validation.Add Type:=xlValidateList, _
-                                         AlertStyle:=xlValidAlertStop, _
-                                         Operator:=xlBetween, _
-                                         Formula1:=STATUS_WEEKLY_REPORT & "," & REPORT_FILTER_ALL & "," & REPORT_FILTER_EMPTY
-    rngDisplayReportOnly.Validation.IgnoreBlank = True
-    rngDisplayReportOnly.Validation.InCellDropdown = True
-
     rngTaskMaxLength.Validation.Add Type:=xlValidateWholeNumber, _
                                     AlertStyle:=xlValidAlertStop, _
                                     Operator:=xlBetween, _
@@ -230,7 +135,94 @@ Public Sub EnsureConfigSheet()
     ws.Range("O1:X203").Clear
     ws.Range("AA1:AA203").Clear
     EnsureTaskTypeConfig
+    FormatConfigSheet ws
     EnsureTaskDetailFoldConfig ws
+End Sub
+
+Private Sub MigrateHolidayTable(ByVal ws As Worksheet)
+    Dim lastRow As Long
+    If CStr(ws.Range("A1").Value2) <> "날짜" Or _
+       CStr(ws.Range("B1").Value2) <> "구분" Then Exit Sub
+    lastRow = Application.Max( _
+        ws.Cells(ws.Rows.Count, "A").End(xlUp).Row, _
+        ws.Cells(ws.Rows.Count, "B").End(xlUp).Row, _
+        ws.Cells(ws.Rows.Count, "C").End(xlUp).Row)
+    ws.Range("A1:C" & lastRow).Copy Destination:=ws.Range("A" & HOLIDAY_HEADER_ROW)
+    ws.Range("A1:C" & CStr(HOLIDAY_HEADER_ROW - 1)).Clear
+End Sub
+
+Private Sub FormatConfigSheet(ByVal ws As Worksheet)
+    Dim section As Variant, inputs As Variant, lastHolidayRow As Long
+    lastHolidayRow = ws.Cells(ws.Rows.Count, HOLIDAY_COL_DATE).End(xlUp).Row
+    If lastHolidayRow < 30 Then lastHolidayRow = 30
+    With ws.Range("A1:J30")
+        .Font.Name = "맑은 고딕"
+        .Font.Size = 10
+        .Font.Color = RGB(45, 55, 68)
+        .Interior.Color = RGB(255, 255, 255)
+        .Borders.LineStyle = xlNone
+        .VerticalAlignment = xlCenter
+        .RowHeight = 23
+    End With
+    ws.Columns("A").ColumnWidth = 14
+    ws.Columns("B").ColumnWidth = 12
+    ws.Columns("C").ColumnWidth = 24
+    ws.Columns("D").ColumnWidth = 3
+    ws.Columns("E").ColumnWidth = 36
+    ws.Columns("F:H").ColumnWidth = 1
+    ws.Columns("I").ColumnWidth = 31
+    ws.Columns("J").ColumnWidth = 17
+    ws.Range("A1").Value2 = "휴일·근무일 설정"
+    ws.Range("A1:C1").HorizontalAlignment = xlCenterAcrossSelection
+    With ws.Range("A" & HOLIDAY_HEADER_ROW & ":C" & HOLIDAY_HEADER_ROW)
+        .Interior.Color = RGB(233, 239, 245)
+        .Font.Bold = True
+        .HorizontalAlignment = xlCenter
+    End With
+    ws.Range("E1").Value2 = "휴일 입력 안내"
+    ws.Range("I5").Value2 = "기간을 비우면 전체 일정 표시"
+    ws.Range("I11").Value2 = "요청·수정 내용에 각각 적용"
+    For Each section In Array("A1:C1", "E1", "E7", "I1:J1", "I7:J7", "I12:J12")
+        With ws.Range(CStr(section))
+            .Interior.Color = RGB(37, 55, 75)
+            .Font.Color = RGB(255, 255, 255)
+            .Font.Bold = True
+            .RowHeight = 28
+        End With
+    Next section
+    For Each inputs In Array("A" & HOLIDAY_DATA_START_ROW & ":C" & lastHolidayRow, TASK_TYPE_CONFIG_RANGE, _
+                             "J2:J3", TASK_MAX_LENGTH_VALUE_RANGE, TASK_FOLD_SETTING_VALUE_RANGE)
+        With ws.Range(CStr(inputs))
+            .Interior.Color = RGB(255, 249, 228)
+            .Font.Color = RGB(36, 72, 111)
+            .Borders(xlEdgeBottom).LineStyle = xlContinuous
+            .Borders(xlEdgeBottom).Color = RGB(216, 222, 229)
+        End With
+    Next inputs
+    ws.Range("A" & HOLIDAY_DATA_START_ROW & ":A" & lastHolidayRow).NumberFormat = "yyyy-mm-dd"
+    ws.Range("A" & HOLIDAY_DATA_START_ROW & ":B" & lastHolidayRow).HorizontalAlignment = xlCenter
+    ws.Range("E2:E4").Font.Color = RGB(95, 105, 117)
+    ws.Range("E2:E4").Font.Size = 9
+    ws.Range("E29:E30").Font.Size = 9
+    ws.Range("E29:E30").Font.Color = RGB(95, 105, 117)
+    ws.Range("I5:J5").HorizontalAlignment = xlLeft
+    ws.Range("I5:J5").Font.Size = 9
+    ws.Range("I5:J5").Font.Color = RGB(95, 105, 117)
+    ws.Range("I11:J11").HorizontalAlignment = xlLeft
+    ws.Range("I11:J11").Font.Size = 9
+    ws.Range("I11:J11").Font.Color = RGB(95, 105, 117)
+    ws.Range("J2:J3").HorizontalAlignment = xlCenter
+    ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).HorizontalAlignment = xlCenter
+    ws.Range("I17:J18").Font.Size = 9
+    ws.Range("I17:J18").Font.Color = RGB(95, 105, 117)
+    ws.Rows("17:18").RowHeight = 24
+    ws.Tab.Color = RGB(68, 90, 115)
+    If ActiveSheet Is ws Then ActiveWindow.DisplayGridlines = False
+    ws.PageSetup.PrintArea = "$A$1:$J$" & CStr(lastHolidayRow)
+    ws.PageSetup.Orientation = xlLandscape
+    ws.PageSetup.Zoom = False
+    ws.PageSetup.FitToPagesWide = 1
+    ws.PageSetup.FitToPagesTall = False
 End Sub
 
 Private Function GetWeeklyReportConfigSheet() As Worksheet
@@ -820,30 +812,6 @@ Public Function TryGetDisplayDateRange(ByRef displayStartDate As Date, ByRef dis
     End If
 
     TryGetDisplayDateRange = True
-End Function
-
-Public Function GetDisplayGanttOnlyFlag() As Boolean
-    Dim ws As Worksheet
-    Dim v As String
-
-    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    v = UCase$(Trim$(CStr(ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).Value)))
-
-    GetDisplayGanttOnlyFlag = (v = "Y")
-End Function
-
-Public Function GetDisplayReportOnlyFlag() As String
-    Dim ws As Worksheet
-    Dim v As String
-
-    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    v = Trim$(CStr(ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).Value))
-
-    If v = STATUS_WEEKLY_REPORT Or v = REPORT_FILTER_ALL Or v = REPORT_FILTER_EMPTY Then
-        GetDisplayReportOnlyFlag = v
-    Else
-        GetDisplayReportOnlyFlag = ""
-    End If
 End Function
 
 Public Function GetTaskMaxLength(Optional ByVal taskLevel As Long = 1) As Long
@@ -1439,70 +1407,6 @@ EH:
     End If
 
     Err.Raise errNumber, "RefreshTaskTextLengthValidation", errDescription
-End Sub
-
-Public Function GetHideCompletedMaxLevel() As Long
-    Dim ws As Worksheet
-    Dim v As Variant
-
-    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    v = ws.Range(HIDE_SETTING_LEVEL_VALUE_CELL).Value
-
-    If IsNumeric(v) Then
-        GetHideCompletedMaxLevel = CLng(v)
-    Else
-        GetHideCompletedMaxLevel = 3
-    End If
-
-    If GetHideCompletedMaxLevel < 1 Then GetHideCompletedMaxLevel = 1
-    If GetHideCompletedMaxLevel > 3 Then GetHideCompletedMaxLevel = 3
-End Function
-
-Public Sub LoadExcludedRowNos(ByRef excludeNoDict As Object)
-    Dim ws As Worksheet
-    Dim lastRow As Long
-    Dim r As Long
-    Dim v As Variant
-    Dim key As String
-
-    Set excludeNoDict = CreateObject("Scripting.Dictionary")
-    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    lastRow = ws.Cells(ws.rows.Count, "F").End(xlUp).Row
-
-    If lastRow < 6 Then Exit Sub
-
-    For r = 6 To lastRow
-        v = ws.Cells(r, "F").Value
-        If IsNumeric(v) Then
-            key = Trim$(CStr(CLng(v)))
-            If Len(key) > 0 Then
-                If Not excludeNoDict.Exists(key) Then excludeNoDict.Add key, True
-            End If
-        End If
-    Next r
-End Sub
-
-Public Sub LoadExcludedDates(ByRef excludeDateDict As Object)
-    Dim ws As Worksheet
-    Dim lastRow As Long
-    Dim r As Long
-    Dim v As Variant
-    Dim parsedDate As Date
-    Dim key As String
-
-    Set excludeDateDict = CreateObject("Scripting.Dictionary")
-    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    lastRow = ws.Cells(ws.rows.Count, "G").End(xlUp).Row
-
-    If lastRow < 6 Then Exit Sub
-
-    For r = 6 To lastRow
-        v = ws.Cells(r, "G").Value
-        If TryParseHolidayDate(v, parsedDate) Then
-            key = NormalizeDateKey(parsedDate)
-            If Not excludeDateDict.Exists(key) Then excludeDateDict.Add key, True
-        End If
-    Next r
 End Sub
 
 Private Function TryParseHolidayDate(ByVal vDate As Variant, ByRef parsedDate As Date) As Boolean
