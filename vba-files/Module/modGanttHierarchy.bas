@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 숨긴 행의 틀 고정 좌표 보정과 화면 변경 중 재진입 방지
 ' 2026-10-20 김좌현 수정 : 계층 펼치기 후에도 완료 숨김 상태 유지
 ' 2026-10-20 김좌현 수정 : config 열 접기 영역의 제목/입력 서식 통일
 
@@ -279,6 +280,34 @@ Public Sub InitializeTaskHierarchyOutlines()
     If wasSaved Then ThisWorkbook.Saved = True
 End Sub
 
+Private Function CaptureTaskFreezeHiddenRows(ByVal ws As Worksheet, ByVal lastRow As Long) As Range
+    Dim r As Long, first As Long, isHidden As Boolean, part As Range, result As Range
+    For r = 1 To lastRow + 1
+        isHidden = False
+        If r <= lastRow Then isHidden = ws.Rows(r).Hidden
+        If isHidden Then
+            If first = 0 Then first = r
+        ElseIf first > 0 Then
+            Set part = ws.Rows(CStr(first) & ":" & CStr(r - 1))
+            If result Is Nothing Then
+                Set result = part
+            Else
+                Set result = Application.Union(result, part)
+            End If
+            first = 0
+        End If
+    Next r
+    Set CaptureTaskFreezeHiddenRows = result
+End Function
+
+Private Sub RestoreTaskFreezeHiddenRows(ByVal hiddenRows As Range)
+    Dim area As Range
+    If hiddenRows Is Nothing Then Exit Sub
+    For Each area In hiddenRows.Areas
+        area.EntireRow.Hidden = True
+    Next area
+End Sub
+
 Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
     Dim taskWindow As Window, requestCol As Long, previousRow As Long, c As Long
     Dim firstCol As Long, lastCol As Long, freezeColumns As Long, nextVisibleCol As Long
@@ -286,6 +315,7 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
     Dim detailColumns As Range, wasScreenUpdating As Boolean
     Dim viewError As Long, viewErrorText As String
     Dim selected As Object, normalized As String, selectedColumn As Variant, lastSelected As Long
+    Dim freezeRows As Range, hiddenRows As Range, lastTaskRow As Long
     If ActiveWindow Is Nothing Then Exit Sub
     If Not (ActiveWorkbook Is ws.Parent) Then Exit Sub
     If Not (ActiveSheet Is ws) Then Exit Sub
@@ -345,6 +375,13 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
         previousRow = .Panes(.Panes.Count).ScrollRow
         On Error GoTo Failed
         Application.ScreenUpdating = False
+        If collapsed Then
+            lastTaskRow = Application.Max(HEADER_ROW, GetLastDataRow(ws))
+            Set freezeRows = ws.Rows("1:" & CStr(lastTaskRow))
+            Set hiddenRows = CaptureTaskFreezeHiddenRows(ws, lastTaskRow)
+            ' Hidden rows also change Excel's split coordinates; retain their exact visibility.
+            If Not hiddenRows Is Nothing Then freezeRows.Hidden = False
+        End If
         .FreezePanes = False
         .SplitColumn = 0
         .SplitRow = 0
@@ -366,6 +403,7 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
             .SplitColumn = freezeColumns
             .SplitRow = HEADER_ROW
             .FreezePanes = True
+            RestoreTaskFreezeHiddenRows hiddenRows
             For c = detailColumns.Column To lastCol
                 If selected Is Nothing Then
                     ws.Columns(c).Hidden = True
@@ -397,6 +435,7 @@ Failed:
     viewError = Err.Number
     viewErrorText = Err.Description
     On Error Resume Next
+    RestoreTaskFreezeHiddenRows hiddenRows
     If Not detailColumns Is Nothing Then
         For c = detailColumns.Column To lastCol
             If selected Is Nothing Then
@@ -454,10 +493,11 @@ End Sub
 Public Sub TaskOutlineViewTick()
     Dim ws As Worksheet
     If mTaskOutlineViewStarting Then Exit Sub
+    If Not Application.EnableEvents Or Not Application.ScreenUpdating Then Exit Sub
     Set ws = ActiveTaskOutlineSheet()
     If Not ws Is Nothing Then
         EnsureTaskRequestFreeze ws
-        If Application.EnableEvents And Application.ScreenUpdating Then MaintainCompletedTaskView ws
+        MaintainCompletedTaskView ws
     End If
 End Sub
 

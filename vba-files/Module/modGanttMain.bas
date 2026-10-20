@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 새로고침 실패 시 완료 숨김과 수동/계층 보기 및 보호 복원
 ' 2026-10-20 김좌현 수정 : 완료 숨김 버튼과 새로고침 시 행 보기 상태 유지
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
 ' 2026-10-20 김좌현 수정 : 미사용 항목 숨기기 매크로와 전용 버튼 생성 제거
@@ -25,7 +26,8 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     Dim errorText As String
     Dim detailColumnHidden As Variant
     Dim detailScrollColumn As Long, detailScrollRow As Long
-    Dim rowView As Object
+    Dim rowView As Object, originalRowView As Object
+    Dim originalLastRow As Long, taskViewCaptured As Boolean
 
     previousScreenUpdating = Application.ScreenUpdating
     previousEnableEvents = Application.EnableEvents
@@ -45,9 +47,12 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
         Exit Sub
     End If
 
-    EnsureConfigSheet
     taskSheetWasProtected = _
         (ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios)
+    originalLastRow = GetLastDataRow(ws)
+    Set originalRowView = CaptureTaskRowView(ws, originalLastRow)
+    taskViewCaptured = True
+    EnsureConfigSheet
     If taskSheetWasProtected Then UnprotectTaskSheet ws
     SetupDataHeaders ws
     If taskSheetWasProtected Then
@@ -111,8 +116,27 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
 
 EH:
     errorText = Err.Description
+    ' Recover the captured view before UI events can observe a half-refreshed sheet.
+    On Error Resume Next
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    If taskViewCaptured Then
+        UnprotectTaskSheet ws
+        RestoreTaskRowViewSnapshot ws, originalLastRow, originalRowView
+        RestoreTaskDetailColumnHidden ws, detailColumnHidden
+        If detailScrollColumn > 0 And Not ActiveWindow Is Nothing Then
+            ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollColumn = detailScrollColumn
+            ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollRow = detailScrollRow
+        End If
+        If taskSheetWasProtected Then
+            ApplyCalculatedColumnsProtection ws, Application.Max(DATA_START_ROW, originalLastRow)
+        Else
+            UnprotectTaskSheet ws
+        End If
+    End If
     Application.EnableEvents = previousEnableEvents
     Application.ScreenUpdating = previousScreenUpdating
+    On Error GoTo 0
     If showCompletionMessage Then
         MsgBox "오류가 발생했습니다: " & errorText, vbExclamation
     Else
