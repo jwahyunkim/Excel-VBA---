@@ -1,11 +1,13 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 새로고침 버튼 통합 및 기존 생성 버튼 연결 전환
 
 Private Const AUTOMATION_SECURITY_FORCE_DISABLE As Long = 3
 Private Const FILE_DIALOG_PICKER As Long = 3
 Private Const PPT_OLE_PREFIX As String = "oleGanttPpt_"
 Private Const TEMP_PPT_OLE_PREFIX As String = "tmpGanttPptOle_"
 Private Const BUTTON_SETUP_SHEET_NAME As String = "_버튼생성"
+Private Const BUTTON_OPTION_COUNT As Long = 6
 
 Public Sub 데이터_가져오기()
     Dim targetBook As Workbook
@@ -219,8 +221,7 @@ Public Sub 버튼_생성_선택()
 
     optionCaptions = Array( _
         "데이터 가져오기", _
-        "간트차트 생성", _
-        "새로고침", _
+        "간트차트 새로고침", _
         "초기화", _
         "항목 숨김", _
         "개체삽입", _
@@ -297,8 +298,8 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     Dim setupSheet As Worksheet
     Dim targetSheet As Worksheet
     Dim targetSheetName As String
-    Dim selectedIndexes(1 To 7) As Long
-    Dim selectedOrders(1 To 7) As Long
+    Dim selectedIndexes(1 To BUTTON_OPTION_COUNT) As Long
+    Dim selectedOrders(1 To BUTTON_OPTION_COUNT) As Long
     Dim selectedCount As Long
     Dim optionIndex As Long
     Dim optionOrder As Long
@@ -312,7 +313,7 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     targetSheetName = CStr(setupSheet.Range("Z1").Value2)
     Set targetSheet = ThisWorkbook.Worksheets(targetSheetName)
 
-    For optionIndex = 1 To 7
+    For optionIndex = 1 To BUTTON_OPTION_COUNT
         If IsSetupOptionChecked(setupSheet, optionIndex) Then
             optionOrder = GetSetupOptionOrder(setupSheet, optionIndex)
             If optionOrder < 1 Then
@@ -391,16 +392,14 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 1
             CreateVersionButton ws, "btnDataImport", "데이터 가져오기", "데이터_가져오기", buttonOrder, 72
         Case 2
-            CreateVersionButton ws, "btnGanttCreate", "생성", "칸트차트_생성", buttonOrder, 72
-        Case 3
             CreateVersionButton ws, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", buttonOrder, 72
-        Case 4
+        Case 3
             CreateVersionButton ws, "btnGanttReset", "초기화", "칸트차트_초기화", buttonOrder, 72
-        Case 5
+        Case 4
             CreateVersionButton ws, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", buttonOrder, 72
-        Case 6
+        Case 5
             CreateVersionButton ws, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", buttonOrder, 72
-        Case 7
+        Case 6
             CreateVersionButton ws, "btnPeriodTextReport", "TXT 출력", "기간보고TXT_생성", buttonOrder, 72
     End Select
 End Sub
@@ -556,6 +555,70 @@ Private Function VersionShapeExistsOnSheet(ByVal ws As Worksheet, _
     On Error GoTo 0
 
     VersionShapeExistsOnSheet = Not targetShape Is Nothing
+End Function
+
+' Converts managed legacy buttons and workbook-qualified custom assignments.
+' Called on open and refresh; keeps the existing refresh button when both exist.
+Public Sub UpgradeGanttRefreshButtons(ByVal ws As Worksheet)
+    Dim createButton As Shape, refreshButton As Shape, button As Shape
+    Dim macroName As String, wasProtected As Boolean, needsUpdate As Boolean
+    Dim errNumber As Long, errDescription As String
+
+    If Not IsTaskSheet(ws) Then Exit Sub
+    On Error GoTo Failed
+    On Error Resume Next
+    Set createButton = ws.Shapes("btnGanttCreate")
+    Set refreshButton = ws.Shapes("btnGanttRefresh")
+    On Error GoTo Failed
+    needsUpdate = Not createButton Is Nothing
+    For Each button In ws.Shapes
+        macroName = GetGanttButtonMacroName(button)
+        If macroName = "칸트차트_생성" Then needsUpdate = True
+        If button.Name = "btnGanttRefresh" Then
+            If macroName <> "칸트차트_새로고침" Or _
+               button.TextFrame2.TextRange.Text <> "새로고침" Then needsUpdate = True
+        End If
+    Next button
+    ' Leave already migrated workbooks unchanged when opened.
+    If Not needsUpdate Then Exit Sub
+    wasProtected = ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios
+    If wasProtected Then UnprotectTaskSheet ws
+    If Not createButton Is Nothing Then
+        If refreshButton Is Nothing Then
+            createButton.Name = "btnGanttRefresh"
+        Else
+            createButton.Delete
+        End If
+    End If
+    For Each button In ws.Shapes
+        macroName = GetGanttButtonMacroName(button)
+        If button.Name = "btnGanttRefresh" Or macroName = "칸트차트_생성" Then
+            button.OnAction = "칸트차트_새로고침"
+            button.TextFrame2.TextRange.Text = "새로고침"
+        End If
+    Next button
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    Exit Sub
+Failed:
+    errNumber = Err.Number
+    errDescription = Err.Description
+    If wasProtected Then
+        On Error Resume Next
+        ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+        On Error GoTo 0
+    End If
+    Err.Raise errNumber, "UpgradeGanttRefreshButtons", errDescription
+End Sub
+
+Private Function GetGanttButtonMacroName(ByVal button As Shape) As String
+    Dim macroName As String
+    ' Some embedded objects do not expose OnAction.
+    On Error Resume Next
+    macroName = CStr(button.OnAction)
+    On Error GoTo 0
+    If InStrRev(macroName, "!") > 0 Then macroName = Mid$(macroName, InStrRev(macroName, "!") + 1)
+    If InStrRev(macroName, ".") > 0 Then macroName = Mid$(macroName, InStrRev(macroName, ".") + 1)
+    GetGanttButtonMacroName = macroName
 End Function
 
 Public Sub UpgradeTaskReportButtons(ByVal ws As Worksheet)

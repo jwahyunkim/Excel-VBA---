@@ -1,7 +1,8 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
 
-Public Sub 칸트차트_생성()
+' 2026-10-20 김좌현 수정 : 생성/새로고침을 새로고침 진입점으로 통합
+Public Sub 칸트차트_새로고침()
     RefreshGanttSheet
 End Sub
 
@@ -73,6 +74,7 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     Application.EnableEvents = False
 
     UnprotectTaskSheet ws
+    UpgradeGanttRefreshButtons ws
     SynchronizeTaskHierarchyModules ws, lastRow, True
     ShowTaskInputErrorReasons ws, lastRow
     UpdateTaskNumbers ws, lastRow
@@ -98,7 +100,7 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     DoEvents
     AlignAllGanttPptArtifactsToNoteCells ws
 
-    If showCompletionMessage Then MsgBox "칸트차트 생성 완료", vbInformation
+    If showCompletionMessage Then MsgBox "간트차트 새로고침 완료", vbInformation
     Exit Sub
 
 EH:
@@ -110,10 +112,6 @@ EH:
     Else
         Err.Raise vbObjectError + 2121, "RefreshGanttSheet", errorText
     End If
-End Sub
-
-Public Sub 칸트차트_새로고침()
-    칸트차트_생성
 End Sub
 
 Public Sub 칸트차트_초기화()
@@ -198,24 +196,20 @@ EH:
     MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
 End Sub
 
-Public Sub 칸트차트_생성버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttCreate", "생성", "칸트차트_생성", 1
-End Sub
-
 Public Sub 칸트차트_새로고침버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", 2
+    CreateGanttActionButton ActiveSheet, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", 1
 End Sub
 
 Public Sub 칸트차트_초기화버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttReset", "초기화", "칸트차트_초기화", 3
+    CreateGanttActionButton ActiveSheet, "btnGanttReset", "초기화", "칸트차트_초기화", 2
 End Sub
 
 Public Sub 칸트차트_항목숨기기버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", 4
+    CreateGanttActionButton ActiveSheet, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", 3
 End Sub
 
 Public Sub 칸트차트_개체삽입버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 5
+    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 4
 End Sub
 
 Public Sub 칸트차트_개체삽입()

@@ -10,7 +10,12 @@ Attribute VB_Exposed = True
 Option Explicit
 
 Private Sub Workbook_Open()
+    ' 2026-10-20 김좌현 수정 : 기존 생성 버튼을 새로고침으로 전환
+    Dim ws As Worksheet
     InitializeReleaseSecurity
+    For Each ws In ThisWorkbook.Worksheets
+        UpgradeGanttRefreshButtons ws
+    Next ws
     InitializeTaskHierarchyOutlines
     StartTaskOutlineViewMonitor
 End Sub
