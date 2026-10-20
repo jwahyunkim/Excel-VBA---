@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttConfig"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 완료 숨김 및 숨김 제외 설정 상수 제거
 
 Public Const GANTT_HEADER_ROW_MONTH As Long = 1
 Public Const GANTT_HEADER_ROW_WEEK As Long = 2
@@ -88,9 +89,6 @@ Public Const HOLIDAY_COL_DESC As String = "C"
 Public Const HOLIDAY_TYPE_HOLIDAY As String = "휴일"
 Public Const HOLIDAY_TYPE_WORKDAY As String = "근무일"
 
-Public Const HIDE_SETTING_TITLE_CELL As String = "F1"
-Public Const HIDE_SETTING_LEVEL_LABEL_CELL As String = "F2"
-Public Const HIDE_SETTING_LEVEL_VALUE_CELL As String = "G2"
 Public Const DISPLAY_SETTING_TITLE_CELL As String = "I1"
 Public Const DISPLAY_SETTING_START_LABEL_CELL As String = "I2"
 Public Const DISPLAY_SETTING_START_VALUE_CELL As String = "J2"
@@ -200,10 +198,6 @@ Public Const WEEKLY_REPORT_PAGE_MODE_ALL As String = "전체 통합"
 Public Const WEEKLY_REPORT_PAGE_MODE_MODULE As String = "분류 기준마다 파일 분리"
 Public Const WEEKLY_REPORT_PAGE_MODE_LEGACY_MODULE As String = "모듈별 페이지"
 Public Const WEEKLY_REPORT_PAGE_MODE_CUSTOM As String = "커스텀 파일"
-Public Const HIDE_EXCLUDE_NO_HEADER_CELL As String = "F5"
-Public Const HIDE_EXCLUDE_DATE_HEADER_CELL As String = "G5"
-Public Const HIDE_EXCLUDE_NO_START_CELL As String = "F6"
-Public Const HIDE_EXCLUDE_DATE_START_CELL As String = "G6"
 
 Public Const STATUS_NORMAL As String = "정상"
 Public Const STATUS_CAUTION As String = "주의"

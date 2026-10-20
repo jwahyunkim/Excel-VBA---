@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 미사용 항목 숨기기 매크로와 전용 버튼 생성 제거
 
 ' 2026-10-20 김좌현 수정 : 생성/새로고침을 새로고침 진입점으로 통합
 Public Sub 칸트차트_새로고침()
@@ -154,48 +155,6 @@ EH:
     MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
 End Sub
 
-Public Sub 칸트차트_항목숨기기()
-    Dim ws As Worksheet
-    Dim lastRow As Long
-
-    On Error GoTo EH
-
-    Set ws = ActiveSheet
-
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
-        MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
-        Exit Sub
-    End If
-
-    EnsureConfigSheet
-
-    If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
-    lastRow = GetLastDataRow(ws)
-    If lastRow < DATA_START_ROW Then
-        MsgBox "데이터가 없습니다.", vbExclamation
-        Exit Sub
-    End If
-
-    Application.ScreenUpdating = False
-    Application.EnableEvents = False
-
-    UnprotectTaskSheet ws
-    UpdateTaskNumbers ws, lastRow
-    HideCompletedTaskRows ws, lastRow
-    ApplyCalculatedColumnsProtection ws, lastRow
-
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
-
-    MsgBox "항목 숨김 완료", vbInformation
-    Exit Sub
-
-EH:
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
-    MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
-End Sub
-
 Public Sub 칸트차트_새로고침버튼_생성()
     CreateGanttActionButton ActiveSheet, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", 1
 End Sub
@@ -204,12 +163,8 @@ Public Sub 칸트차트_초기화버튼_생성()
     CreateGanttActionButton ActiveSheet, "btnGanttReset", "초기화", "칸트차트_초기화", 2
 End Sub
 
-Public Sub 칸트차트_항목숨기기버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", 3
-End Sub
-
 Public Sub 칸트차트_개체삽입버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 4
+    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 3
 End Sub
 
 Public Sub 칸트차트_개체삽입()

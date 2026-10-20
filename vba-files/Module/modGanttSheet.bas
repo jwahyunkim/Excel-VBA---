@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 완료 항목 숨김 처리와 전용 번호 변환 제거
 
 Private Const TASK_VALIDATION_MIN_LAST_ROW As Long = 5000
 Private Const TASK_VALIDATION_EXTRA_ROWS As Long = 1000
@@ -657,14 +658,6 @@ End Sub
 
 Private Function IsManualProgressEnabled(ws As Worksheet, ByVal rowNum As Long) As Boolean
     IsManualProgressEnabled = (UCase$(Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_PROGRESS).Value))) = "Y")
-End Function
-
-Private Function GetTaskNoKey(ws As Worksheet, ByVal rowNum As Long) As String
-    If IsNumeric(ws.Cells(rowNum, COL_NO).Value) Then
-        GetTaskNoKey = Trim$(CStr(CLng(ws.Cells(rowNum, COL_NO).Value)))
-    Else
-        GetTaskNoKey = ""
-    End If
 End Function
 
 Private Function GetProgressWeight(ws As Worksheet, ByVal rowNum As Long, ByVal holidayDict As Object, ByVal workdayDict As Object) As Double
@@ -1696,31 +1689,6 @@ Public Sub ShowAllDateColumns(ws As Worksheet)
 
     If endCol < startCol Then Exit Sub
     ws.Range(ws.Cells(1, startCol), ws.Cells(1, endCol)).EntireColumn.Hidden = False
-End Sub
-
-Public Sub HideCompletedTaskRows(ws As Worksheet, ByVal lastRow As Long)
-    Dim excludeNoDict As Object
-    Dim maxHideLevel As Long
-    Dim r As Long
-    Dim noKey As String
-
-    ShowAllTaskRows ws, lastRow
-    LoadExcludedRowNos excludeNoDict
-    maxHideLevel = GetHideCompletedMaxLevel()
-
-    For r = DATA_START_ROW To lastRow
-        If HasTaskContent(ws, r) Then
-            noKey = GetTaskNoKey(ws, r)
-
-            If IsDoneStatusText(CStr(ws.Cells(r, COL_STATUS).Value)) Then
-                If GetTaskLevel(ws, r) <= maxHideLevel Then
-                    If Len(noKey) = 0 Or Not excludeNoDict.Exists(noKey) Then
-                        ws.Rows(r).Hidden = True
-                    End If
-                End If
-            End If
-        End If
-    Next r
 End Sub
 
 Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Long)

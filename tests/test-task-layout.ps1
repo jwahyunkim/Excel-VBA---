@@ -2,6 +2,7 @@
 param([string]$WorkbookPath, [string]$SavePath)
 
 # 2026-10-20 김좌현 수정 : 새로고침 통합과 기존 버튼 전환 회귀 검증
+# 2026-10-20 김좌현 수정 : 항목 숨김 제거 후 5개 버튼 구성 검증
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 if (-not $WorkbookPath) {
@@ -175,8 +176,8 @@ Public Function RunTaskLayoutRegression() As String
     ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     버튼_생성_선택
     Set setupWs = ActiveSheet
-    Check setupWs.CheckBoxes.Count = 6, "button options were not consolidated"
-    Check setupWs.DropDowns.Count = 6, "button order options were not consolidated"
+    Check setupWs.CheckBoxes.Count = 5, "button options were not consolidated"
+    Check setupWs.DropDowns.Count = 5, "button order options were not consolidated"
     Check setupWs.CheckBoxes("chkButtonOption2").Caption = "간트차트 새로고침", "refresh option caption"
     선택한_버튼_생성 False
     Check ActiveSheet.Name = ws.Name, "button creation did not return to task sheet"
@@ -186,7 +187,6 @@ Public Function RunTaskLayoutRegression() As String
     Next shape
     Check buttonCount = 1, "refresh button duplicated"
     Check ws.Shapes("btnGanttReset").OnAction = "칸트차트_초기화", "reset option shifted"
-    Check ws.Shapes("btnGanttHideTask").OnAction = "칸트차트_항목숨기기", "hide option shifted"
     Check ws.Shapes("btnGanttObjectInsert").OnAction = "칸트차트_개체삽입", "object option shifted"
     Check ws.Shapes("btnPeriodTextReport").Left > ws.Shapes("btnGanttObjectInsert").Left, "button order shifted"
     버튼_생성_선택
@@ -195,7 +195,7 @@ Public Function RunTaskLayoutRegression() As String
     Check ws.Shapes("btnPeriodTextReport").TextFrame2.TextRange.Text = "TXT 출력", "TXT button caption"
     Check ws.Range("I5").Locked = False, "modification input locked"
     Check ws.ProtectContents, "task sheet protection disabled"
-    RunTaskLayoutRegression = "PASS: data preservation, idempotent columns, period validation/persistence, input validation, Gantt refresh, legacy button migration, six button options, TXT button, protection"
+    RunTaskLayoutRegression = "PASS: data preservation, idempotent columns, period validation/persistence, input validation, Gantt refresh, legacy button migration, five button options, TXT button, protection"
     Exit Function
 Failed:
     RunTaskLayoutRegression = "FAIL: " & Err.Description

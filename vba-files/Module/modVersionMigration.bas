@@ -1,5 +1,6 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 항목 숨김 버튼과 선택 항목 제거 및 순서 정리
 ' 2026-10-20 김좌현 수정 : 새로고침 버튼 통합 및 기존 생성 버튼 연결 전환
 
 Private Const AUTOMATION_SECURITY_FORCE_DISABLE As Long = 3
@@ -7,7 +8,7 @@ Private Const FILE_DIALOG_PICKER As Long = 3
 Private Const PPT_OLE_PREFIX As String = "oleGanttPpt_"
 Private Const TEMP_PPT_OLE_PREFIX As String = "tmpGanttPptOle_"
 Private Const BUTTON_SETUP_SHEET_NAME As String = "_버튼생성"
-Private Const BUTTON_OPTION_COUNT As Long = 6
+Private Const BUTTON_OPTION_COUNT As Long = 5
 
 Public Sub 데이터_가져오기()
     Dim targetBook As Workbook
@@ -223,7 +224,6 @@ Public Sub 버튼_생성_선택()
         "데이터 가져오기", _
         "간트차트 새로고침", _
         "초기화", _
-        "항목 숨김", _
         "개체삽입", _
         "TXT 출력")
 
@@ -396,10 +396,8 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 3
             CreateVersionButton ws, "btnGanttReset", "초기화", "칸트차트_초기화", buttonOrder, 72
         Case 4
-            CreateVersionButton ws, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", buttonOrder, 72
-        Case 5
             CreateVersionButton ws, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", buttonOrder, 72
-        Case 6
+        Case 5
             CreateVersionButton ws, "btnPeriodTextReport", "TXT 출력", "기간보고TXT_생성", buttonOrder, 72
     End Select
 End Sub
@@ -434,7 +432,7 @@ Private Sub DeleteManagedButtons(ByVal ws As Worksheet)
 
     buttonNames = Array( _
         "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
-        "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
+        "btnGanttReset", "btnGanttObjectInsert", _
         "btnPersonalDevReport", "btnTeamDevReport", "btnModuleDevReport", _
         "btnPeriodTextReport", "btnWeeklyPptReport", "btnDailyProgressReport", _
         "btnDailyProgressHistoryView", "btnDailyProgressHistoryReset", _
@@ -532,7 +530,7 @@ Public Function GetNextVersionButtonOrder(ByVal ws As Worksheet) As Long
 
     buttonNames = Array( _
         "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
-        "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
+        "btnGanttReset", "btnGanttObjectInsert", _
         "btnPeriodTextReport")
 
     For Each buttonName In buttonNames
