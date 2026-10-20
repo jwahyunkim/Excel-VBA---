@@ -4,6 +4,7 @@ param([string]$WorkbookPath, [string]$SavePath)
 # 2026-10-20 김좌현 수정 : 새로고침 통합과 기존 버튼 전환 회귀 검증
 # 2026-10-20 김좌현 수정 : 항목 숨김 제거 후 5개 버튼 구성 검증
 # 2026-10-20 김좌현 수정 : 표시 기간 유지 및 제거된 only 설정의 행 필터 미적용 검증
+# 2026-10-20 김좌현 수정 : config 타입 목록 이전과 재초기화 시 값 보존 검증
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 if (-not $WorkbookPath) {
@@ -63,6 +64,7 @@ Public Function RunTaskLayoutRegression() As String
     Dim buttonLeft As Double, buttonTop As Double, buttonCount As Long
     Dim legacyButton As Shape, setupWs As Worksheet, shape As Shape
     Dim displayConfig As Worksheet, oldDisplaySettings As Variant
+    Dim typeConfig As Worksheet, originalTypes As Variant, typeIndex As Long
     On Error GoTo Failed
     Application.EnableEvents = False
     Set ws = ThisWorkbook.Worksheets("Sheet1")
@@ -79,8 +81,20 @@ Public Function RunTaskLayoutRegression() As String
         details = ws.Range("J5:O" & lastRow).Value2
         manual = ws.Range("R5:T" & lastRow).Value2
     End If
+    Set typeConfig = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    If CStr(typeConfig.Range("L9").Value2) = "허용 타입 목록" Then
+        originalTypes = typeConfig.Range("L10:L29").Value2
+    Else
+        originalTypes = typeConfig.Range(TASK_TYPE_CONFIG_RANGE).Value2
+    End If
     SetupDataHeaders ws
     SetupDataHeaders ws
+    For typeIndex = 1 To 20
+        Check CStr(typeConfig.Range(TASK_TYPE_CONFIG_RANGE).Cells(typeIndex, 1).Value2) = _
+              CStr(originalTypes(typeIndex, 1)), "type list changed during migration"
+    Next typeIndex
+    Check Len(CStr(typeConfig.Range("L9").Value2)) = 0, "old type title survived"
+    Check Len(CStr(typeConfig.Range("M10").Value2)) = 0, "old type guide survived"
     Check CStr(ws.Range("H4").Value2) = "요청 내용", "request header"
     Check CStr(ws.Range("I4").Value2) = "수정 내용", "modification header"
     Check CStr(ws.Range("J4").Value2) = "담당", "owner header shifted twice"
@@ -210,7 +224,7 @@ Public Function RunTaskLayoutRegression() As String
     Check ws.Shapes("btnPeriodTextReport").TextFrame2.TextRange.Text = "TXT 출력", "TXT button caption"
     Check ws.Range("I5").Locked = False, "modification input locked"
     Check ws.ProtectContents, "task sheet protection disabled"
-    RunTaskLayoutRegression = "PASS: data preservation, idempotent columns, period validation/persistence, input validation, Gantt refresh, display period preserved without only filters, legacy button migration, five button options, TXT button, protection"
+    RunTaskLayoutRegression = "PASS: data preservation, config type migration, idempotent columns, period validation/persistence, input validation, Gantt refresh, display period preserved without only filters, legacy button migration, five button options, TXT button, protection"
     Exit Function
 Failed:
     RunTaskLayoutRegression = "FAIL: " & Err.Description

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-10-20 김좌현 수정 : config 열 접기 영역의 제목/입력 서식 통일
 
 ' 2026-10-19 김좌현 수정 : 쉼표로 선택한 여러 열을 접힌 화면에 고정하고 접기 범위 안의 선택 열도 표시
 
@@ -118,8 +119,8 @@ End Function
 Private Sub UpdateTaskFoldHint(ByVal configWs As Worksheet, ByVal valid As Boolean)
     With configWs.Range(TASK_FOLD_HINT_CELL)
         If valid Then
-            .Value2 = "여러 고정 열: A,B,G (접기 끝 열 이내)" & vbLf & "선택 열 + 접기 끝 다음 열 · 펼치면 복원"
-            .Font.Color = RGB(89, 89, 89)
+            .Value2 = "고정 열: H 또는 A,B,G (접기 끝 열 이내)" & vbLf & "펼치면 원래 화면으로 복원"
+            .Font.Color = RGB(95, 105, 117)
         Else
             .Value2 = "접기 시작 ≤ 끝 · 열 문자를 확인하세요." & vbLf & "고정 열: F 또는 A,B,G (접기 끝 열 이내)"
             .Font.Color = RGB(192, 0, 0)
@@ -133,7 +134,7 @@ Public Sub EnsureTaskDetailFoldConfig(ByVal ws As Worksheet)
         ws.Range("I15:J16").UnMerge
         ws.Range("I15:J16").Clear
     End If
-    ws.Range(TASK_FOLD_TITLE_CELL).Value2 = "간트 - 열 접기 설정"
+    ws.Range(TASK_FOLD_TITLE_CELL).Value2 = "열 접기"
     ws.Range("I13").Value2 = "접기 시작 열"
     ws.Range("I14").Value2 = "접기 끝 열"
     ws.Range("I15").Value2 = "접힌 화면 고정 열"
@@ -148,16 +149,19 @@ Public Sub EnsureTaskDetailFoldConfig(ByVal ws As Worksheet)
     End If
     With ws.Range("I12:J12")
         .Font.Bold = True
-        .Interior.Color = RGB(221, 235, 247)
-        .Borders.LineStyle = xlContinuous
+        .Interior.Color = RGB(37, 55, 75)
+        .Font.Color = RGB(255, 255, 255)
+        .Borders.LineStyle = xlNone
     End With
     ws.Range("I13:J15").Borders.LineStyle = xlContinuous
-    ws.Range("I13:J15").Font.Size = 11
+    ws.Range("I13:J15").Borders.Color = RGB(216, 222, 229)
+    ws.Range("I13:J15").Borders.Weight = xlHairline
+    ws.Range("I13:J15").Font.Size = 10
     ws.Range("I13:J15").WrapText = False
     With ws.Range(TASK_FOLD_SETTING_VALUE_RANGE)
         .NumberFormat = "@"
-        .Interior.Color = RGB(255, 249, 219)
-        .Font.Color = RGB(0, 102, 204)
+        .Interior.Color = RGB(255, 249, 228)
+        .Font.Color = RGB(36, 72, 111)
         .HorizontalAlignment = xlCenter
     End With
     With ws.Range("I17:J18")

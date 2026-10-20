@@ -1,5 +1,6 @@
 Attribute VB_Name = "modHoliday"
 Option Explicit
+' 2026-10-20 김좌현 수정 : config 영역 정렬 및 입력/안내 서식 통일
 ' 2026-10-20 김좌현 수정 : 간트 only/보고 only 설정 및 설정 읽기 함수 제거
 ' 2026-10-20 김좌현 수정 : 미사용 완료 숨김/제외 설정 및 읽기 함수 제거
 
@@ -37,19 +38,19 @@ Public Sub EnsureConfigSheet()
     ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_HEADER_ROW).Value = "구분"
     ws.Range(HOLIDAY_COL_DESC & HOLIDAY_HEADER_ROW).Value = "설명"
 
-    ws.Range("E1").Value = "간트 - 휴일 입력 예시"
-    ws.Range("E2").Value = "A열: 날짜"
-    ws.Range("E3").Value = "B열: 휴일 또는 근무일"
-    ws.Range("E4").Value = "C열: 설명(선택)"
+    ws.Range("E1").Value = "휴일 입력 안내"
+    ws.Range("E2").Value = "날짜: 실제 날짜로 입력"
+    ws.Range("E3").Value = "구분: 휴일 / 근무일"
+    ws.Range("E4").Value = "설명: 연차·공휴일 등 (선택)"
 
-    ws.Range(DISPLAY_SETTING_TITLE_CELL).Value = "간트 - 표시 기간 설정"
+    ws.Range(DISPLAY_SETTING_TITLE_CELL).Value = "표시 기간"
     ws.Range(DISPLAY_SETTING_START_LABEL_CELL).Value = "표시 시작일"
     ws.Range(DISPLAY_SETTING_END_LABEL_CELL).Value = "표시 종료일"
-    ws.Range(INPUT_SETTING_TITLE_CELL).Value = "간트 - 입력 제한 설정"
+    ws.Range(INPUT_SETTING_TITLE_CELL).Value = "내용 입력 제한"
     legacyTaskMaxLength = ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value
-    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 각 내용 최대 글자 수"
-    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 각 내용 최대 글자 수"
-    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 각 내용 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL2_LABEL_CELL).Value = "Level 2 최대 글자 수"
+    ws.Range(TASK_MAX_LENGTH_LEVEL3_LABEL_CELL).Value = "Level 3 최대 글자 수"
     ' Clear settings left by the retired development-report feature.
     ws.Range("L1:M7").Clear
 
@@ -63,30 +64,6 @@ Public Sub EnsureConfigSheet()
     If Trim$(CStr(ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value)) = "" Then
         ws.Range(TASK_MAX_LENGTH_LEVEL3_VALUE_CELL).Value = legacyTaskMaxLength
     End If
-    ws.Columns(HOLIDAY_COL_DATE).ColumnWidth = 14
-    ws.Columns(HOLIDAY_COL_TYPE).ColumnWidth = 12
-    ws.Columns(HOLIDAY_COL_DESC).ColumnWidth = 24
-    ws.Columns("E").ColumnWidth = 24
-    ws.Columns("I").ColumnWidth = 26
-    ws.Columns("J").ColumnWidth = 14
-    ws.Range("A1:C1").Font.Bold = True
-    ws.Range("A1:C1").Interior.Color = RGB(242, 242, 242)
-    ws.Range("A1:C1").Borders.LineStyle = xlContinuous
-
-    ws.Range("E1").Font.Bold = True
-    ws.Range("E1").Interior.Color = RGB(221, 235, 247)
-    ws.Range("E1").Borders.LineStyle = xlContinuous
-
-    ws.Range("I1:J1").Font.Bold = True
-    ws.Range("I1:J1").Interior.Color = RGB(221, 235, 247)
-    ws.Range("I1:J1").Borders.LineStyle = xlContinuous
-
-    ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Font.Bold = True
-    ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(221, 235, 247)
-    ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Borders.LineStyle = xlContinuous
-    ws.Range("I8:J10").Borders.LineStyle = xlContinuous
-    ws.Range("I2:J3").Borders.LineStyle = xlContinuous
-
     ws.Columns(HOLIDAY_COL_DATE).NumberFormat = "yyyy-mm-dd"
     ws.Range(DISPLAY_SETTING_START_VALUE_CELL).NumberFormat = "yyyy-mm-dd"
     ws.Range(DISPLAY_SETTING_END_VALUE_CELL).NumberFormat = "yyyy-mm-dd"
@@ -156,7 +133,76 @@ Public Sub EnsureConfigSheet()
     ws.Range("O1:X203").Clear
     ws.Range("AA1:AA203").Clear
     EnsureTaskTypeConfig
+    FormatConfigSheet ws
     EnsureTaskDetailFoldConfig ws
+End Sub
+
+Private Sub FormatConfigSheet(ByVal ws As Worksheet)
+    Dim section As Variant, inputs As Variant, lastHolidayRow As Long
+    lastHolidayRow = ws.Cells(ws.Rows.Count, HOLIDAY_COL_DATE).End(xlUp).Row
+    If lastHolidayRow < 30 Then lastHolidayRow = 30
+    With ws.Range("A1:J30")
+        .Font.Name = "맑은 고딕"
+        .Font.Size = 10
+        .Font.Color = RGB(45, 55, 68)
+        .Interior.Color = RGB(255, 255, 255)
+        .Borders.LineStyle = xlNone
+        .VerticalAlignment = xlCenter
+        .RowHeight = 23
+    End With
+    ws.Columns("A").ColumnWidth = 14
+    ws.Columns("B").ColumnWidth = 12
+    ws.Columns("C").ColumnWidth = 24
+    ws.Columns("D").ColumnWidth = 3
+    ws.Columns("E").ColumnWidth = 36
+    ws.Columns("F:H").ColumnWidth = 1
+    ws.Columns("I").ColumnWidth = 31
+    ws.Columns("J").ColumnWidth = 17
+    ws.Range("A1:C1").HorizontalAlignment = xlCenter
+    ws.Range("E1").Value2 = "휴일 입력 안내"
+    ws.Range("I5").Value2 = "기간을 비우면 전체 일정 표시"
+    ws.Range("I11").Value2 = "요청·수정 내용에 각각 적용"
+    For Each section In Array("A1:C1", "E1", "E7", "I1:J1", "I7:J7", "I12:J12")
+        With ws.Range(CStr(section))
+            .Interior.Color = RGB(37, 55, 75)
+            .Font.Color = RGB(255, 255, 255)
+            .Font.Bold = True
+            .RowHeight = 28
+        End With
+    Next section
+    For Each inputs In Array("A2:C" & lastHolidayRow, TASK_TYPE_CONFIG_RANGE, _
+                             "J2:J3", TASK_MAX_LENGTH_VALUE_RANGE, TASK_FOLD_SETTING_VALUE_RANGE)
+        With ws.Range(CStr(inputs))
+            .Interior.Color = RGB(255, 249, 228)
+            .Font.Color = RGB(36, 72, 111)
+            .Borders(xlEdgeBottom).LineStyle = xlContinuous
+            .Borders(xlEdgeBottom).Color = RGB(216, 222, 229)
+        End With
+    Next inputs
+    ws.Range("A2:A" & lastHolidayRow).NumberFormat = "yyyy-mm-dd"
+    ws.Range("A2:B" & lastHolidayRow).HorizontalAlignment = xlCenter
+    ws.Range("E2:E4").Font.Color = RGB(95, 105, 117)
+    ws.Range("E2:E4").Font.Size = 9
+    ws.Range("E29:E30").Font.Size = 9
+    ws.Range("E29:E30").Font.Color = RGB(95, 105, 117)
+    ws.Range("I5:J5").HorizontalAlignment = xlLeft
+    ws.Range("I5:J5").Font.Size = 9
+    ws.Range("I5:J5").Font.Color = RGB(95, 105, 117)
+    ws.Range("I11:J11").HorizontalAlignment = xlLeft
+    ws.Range("I11:J11").Font.Size = 9
+    ws.Range("I11:J11").Font.Color = RGB(95, 105, 117)
+    ws.Range("J2:J3").HorizontalAlignment = xlCenter
+    ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).HorizontalAlignment = xlCenter
+    ws.Range("I17:J18").Font.Size = 9
+    ws.Range("I17:J18").Font.Color = RGB(95, 105, 117)
+    ws.Rows("17:18").RowHeight = 24
+    ws.Tab.Color = RGB(68, 90, 115)
+    If ActiveSheet Is ws Then ActiveWindow.DisplayGridlines = False
+    ws.PageSetup.PrintArea = "$A$1:$J$" & CStr(lastHolidayRow)
+    ws.PageSetup.Orientation = xlLandscape
+    ws.PageSetup.Zoom = False
+    ws.PageSetup.FitToPagesWide = 1
+    ws.PageSetup.FitToPagesTall = False
 End Sub
 
 Private Function GetWeeklyReportConfigSheet() As Worksheet
