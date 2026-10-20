@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 간트 only/보고 only 필터 및 전용 판정 함수 제거
 ' 2026-10-20 김좌현 수정 : 완료 항목 숨김 처리와 전용 번호 변환 제거
 
 Private Const TASK_VALIDATION_MIN_LAST_ROW As Long = 5000
@@ -1610,76 +1611,6 @@ Public Sub ShowAllTaskRows(ws As Worksheet, ByVal lastRow As Long)
     ws.Rows(DATA_START_ROW & ":" & lastRow).Hidden = False
 End Sub
 
-Public Sub ApplyDisplayTaskRowFilter(ws As Worksheet, ByVal lastRow As Long, ByVal chartStartDate As Date, ByVal chartEndDate As Date)
-    Dim ganttOnlyFlag As Boolean
-    Dim reportOnlyFlag As String
-    Dim r As Long
-    Dim showRow As Boolean
-
-    If lastRow < DATA_START_ROW Then Exit Sub
-
-    ganttOnlyFlag = GetDisplayGanttOnlyFlag()
-    reportOnlyFlag = GetDisplayReportOnlyFlag()
-
-    If Not ganttOnlyFlag And (reportOnlyFlag = "" Or reportOnlyFlag = REPORT_FILTER_ALL) Then Exit Sub
-
-    For r = DATA_START_ROW To lastRow
-        If HasTaskContent(ws, r) Then
-            showRow = True
-
-            If ganttOnlyFlag Then
-                showRow = HasTaskDateInDisplayRange(ws, r, chartStartDate, chartEndDate)
-            End If
-
-            If showRow Then
-                Select Case reportOnlyFlag
-                    Case STATUS_WEEKLY_REPORT
-                        showRow = IsTaskManualStatus(ws, r, reportOnlyFlag)
-                    Case REPORT_FILTER_EMPTY
-                        showRow = IsTaskManualStatusEmpty(ws, r)
-                End Select
-            End If
-
-            ws.Rows(r).Hidden = Not showRow
-        End If
-    Next r
-End Sub
-
-Private Function HasTaskDateInDisplayRange(ws As Worksheet, ByVal rowNum As Long, ByVal displayStartDate As Date, ByVal displayEndDate As Date) As Boolean
-    HasTaskDateInDisplayRange = _
-        IsTaskDateRangeOverlap(ws.Cells(rowNum, COL_PLAN_START).Value, ws.Cells(rowNum, COL_PLAN_END).Value, displayStartDate, displayEndDate) Or _
-        IsTaskDateRangeOverlap(ws.Cells(rowNum, COL_ACTUAL_START).Value, ws.Cells(rowNum, COL_ACTUAL_END).Value, displayStartDate, displayEndDate)
-End Function
-
-Private Function IsTaskDateRangeOverlap(ByVal startValue As Variant, ByVal endValue As Variant, ByVal displayStartDate As Date, ByVal displayEndDate As Date) As Boolean
-    If Not IsDate(startValue) Or Not IsDate(endValue) Then Exit Function
-
-    IsTaskDateRangeOverlap = (CLng(CDate(startValue)) <= CLng(displayEndDate) And CLng(CDate(endValue)) >= CLng(displayStartDate))
-End Function
-
-Private Function IsTaskManualStatus(ws As Worksheet, ByVal rowNum As Long, ByVal statusText As String) As Boolean
-    Select Case statusText
-        Case STATUS_WEEKLY_REPORT
-            IsTaskManualStatus = HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value)
-        Case Else
-            IsTaskManualStatus = (Trim$(CStr(ws.Cells(rowNum, COL_MANUAL_STATUS).Value)) = statusText)
-    End Select
-End Function
-
-Private Function IsTaskManualStatusEmpty(ws As Worksheet, ByVal rowNum As Long) As Boolean
-    IsTaskManualStatusEmpty = _
-        Not HasReportStatusValue(ws.Cells(rowNum, COL_WEEKLY_REPORT).Value)
-End Function
-
-Private Function HasReportStatusValue(ByVal statusValue As Variant) As Boolean
-    Dim statusText As String
-
-    statusText = UCase$(Trim$(CStr(statusValue)))
-    HasReportStatusValue = _
-        (statusText = UCase$(REPORT_STATUS_PLANNED) Or _
-         statusText = UCase$(REPORT_STATUS_IN_PROGRESS) Or _
-         statusText = UCase$(REPORT_STATUS_COMPLETED))
-End Function
 Public Sub ShowAllDateColumns(ws As Worksheet)
     Dim startCol As Long
     Dim endCol As Long

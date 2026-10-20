@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttConfig"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 필터 설정 상수 제거
 ' 2026-10-20 김좌현 수정 : 완료 숨김 및 숨김 제외 설정 상수 제거
 
 Public Const GANTT_HEADER_ROW_MONTH As Long = 1
@@ -94,10 +95,6 @@ Public Const DISPLAY_SETTING_START_LABEL_CELL As String = "I2"
 Public Const DISPLAY_SETTING_START_VALUE_CELL As String = "J2"
 Public Const DISPLAY_SETTING_END_LABEL_CELL As String = "I3"
 Public Const DISPLAY_SETTING_END_VALUE_CELL As String = "J3"
-Public Const DISPLAY_SETTING_GANTT_ONLY_LABEL_CELL As String = "I4"
-Public Const DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL As String = "J4"
-Public Const DISPLAY_SETTING_REPORT_ONLY_LABEL_CELL As String = "I5"
-Public Const DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL As String = "J5"
 Public Const INPUT_SETTING_TITLE_CELL As String = "I7"
 Public Const TASK_FOLD_TITLE_CELL As String = "I12"
 Public Const TASK_FOLD_START_VALUE_CELL As String = "J13"
@@ -207,8 +204,6 @@ Public Const STATUS_DONE As String = "완료"
 Public Const STATUS_HOLD As String = "보류"
 Public Const STATUS_WEEKLY_REPORT As String = "주간보고"
 Public Const STATUS_ERROR As String = "오류"
-Public Const REPORT_FILTER_ALL As String = "전체"
-Public Const REPORT_FILTER_EMPTY As String = "빈값"
 Public Const REPORT_STATUS_PLANNED As String = "Planned"
 Public Const REPORT_STATUS_IN_PROGRESS As String = "In Progress"
 Public Const REPORT_STATUS_COMPLETED As String = "Completed"

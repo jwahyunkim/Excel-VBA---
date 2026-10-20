@@ -3,6 +3,7 @@ param([string]$WorkbookPath, [string]$SavePath)
 
 # 2026-10-20 김좌현 수정 : 새로고침 통합과 기존 버튼 전환 회귀 검증
 # 2026-10-20 김좌현 수정 : 항목 숨김 제거 후 5개 버튼 구성 검증
+# 2026-10-20 김좌현 수정 : 표시 기간 유지 및 제거된 only 설정의 행 필터 미적용 검증
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 if (-not $WorkbookPath) {
@@ -61,6 +62,7 @@ Public Function RunTaskLayoutRegression() As String
     Dim reversedPeriodError As Long
     Dim buttonLeft As Double, buttonTop As Double, buttonCount As Long
     Dim legacyButton As Shape, setupWs As Worksheet, shape As Shape
+    Dim displayConfig As Worksheet, oldDisplaySettings As Variant
     On Error GoTo Failed
     Application.EnableEvents = False
     Set ws = ThisWorkbook.Worksheets("Sheet1")
@@ -136,7 +138,20 @@ Public Function RunTaskLayoutRegression() As String
     Check InStr(ws.Range("H5").Validation.Formula1, "LEN(H5)") > 0, "request length validation"
     Check InStr(ws.Range("I5").Validation.Formula1, "LEN(I5)") > 0, "modification length validation"
     ws.Activate
+    Set displayConfig = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    oldDisplaySettings = displayConfig.Range("J2:J5").Value2
+    displayConfig.Range("J2").Value = DateSerial(2026, 10, 10)
+    displayConfig.Range("J3").Value = DateSerial(2026, 10, 20)
+    ' Old workbook values must no longer filter rows.
+    displayConfig.Range("J4").Value2 = "Y"
+    displayConfig.Range("J5").Value2 = "주간보고"
     RefreshGanttSheet False
+    Check CDate(ws.Range("X4").Value) = DateSerial(2026, 10, 10), "display start lost"
+    Check CDate(ws.Range("AH4").Value) = DateSerial(2026, 10, 20), "display end lost"
+    For r = DATA_START_ROW To GetLastDataRow(ws)
+        If HasTaskContent(ws, r) Then Check Not ws.Rows(r).Hidden, "retired only filter hid row " & r
+    Next r
+    displayConfig.Range("J2:J5").Value2 = oldDisplaySettings
     UpgradeTaskReportButtons ws
     ' A legacy create-only button must retain its position and remain executable.
     UnprotectTaskSheet ws
@@ -195,7 +210,7 @@ Public Function RunTaskLayoutRegression() As String
     Check ws.Shapes("btnPeriodTextReport").TextFrame2.TextRange.Text = "TXT 출력", "TXT button caption"
     Check ws.Range("I5").Locked = False, "modification input locked"
     Check ws.ProtectContents, "task sheet protection disabled"
-    RunTaskLayoutRegression = "PASS: data preservation, idempotent columns, period validation/persistence, input validation, Gantt refresh, legacy button migration, five button options, TXT button, protection"
+    RunTaskLayoutRegression = "PASS: data preservation, idempotent columns, period validation/persistence, input validation, Gantt refresh, display period preserved without only filters, legacy button migration, five button options, TXT button, protection"
     Exit Function
 Failed:
     RunTaskLayoutRegression = "FAIL: " & Err.Description

@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param([string]$WorkbookPath, [string]$SavePath, [switch]$ViewOnly, [switch]$SelectedColumnsOnly)
 
+# 2026-10-20 김좌현 수정 : 행 필터 제거 후 열 접기 상태 복구 삽입 위치 변경
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 if (-not $WorkbookPath) {
@@ -254,7 +255,7 @@ try {
     $count = $code.ProcCountLines('RefreshGanttSheet', 0)
     if (-not ([string]$code.Lines($start, $count)).Contains('RestoreTaskDetailColumnHidden ws, detailColumnHidden')) {
         for ($line = $start; $line -lt $start + $count; $line++) {
-            if (([string]$code.Lines($line, 1)).Trim() -eq 'ApplyDisplayTaskRowFilter ws, lastRow, chartStartDate, chartEndDate') {
+            if (([string]$code.Lines($line, 1)).Trim() -eq 'ShowAllDateColumns ws') {
                 $code.InsertLines($line + 1, @"
     RestoreTaskDetailColumnHidden ws, detailColumnHidden
     If detailScrollColumn > 0 And Not ActiveWindow Is Nothing Then

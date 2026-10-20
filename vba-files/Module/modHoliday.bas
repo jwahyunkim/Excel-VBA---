@@ -1,5 +1,6 @@
 Attribute VB_Name = "modHoliday"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 간트 only/보고 only 설정 및 설정 읽기 함수 제거
 ' 2026-10-20 김좌현 수정 : 미사용 완료 숨김/제외 설정 및 읽기 함수 제거
 
 Private weeklyReportNumbers(1 To 7) As Long
@@ -10,8 +11,6 @@ Public Sub EnsureConfigSheet()
     Dim rngType As Range
     Dim rngDisplayStart As Range
     Dim rngDisplayEnd As Range
-    Dim rngDisplayGanttOnly As Range
-    Dim rngDisplayReportOnly As Range
     Dim rngTaskMaxLength As Range
     Dim legacyTaskMaxLength As Variant
 
@@ -46,11 +45,6 @@ Public Sub EnsureConfigSheet()
     ws.Range(DISPLAY_SETTING_TITLE_CELL).Value = "간트 - 표시 기간 설정"
     ws.Range(DISPLAY_SETTING_START_LABEL_CELL).Value = "표시 시작일"
     ws.Range(DISPLAY_SETTING_END_LABEL_CELL).Value = "표시 종료일"
-    ws.Range(DISPLAY_SETTING_GANTT_ONLY_LABEL_CELL).Value = "간트 only"
-    ws.Range(DISPLAY_SETTING_REPORT_ONLY_LABEL_CELL).Value = "보고 only"
-    If Trim$(CStr(ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).Value)) = "개발진행" Then
-        ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).ClearContents
-    End If
     ws.Range(INPUT_SETTING_TITLE_CELL).Value = "간트 - 입력 제한 설정"
     legacyTaskMaxLength = ws.Range(TASK_MAX_LENGTH_LEVEL1_VALUE_CELL).Value
     ws.Range(TASK_MAX_LENGTH_LEVEL1_LABEL_CELL).Value = "Level 1 각 내용 최대 글자 수"
@@ -91,27 +85,21 @@ Public Sub EnsureConfigSheet()
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Interior.Color = RGB(221, 235, 247)
     ws.Range(INPUT_SETTING_TITLE_CELL & ":J7").Borders.LineStyle = xlContinuous
     ws.Range("I8:J10").Borders.LineStyle = xlContinuous
-    ws.Range("I2:J5").Borders.LineStyle = xlContinuous
+    ws.Range("I2:J3").Borders.LineStyle = xlContinuous
 
     ws.Columns(HOLIDAY_COL_DATE).NumberFormat = "yyyy-mm-dd"
     ws.Range(DISPLAY_SETTING_START_VALUE_CELL).NumberFormat = "yyyy-mm-dd"
     ws.Range(DISPLAY_SETTING_END_VALUE_CELL).NumberFormat = "yyyy-mm-dd"
-    ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).NumberFormat = "General"
-    ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).NumberFormat = "General"
     ws.Range(TASK_MAX_LENGTH_VALUE_RANGE).NumberFormat = "0"
     lastSheetRow = ws.rows.Count
     Set rngType = ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_DATA_START_ROW & ":" & HOLIDAY_COL_TYPE & lastSheetRow)
     Set rngDisplayStart = ws.Range(DISPLAY_SETTING_START_VALUE_CELL)
     Set rngDisplayEnd = ws.Range(DISPLAY_SETTING_END_VALUE_CELL)
-    Set rngDisplayGanttOnly = ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL)
-    Set rngDisplayReportOnly = ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL)
     Set rngTaskMaxLength = ws.Range(TASK_MAX_LENGTH_VALUE_RANGE)
     On Error Resume Next
     rngType.Validation.Delete
     rngDisplayStart.Validation.Delete
     rngDisplayEnd.Validation.Delete
-    rngDisplayGanttOnly.Validation.Delete
-    rngDisplayReportOnly.Validation.Delete
     rngTaskMaxLength.Validation.Delete
     On Error GoTo 0
 
@@ -148,20 +136,6 @@ Public Sub EnsureConfigSheet()
     rngDisplayEnd.Validation.InputMessage = "간트에서 마지막으로 보여줄 날짜를 입력하세요."
     rngDisplayEnd.Validation.ErrorTitle = "입력 오류"
     rngDisplayEnd.Validation.ErrorMessage = "올바른 날짜를 입력하세요."
-
-    rngDisplayGanttOnly.Validation.Add Type:=xlValidateList, _
-                                        AlertStyle:=xlValidAlertStop, _
-                                        Operator:=xlBetween, _
-                                        Formula1:="Y,N"
-    rngDisplayGanttOnly.Validation.IgnoreBlank = True
-    rngDisplayGanttOnly.Validation.InCellDropdown = True
-
-    rngDisplayReportOnly.Validation.Add Type:=xlValidateList, _
-                                         AlertStyle:=xlValidAlertStop, _
-                                         Operator:=xlBetween, _
-                                         Formula1:=STATUS_WEEKLY_REPORT & "," & REPORT_FILTER_ALL & "," & REPORT_FILTER_EMPTY
-    rngDisplayReportOnly.Validation.IgnoreBlank = True
-    rngDisplayReportOnly.Validation.InCellDropdown = True
 
     rngTaskMaxLength.Validation.Add Type:=xlValidateWholeNumber, _
                                     AlertStyle:=xlValidAlertStop, _
@@ -772,30 +746,6 @@ Public Function TryGetDisplayDateRange(ByRef displayStartDate As Date, ByRef dis
     End If
 
     TryGetDisplayDateRange = True
-End Function
-
-Public Function GetDisplayGanttOnlyFlag() As Boolean
-    Dim ws As Worksheet
-    Dim v As String
-
-    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    v = UCase$(Trim$(CStr(ws.Range(DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL).Value)))
-
-    GetDisplayGanttOnlyFlag = (v = "Y")
-End Function
-
-Public Function GetDisplayReportOnlyFlag() As String
-    Dim ws As Worksheet
-    Dim v As String
-
-    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-    v = Trim$(CStr(ws.Range(DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL).Value))
-
-    If v = STATUS_WEEKLY_REPORT Or v = REPORT_FILTER_ALL Or v = REPORT_FILTER_EMPTY Then
-        GetDisplayReportOnlyFlag = v
-    Else
-        GetDisplayReportOnlyFlag = ""
-    End If
 End Function
 
 Public Function GetTaskMaxLength(Optional ByVal taskLevel As Long = 1) As Long

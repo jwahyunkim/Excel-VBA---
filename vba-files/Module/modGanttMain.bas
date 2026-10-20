@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
 ' 2026-10-20 김좌현 수정 : 미사용 항목 숨기기 매크로와 전용 버튼 생성 제거
 
 ' 2026-10-20 김좌현 수정 : 생성/새로고침을 새로고침 진입점으로 통합
@@ -88,7 +89,6 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     DrawTaskBars ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     ShowAllDateColumns ws
-    ApplyDisplayTaskRowFilter ws, lastRow, chartStartDate, chartEndDate
     RestoreTaskDetailColumnHidden ws, detailColumnHidden
     If detailScrollColumn > 0 And Not ActiveWindow Is Nothing Then
         ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollColumn = detailScrollColumn

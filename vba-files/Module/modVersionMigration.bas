@@ -1,5 +1,6 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
 ' 2026-10-20 김좌현 수정 : 항목 숨김 버튼과 선택 항목 제거 및 순서 정리
 ' 2026-10-20 김좌현 수정 : 새로고침 버튼 통합 및 기존 생성 버튼 연결 전환
 
@@ -857,7 +858,6 @@ Private Function RefreshMigratedSheet(ByVal ws As Worksheet) As Boolean
     DrawTaskBars ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     ShowAllDateColumns ws
-    ApplyDisplayTaskRowFilter ws, lastRow, chartStartDate, chartEndDate
     ApplyCalculatedColumnsProtection ws, lastRow
 
     RefreshMigratedSheet = True
