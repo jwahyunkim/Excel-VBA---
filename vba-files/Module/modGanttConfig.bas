@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttConfig"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 휴일 표 제목 공간 확보에 따른 헤더/입력 시작 행 변경
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 필터 설정 상수 제거
 ' 2026-10-20 김좌현 수정 : 완료 숨김 및 숨김 제외 설정 상수 제거
 
@@ -80,8 +81,8 @@ Public Const WR_CUSTOM_START_ROW As Long = 3
 Public Const WR_CUSTOM_END_ROW As Long = 197
 Public Const WR_MODULE_LIST_COLUMN As String = "K"
 Public Const LEGACY_CONFIG_SHEET_NAME As String = "휴일설정"
-Public Const HOLIDAY_HEADER_ROW As Long = 1
-Public Const HOLIDAY_DATA_START_ROW As Long = 2
+Public Const HOLIDAY_HEADER_ROW As Long = 3
+Public Const HOLIDAY_DATA_START_ROW As Long = 4
 
 Public Const HOLIDAY_COL_DATE As String = "A"
 Public Const HOLIDAY_COL_TYPE As String = "B"

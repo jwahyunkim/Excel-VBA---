@@ -1,5 +1,6 @@
 Attribute VB_Name = "modHoliday"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 휴일·근무일 표 제목 추가 및 기존 날짜 입력 보존 이전
 ' 2026-10-20 김좌현 수정 : config 영역 정렬 및 입력/안내 서식 통일
 ' 2026-10-20 김좌현 수정 : 간트 only/보고 only 설정 및 설정 읽기 함수 제거
 ' 2026-10-20 김좌현 수정 : 미사용 완료 숨김/제외 설정 및 읽기 함수 제거
@@ -34,6 +35,7 @@ Public Sub EnsureConfigSheet()
         ws.Name = CONFIG_SHEET_NAME
     End If
 
+    MigrateHolidayTable ws
     ws.Range(HOLIDAY_COL_DATE & HOLIDAY_HEADER_ROW).Value = "날짜"
     ws.Range(HOLIDAY_COL_TYPE & HOLIDAY_HEADER_ROW).Value = "구분"
     ws.Range(HOLIDAY_COL_DESC & HOLIDAY_HEADER_ROW).Value = "설명"
@@ -137,6 +139,18 @@ Public Sub EnsureConfigSheet()
     EnsureTaskDetailFoldConfig ws
 End Sub
 
+Private Sub MigrateHolidayTable(ByVal ws As Worksheet)
+    Dim lastRow As Long
+    If CStr(ws.Range("A1").Value2) <> "날짜" Or _
+       CStr(ws.Range("B1").Value2) <> "구분" Then Exit Sub
+    lastRow = Application.Max( _
+        ws.Cells(ws.Rows.Count, "A").End(xlUp).Row, _
+        ws.Cells(ws.Rows.Count, "B").End(xlUp).Row, _
+        ws.Cells(ws.Rows.Count, "C").End(xlUp).Row)
+    ws.Range("A1:C" & lastRow).Copy Destination:=ws.Range("A" & HOLIDAY_HEADER_ROW)
+    ws.Range("A1:C" & CStr(HOLIDAY_HEADER_ROW - 1)).Clear
+End Sub
+
 Private Sub FormatConfigSheet(ByVal ws As Worksheet)
     Dim section As Variant, inputs As Variant, lastHolidayRow As Long
     lastHolidayRow = ws.Cells(ws.Rows.Count, HOLIDAY_COL_DATE).End(xlUp).Row
@@ -158,7 +172,13 @@ Private Sub FormatConfigSheet(ByVal ws As Worksheet)
     ws.Columns("F:H").ColumnWidth = 1
     ws.Columns("I").ColumnWidth = 31
     ws.Columns("J").ColumnWidth = 17
-    ws.Range("A1:C1").HorizontalAlignment = xlCenter
+    ws.Range("A1").Value2 = "휴일·근무일 설정"
+    ws.Range("A1:C1").HorizontalAlignment = xlCenterAcrossSelection
+    With ws.Range("A" & HOLIDAY_HEADER_ROW & ":C" & HOLIDAY_HEADER_ROW)
+        .Interior.Color = RGB(233, 239, 245)
+        .Font.Bold = True
+        .HorizontalAlignment = xlCenter
+    End With
     ws.Range("E1").Value2 = "휴일 입력 안내"
     ws.Range("I5").Value2 = "기간을 비우면 전체 일정 표시"
     ws.Range("I11").Value2 = "요청·수정 내용에 각각 적용"
@@ -170,7 +190,7 @@ Private Sub FormatConfigSheet(ByVal ws As Worksheet)
             .RowHeight = 28
         End With
     Next section
-    For Each inputs In Array("A2:C" & lastHolidayRow, TASK_TYPE_CONFIG_RANGE, _
+    For Each inputs In Array("A" & HOLIDAY_DATA_START_ROW & ":C" & lastHolidayRow, TASK_TYPE_CONFIG_RANGE, _
                              "J2:J3", TASK_MAX_LENGTH_VALUE_RANGE, TASK_FOLD_SETTING_VALUE_RANGE)
         With ws.Range(CStr(inputs))
             .Interior.Color = RGB(255, 249, 228)
@@ -179,8 +199,8 @@ Private Sub FormatConfigSheet(ByVal ws As Worksheet)
             .Borders(xlEdgeBottom).Color = RGB(216, 222, 229)
         End With
     Next inputs
-    ws.Range("A2:A" & lastHolidayRow).NumberFormat = "yyyy-mm-dd"
-    ws.Range("A2:B" & lastHolidayRow).HorizontalAlignment = xlCenter
+    ws.Range("A" & HOLIDAY_DATA_START_ROW & ":A" & lastHolidayRow).NumberFormat = "yyyy-mm-dd"
+    ws.Range("A" & HOLIDAY_DATA_START_ROW & ":B" & lastHolidayRow).HorizontalAlignment = xlCenter
     ws.Range("E2:E4").Font.Color = RGB(95, 105, 117)
     ws.Range("E2:E4").Font.Size = 9
     ws.Range("E29:E30").Font.Size = 9

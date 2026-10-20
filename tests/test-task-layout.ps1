@@ -5,6 +5,7 @@ param([string]$WorkbookPath, [string]$SavePath)
 # 2026-10-20 김좌현 수정 : 항목 숨김 제거 후 5개 버튼 구성 검증
 # 2026-10-20 김좌현 수정 : 표시 기간 유지 및 제거된 only 설정의 행 필터 미적용 검증
 # 2026-10-20 김좌현 수정 : config 타입 목록 이전과 재초기화 시 값 보존 검증
+# 2026-10-20 김좌현 수정 : 휴일 표 이전 시 날짜 보존 및 휴일 읽기 검증
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 if (-not $WorkbookPath) {
@@ -65,6 +66,8 @@ Public Function RunTaskLayoutRegression() As String
     Dim legacyButton As Shape, setupWs As Worksheet, shape As Shape
     Dim displayConfig As Worksheet, oldDisplaySettings As Variant
     Dim typeConfig As Worksheet, originalTypes As Variant, typeIndex As Long
+    Dim holidayValues As Variant, holidayStart As Long, holidayEnd As Long, holidayRows As Long
+    Dim holidays As Object, workdays As Object, holidayKey As String
     On Error GoTo Failed
     Application.EnableEvents = False
     Set ws = ThisWorkbook.Worksheets("Sheet1")
@@ -82,6 +85,13 @@ Public Function RunTaskLayoutRegression() As String
         manual = ws.Range("R5:T" & lastRow).Value2
     End If
     Set typeConfig = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    holidayStart = HOLIDAY_DATA_START_ROW
+    If CStr(typeConfig.Range("A1").Value2) = "날짜" Then holidayStart = 2
+    holidayEnd = typeConfig.Cells(typeConfig.Rows.Count, "A").End(xlUp).Row
+    If holidayEnd >= holidayStart Then
+        holidayValues = typeConfig.Range("A" & holidayStart & ":C" & holidayEnd).Value2
+        holidayRows = holidayEnd - holidayStart + 1
+    End If
     If CStr(typeConfig.Range("L9").Value2) = "허용 타입 목록" Then
         originalTypes = typeConfig.Range("L10:L29").Value2
     Else
@@ -122,6 +132,21 @@ Public Function RunTaskLayoutRegression() As String
         End If
     Next name
     EnsureConfigSheet
+    EnsureConfigSheet
+    Check CStr(typeConfig.Range("A1").Value2) = "휴일·근무일 설정", "holiday table title missing"
+    Check CStr(typeConfig.Cells(HOLIDAY_HEADER_ROW, 1).Value2) = "날짜", "holiday date header missing"
+    LoadHolidaySettings holidays, workdays
+    For r = 1 To holidayRows
+        For c = 1 To 3
+            Check CStr(typeConfig.Cells(HOLIDAY_DATA_START_ROW + r - 1, c).Value2) = _
+                  CStr(holidayValues(r, c)), "holiday value lost during move"
+        Next c
+        If IsDate(typeConfig.Cells(HOLIDAY_DATA_START_ROW + r - 1, 1).Value) Then
+            holidayKey = NormalizeDateKey(CDate(typeConfig.Cells(HOLIDAY_DATA_START_ROW + r - 1, 1).Value))
+            If CStr(holidayValues(r, 2)) = HOLIDAY_TYPE_HOLIDAY Then Check holidays.Exists(holidayKey), "holiday no longer loaded"
+            If CStr(holidayValues(r, 2)) = HOLIDAY_TYPE_WORKDAY Then Check workdays.Exists(holidayKey), "workday no longer loaded"
+        End If
+    Next r
     Set reportWs = ThisWorkbook.Worksheets(OUTPUT_CONFIG_SHEET_NAME)
     configuredStart = reportWs.Range(OUTPUT_REPORT_START_CELL).Value
     configuredEnd = reportWs.Range(OUTPUT_REPORT_END_CELL).Value
@@ -224,7 +249,7 @@ Public Function RunTaskLayoutRegression() As String
     Check ws.Shapes("btnPeriodTextReport").TextFrame2.TextRange.Text = "TXT 출력", "TXT button caption"
     Check ws.Range("I5").Locked = False, "modification input locked"
     Check ws.ProtectContents, "task sheet protection disabled"
-    RunTaskLayoutRegression = "PASS: data preservation, config type migration, idempotent columns, period validation/persistence, input validation, Gantt refresh, display period preserved without only filters, legacy button migration, five button options, TXT button, protection"
+    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, Gantt refresh, display period preserved without only filters, legacy button migration, five button options, TXT button, protection"
     Exit Function
 Failed:
     RunTaskLayoutRegression = "FAIL: " & Err.Description
