@@ -6,6 +6,7 @@ param([string]$WorkbookPath, [string]$SavePath)
 # 2026-10-20 김좌현 수정 : 표시 기간 유지 및 제거된 only 설정의 행 필터 미적용 검증
 # 2026-10-20 김좌현 수정 : config 타입 목록 이전과 재초기화 시 값 보존 검증
 # 2026-10-20 김좌현 수정 : 휴일 표 이전 시 날짜 보존 및 휴일 읽기 검증
+# 2026-10-20 김좌현 수정 : 완료 숨김을 포함한 6개 버튼 구성 검증
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 if (-not $WorkbookPath) {
@@ -66,6 +67,7 @@ Public Function RunTaskLayoutRegression() As String
     Dim legacyButton As Shape, setupWs As Worksheet, shape As Shape
     Dim displayConfig As Worksheet, oldDisplaySettings As Variant
     Dim typeConfig As Worksheet, originalTypes As Variant, typeIndex As Long
+    Dim hiddenBeforeRefresh() As Boolean
     Dim holidayValues As Variant, holidayStart As Long, holidayEnd As Long, holidayRows As Long
     Dim holidays As Object, workdays As Object, holidayKey As String
     On Error GoTo Failed
@@ -177,6 +179,15 @@ Public Function RunTaskLayoutRegression() As String
     Check InStr(ws.Range("H5").Validation.Formula1, "LEN(H5)") > 0, "request length validation"
     Check InStr(ws.Range("I5").Validation.Formula1, "LEN(I5)") > 0, "modification length validation"
     ws.Activate
+    UnprotectTaskSheet ws
+    If ws.FilterMode Then ws.ShowAllData
+    ws.Outline.ShowLevels RowLevels:=8
+    ShowAllTaskRows ws, GetLastDataRow(ws)
+    ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    ReDim hiddenBeforeRefresh(DATA_START_ROW To GetLastDataRow(ws))
+    For r = DATA_START_ROW To GetLastDataRow(ws)
+        hiddenBeforeRefresh(r) = ws.Rows(r).Hidden
+    Next r
     Set displayConfig = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     oldDisplaySettings = displayConfig.Range("J2:J5").Value2
     displayConfig.Range("J2").Value = DateSerial(2026, 10, 10)
@@ -188,7 +199,7 @@ Public Function RunTaskLayoutRegression() As String
     Check CDate(ws.Range("X4").Value) = DateSerial(2026, 10, 10), "display start lost"
     Check CDate(ws.Range("AH4").Value) = DateSerial(2026, 10, 20), "display end lost"
     For r = DATA_START_ROW To GetLastDataRow(ws)
-        If HasTaskContent(ws, r) Then Check Not ws.Rows(r).Hidden, "retired only filter hid row " & r
+        If HasTaskContent(ws, r) Then Check Not ws.Rows(r).Hidden, "retired only filter hid row " & r & "; before=" & hiddenBeforeRefresh(r)
     Next r
     displayConfig.Range("J2:J5").Value2 = oldDisplaySettings
     UpgradeTaskReportButtons ws
@@ -230,8 +241,8 @@ Public Function RunTaskLayoutRegression() As String
     ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     버튼_생성_선택
     Set setupWs = ActiveSheet
-    Check setupWs.CheckBoxes.Count = 5, "button options were not consolidated"
-    Check setupWs.DropDowns.Count = 5, "button order options were not consolidated"
+    Check setupWs.CheckBoxes.Count = 6, "button options were not consolidated"
+    Check setupWs.DropDowns.Count = 6, "button order options were not consolidated"
     Check setupWs.CheckBoxes("chkButtonOption2").Caption = "간트차트 새로고침", "refresh option caption"
     선택한_버튼_생성 False
     Check ActiveSheet.Name = ws.Name, "button creation did not return to task sheet"
@@ -242,6 +253,9 @@ Public Function RunTaskLayoutRegression() As String
     Check buttonCount = 1, "refresh button duplicated"
     Check ws.Shapes("btnGanttReset").OnAction = "칸트차트_초기화", "reset option shifted"
     Check ws.Shapes("btnGanttObjectInsert").OnAction = "칸트차트_개체삽입", "object option shifted"
+    Check ws.Shapes(COMPLETED_TASK_BUTTON_NAME).OnAction = "칸트차트_완료숨김", "completed button action"
+    Check Abs(ws.Shapes(COMPLETED_TASK_BUTTON_NAME).Width - ws.Shapes("btnGanttRefresh").Width) < 0.1, "completed button template width " & ws.Shapes(COMPLETED_TASK_BUTTON_NAME).Width & " vs " & ws.Shapes("btnGanttRefresh").Width
+    Check ws.Shapes(COMPLETED_TASK_BUTTON_NAME).TextFrame2.TextRange.Font.Size = ws.Shapes("btnGanttRefresh").TextFrame2.TextRange.Font.Size, "completed button template font"
     Check ws.Shapes("btnPeriodTextReport").Left > ws.Shapes("btnGanttObjectInsert").Left, "button order shifted"
     버튼_생성_선택
     버튼_생성_취소
@@ -249,7 +263,7 @@ Public Function RunTaskLayoutRegression() As String
     Check ws.Shapes("btnPeriodTextReport").TextFrame2.TextRange.Text = "TXT 출력", "TXT button caption"
     Check ws.Range("I5").Locked = False, "modification input locked"
     Check ws.ProtectContents, "task sheet protection disabled"
-    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, Gantt refresh, display period preserved without only filters, legacy button migration, five button options, TXT button, protection"
+    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, Gantt refresh, display period preserved without only filters, legacy button migration, six button options, TXT button, protection"
     Exit Function
 Failed:
     RunTaskLayoutRegression = "FAIL: " & Err.Description

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 계층 펼치기 후에도 완료 숨김 상태 유지
 ' 2026-10-20 김좌현 수정 : config 열 접기 영역의 제목/입력 서식 통일
 
 ' 2026-10-19 김좌현 수정 : 쉼표로 선택한 여러 열을 접힌 화면에 고정하고 접기 범위 안의 선택 열도 표시
@@ -454,7 +455,10 @@ Public Sub TaskOutlineViewTick()
     Dim ws As Worksheet
     If mTaskOutlineViewStarting Then Exit Sub
     Set ws = ActiveTaskOutlineSheet()
-    If Not ws Is Nothing Then EnsureTaskRequestFreeze ws
+    If Not ws Is Nothing Then
+        EnsureTaskRequestFreeze ws
+        If Application.EnableEvents And Application.ScreenUpdating Then MaintainCompletedTaskView ws
+    End If
 End Sub
 
 Public Function CaptureTaskDetailColumnHidden(ByVal ws As Worksheet) As Variant

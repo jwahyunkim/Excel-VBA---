@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 완료 숨김 버튼과 새로고침 시 행 보기 상태 유지
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
 ' 2026-10-20 김좌현 수정 : 미사용 항목 숨기기 매크로와 전용 버튼 생성 제거
 
@@ -24,6 +25,7 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     Dim errorText As String
     Dim detailColumnHidden As Variant
     Dim detailScrollColumn As Long, detailScrollRow As Long
+    Dim rowView As Object
 
     previousScreenUpdating = Application.ScreenUpdating
     previousEnableEvents = Application.EnableEvents
@@ -71,6 +73,7 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     chartEndDate = maxDate
 
     hasDisplayRange = TryGetDisplayDateRange(chartStartDate, chartEndDate)
+    Set rowView = CaptureTaskRowView(ws, lastRow)
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
@@ -89,6 +92,8 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     DrawTaskBars ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     ShowAllDateColumns ws
+    RestoreTaskRowView ws, lastRow, rowView
+    ApplyCompletedTaskVisibility ws, lastRow
     RestoreTaskDetailColumnHidden ws, detailColumnHidden
     If detailScrollColumn > 0 And Not ActiveWindow Is Nothing Then
         ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollColumn = detailScrollColumn
@@ -115,6 +120,14 @@ EH:
     End If
 End Sub
 
+Public Sub 칸트차트_완료숨김()
+    On Error GoTo Failed
+    ToggleCompletedTaskFilter ActiveSheet
+    Exit Sub
+Failed:
+    MsgBox "완료 항목 표시를 변경할 수 없습니다: " & Err.Description, vbExclamation
+End Sub
+
 Public Sub 칸트차트_초기화()
     Dim ws As Worksheet
     Dim lastRow As Long
@@ -137,6 +150,7 @@ Public Sub 칸트차트_초기화()
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
 
+    ClearCompletedTaskFilter ws, lastRow
     ShowAllTaskRows ws, lastRow
     ClearCalculatedArea ws, lastRow
     ClearGanttArea ws

@@ -1,11 +1,13 @@
 Attribute VB_Name = "modGanttDate"
 
 Option Explicit
+' 2026-10-20 ±èÁÂÇö ¼öÁ¤ : ¼û±ä Çàµµ Æ÷ÇÔÇØ ¸¶Áö¸· µ¥ÀÌÅÍ Çà Å½»ö
 
 Public Function GetLastDataRow(ws As Worksheet) As Long
     Dim lastRow As Long
     Dim colAddr As Variant
     Dim colLastRow As Long
+    Dim lastCell As Range
 
     lastRow = HEADER_ROW
 
@@ -15,7 +17,12 @@ Public Function GetLastDataRow(ws As Worksheet) As Long
                               COL_NOTE, COL_PLAN_START, COL_PLAN_END, _
                               COL_ACTUAL_START, COL_ACTUAL_END, _
                               COL_MANUAL_STATUS, COL_WEEKLY_REPORT)
-        colLastRow = ws.Cells(ws.Rows.Count, CStr(colAddr)).End(xlUp).Row
+        Set lastCell = ws.Columns(CStr(colAddr)).Find(What:="*", _
+            After:=ws.Range(CStr(colAddr) & "1"), LookIn:=xlFormulas, _
+            LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, _
+            MatchCase:=False, SearchFormat:=False)
+        colLastRow = HEADER_ROW
+        If Not lastCell Is Nothing Then colLastRow = lastCell.Row
         If colLastRow > lastRow Then lastRow = colLastRow
     Next colAddr
 

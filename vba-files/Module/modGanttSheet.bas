@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 완료 숨김에서도 동일한 계층/상태 재계산 사용
 ' 2026-10-20 김좌현 수정 : 간트 only/보고 only 필터 및 전용 판정 함수 제거
 ' 2026-10-20 김좌현 수정 : 완료 항목 숨김 처리와 전용 번호 변환 제거
 
@@ -482,7 +483,7 @@ ContinueNextRow:
     Next r
 End Sub
 
-Private Sub ApplyHierarchySummaryValues(ws As Worksheet, ByVal lastRow As Long, ByVal holidayDict As Object, ByVal workdayDict As Object)
+Public Sub ApplyHierarchySummaryValues(ws As Worksheet, ByVal lastRow As Long, ByVal holidayDict As Object, ByVal workdayDict As Object)
     Dim r As Long
     
     For r = lastRow To DATA_START_ROW Step -1
