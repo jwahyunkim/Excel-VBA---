@@ -1,0 +1,322 @@
+Attribute VB_Name = "modCompletedTaskView"
+Option Explicit
+' 2026-10-20 김좌현 수정 : 시트별 완료 숨김 토글과 기존 행/계층 보기 상태 보존
+
+Public Const COMPLETED_TASK_BUTTON_NAME As String = "btnGanttCompletedToggle"
+Private Const FILTER_NAME As String = "_GanttHideCompleted"
+Private Const OWNED_PREFIX As String = "_GanttDoneOwned_"
+Private Const COLLAPSED_PREFIX As String = "_GanttDoneCollapsed_"
+Private mChangingView As Boolean
+
+Public Function IsCompletedTaskSheet(ByVal ws As Worksheet) As Boolean
+    If ws Is Nothing Then Exit Function
+    IsCompletedTaskSheet = (CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) = "No." And _
+                            CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) = "Level" And _
+                            CStr(ws.Cells(HEADER_ROW, COL_STATUS).Value2) = "상태")
+End Function
+
+Private Function LocalNameKey(ByVal item As Name) As String
+    LocalNameKey = Mid$(item.Name, InStrRev(item.Name, "!") + 1)
+End Function
+
+Public Function AreCompletedTasksHidden(ByVal ws As Worksheet) As Boolean
+    Dim item As Name
+    For Each item In ws.Names
+        If LocalNameKey(item) = FILTER_NAME Then
+            AreCompletedTasksHidden = (item.RefersTo = "=1")
+            Exit Function
+        End If
+    Next item
+End Function
+
+Public Function CompletedTaskButtonCaption(ByVal ws As Worksheet) As String
+    If AreCompletedTasksHidden(ws) Then
+        CompletedTaskButtonCaption = "완료 표시"
+    Else
+        CompletedTaskButtonCaption = "완료 숨김"
+    End If
+End Function
+
+Public Sub UpdateCompletedTaskButton(ByVal ws As Worksheet)
+    Dim button As Shape, caption As String
+    If Not IsCompletedTaskSheet(ws) Then Exit Sub
+    On Error Resume Next
+    Set button = ws.Shapes(COMPLETED_TASK_BUTTON_NAME)
+    On Error GoTo 0
+    If button Is Nothing Then Exit Sub
+    caption = CompletedTaskButtonCaption(ws)
+    If button.TextFrame2.TextRange.Text <> caption Then button.TextFrame2.TextRange.Text = caption
+End Sub
+
+Private Sub DeleteStoredNames(ByVal ws As Worksheet, ByVal prefix As String)
+    Dim i As Long, key As String
+    For i = ws.Names.Count To 1 Step -1
+        key = LocalNameKey(ws.Names(i))
+        If Left$(key, Len(prefix)) = prefix Then ws.Names(i).Delete
+    Next i
+End Sub
+
+Private Sub AddLocalName(ByVal ws As Worksheet, ByVal key As String, ByVal formula As String)
+    ws.Names.Add Name:="'" & Replace(ws.Name, "'", "''") & "'!" & key, _
+                 RefersTo:=formula, Visible:=False
+End Sub
+
+Private Function StoredRows(ByVal ws As Worksheet, ByVal prefix As String) As Range
+    Dim item As Name, part As Range, result As Range
+    For Each item In ws.Names
+        If Left$(LocalNameKey(item), Len(prefix)) = prefix Then
+            Set part = Nothing
+            ' Deleting task rows can remove a stored range completely.
+            On Error Resume Next
+            Set part = item.RefersToRange
+            On Error GoTo 0
+            If Not part Is Nothing Then
+                If result Is Nothing Then
+                    Set result = part
+                Else
+                    Set result = Application.Union(result, part)
+                End If
+            End If
+        End If
+    Next item
+    Set StoredRows = result
+End Function
+
+Private Sub StoreRows(ByVal ws As Worksheet, ByVal prefix As String, ByVal rows As Range)
+    Dim area As Range, formula As String, part As String, index As Long
+    DeleteStoredNames ws, prefix
+    If rows Is Nothing Then Exit Sub
+    index = 1
+    For Each area In rows.Areas
+        part = "'" & Replace(ws.Name, "'", "''") & "'!" & area.Address
+        ' Bound each name formula; alternating completed rows can create many areas.
+        If Len(formula) + Len(part) > 3000 Then
+            AddLocalName ws, prefix & CStr(index), "=" & formula
+            index = index + 1
+            formula = vbNullString
+        End If
+        If Len(formula) > 0 Then formula = formula & ","
+        formula = formula & part
+    Next area
+    If Len(formula) > 0 Then AddLocalName ws, prefix & CStr(index), "=" & formula
+End Sub
+
+Private Function ContainsRow(ByVal rows As Range, ByVal ws As Worksheet, ByVal rowNumber As Long) As Boolean
+    If rows Is Nothing Then Exit Function
+    ContainsRow = Not Application.Intersect(rows, ws.Rows(rowNumber)) Is Nothing
+End Function
+
+Private Function RowsFromMask(ByVal ws As Worksheet, ByRef mask() As Boolean, ByVal lastRow As Long) As Range
+    Dim r As Long, first As Long, part As Range, result As Range
+    For r = DATA_START_ROW To lastRow + 1
+        If r <= lastRow Then
+            If mask(r) And first = 0 Then first = r
+        End If
+        If first > 0 Then
+            If r > lastRow Then
+                Set part = ws.Rows(CStr(first) & ":" & CStr(r - 1))
+                first = 0
+            ElseIf Not mask(r) Then
+                Set part = ws.Rows(CStr(first) & ":" & CStr(r - 1))
+                first = 0
+            Else
+                Set part = Nothing
+            End If
+            If Not part Is Nothing Then
+                If result Is Nothing Then
+                    Set result = part
+                Else
+                    Set result = Application.Union(result, part)
+                End If
+            End If
+        End If
+    Next r
+    Set RowsFromMask = result
+End Function
+
+Public Function CaptureTaskRowView(ByVal ws As Worksheet, ByVal lastRow As Long) As Object
+    Dim view As Object, owned As Range, savedCollapsed As Range, selected As Range
+    Dim hidden() As Boolean, collapsed() As Boolean, allHidden() As Boolean
+    Dim r As Long, child As Long, groupEnd As Long, isExpanded As Boolean, allOwned As Boolean, allChildrenHidden As Boolean
+    Set view = CreateObject("Scripting.Dictionary")
+    view.Add "Hidden", Nothing
+    view.Add "Collapsed", Nothing
+    view.Add "AllHidden", Nothing
+    If lastRow >= DATA_START_ROW Then
+        ReDim hidden(DATA_START_ROW To lastRow)
+        ReDim collapsed(DATA_START_ROW To lastRow)
+        ReDim allHidden(DATA_START_ROW To lastRow)
+        Set owned = StoredRows(ws, OWNED_PREFIX)
+        Set savedCollapsed = StoredRows(ws, COLLAPSED_PREFIX)
+        For r = DATA_START_ROW To lastRow
+            allHidden(r) = ws.Rows(r).Hidden
+            hidden(r) = allHidden(r) And Not ContainsRow(owned, ws, r)
+            If HasTaskContent(ws, r) And HasChildTask(ws, r, lastRow) Then
+                isExpanded = True
+                On Error Resume Next
+                isExpanded = ws.Rows(r).ShowDetail
+                On Error GoTo 0
+                If Not isExpanded Then
+                    groupEnd = GetTaskSubtreeEndRow(ws, r, lastRow)
+                    allChildrenHidden = True
+                    For child = r + 1 To groupEnd
+                        If Not ws.Rows(child).Hidden Then allChildrenHidden = False: Exit For
+                    Next child
+                    allOwned = Not owned Is Nothing
+                    For child = r + 1 To groupEnd
+                        If Not ContainsRow(owned, ws, child) Then
+                            allOwned = False
+                            Exit For
+                        End If
+                    Next child
+                    ' A filter can make ShowDetail=False without a user collapse.
+                    collapsed(r) = allChildrenHidden And ((Not allOwned) Or ContainsRow(savedCollapsed, ws, r))
+                End If
+            End If
+        Next r
+        Set view("Hidden") = RowsFromMask(ws, hidden, lastRow)
+        Set view("Collapsed") = RowsFromMask(ws, collapsed, lastRow)
+        Set view("AllHidden") = RowsFromMask(ws, allHidden, lastRow)
+    End If
+    Set CaptureTaskRowView = view
+End Function
+
+Private Sub SetRowsHidden(ByVal rows As Range, ByVal hidden As Boolean)
+    Dim area As Range
+    If rows Is Nothing Then Exit Sub
+    For Each area In rows.Areas
+        area.EntireRow.Hidden = hidden
+    Next area
+End Sub
+
+Private Sub RestoreCollapsedRows(ByVal ws As Worksheet, ByVal rows As Range)
+    Dim area As Range, row As Range
+    If rows Is Nothing Then Exit Sub
+    For Each area In rows.Areas
+        For Each row In area.Rows
+            On Error Resume Next
+            ws.Rows(row.Row).ShowDetail = False
+            On Error GoTo 0
+        Next row
+    Next area
+End Sub
+
+Public Sub RestoreTaskRowView(ByVal ws As Worksheet, ByVal lastRow As Long, ByVal view As Object)
+    Dim rows As Range
+    DeleteStoredNames ws, OWNED_PREFIX
+    If lastRow < DATA_START_ROW Then Exit Sub
+    ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).Hidden = False
+    Set rows = view("Hidden")
+    SetRowsHidden rows, True
+    Set rows = view("Collapsed")
+    RestoreCollapsedRows ws, rows
+End Sub
+
+Private Sub ApplyView(ByVal ws As Worksheet, ByVal lastRow As Long, ByVal hideCompleted As Boolean)
+    Dim view As Object, owned As Range, collapsed As Range, mask() As Boolean, r As Long
+    Set view = CaptureTaskRowView(ws, lastRow)
+    RestoreTaskRowView ws, lastRow, view
+    DeleteStoredNames ws, FILTER_NAME
+    If hideCompleted And lastRow >= DATA_START_ROW Then
+        ReDim mask(DATA_START_ROW To lastRow)
+        For r = DATA_START_ROW To lastRow
+            If HasTaskContent(ws, r) Then
+                If CStr(ws.Cells(r, COL_STATUS).Value2) = STATUS_DONE And Not ws.Rows(r).Hidden Then mask(r) = True
+            End If
+        Next r
+        Set owned = RowsFromMask(ws, mask, lastRow)
+        StoreRows ws, OWNED_PREFIX, owned
+        Set collapsed = view("Collapsed")
+        StoreRows ws, COLLAPSED_PREFIX, collapsed
+        AddLocalName ws, FILTER_NAME, "=1"
+        SetRowsHidden owned, True
+    Else
+        DeleteStoredNames ws, COLLAPSED_PREFIX
+    End If
+    UpdateCompletedTaskButton ws
+End Sub
+
+Public Sub ApplyCompletedTaskVisibility(ByVal ws As Worksheet, ByVal lastRow As Long)
+    If Not IsCompletedTaskSheet(ws) Then Exit Sub
+    ApplyView ws, lastRow, AreCompletedTasksHidden(ws)
+End Sub
+
+Public Sub ClearCompletedTaskFilter(ByVal ws As Worksheet, ByVal lastRow As Long)
+    ApplyView ws, lastRow, False
+End Sub
+
+Public Sub ToggleCompletedTaskFilter(ByVal ws As Worksheet)
+    Dim lastRow As Long, previousEvents As Boolean, previousScreen As Boolean, wasProtected As Boolean
+    Dim before As Object, originalOwned As Range, originalCollapsed As Range, originalFlag As Boolean
+    Dim holidays As Object, workdays As Object, rows As Range, errNumber As Long, errText As String
+    If Not IsCompletedTaskSheet(ws) Then Err.Raise vbObjectError + 7600, , "업무 시트에서 실행하세요."
+    If mChangingView Then Exit Sub
+    lastRow = GetLastDataRow(ws)
+    If lastRow < DATA_START_ROW Then Err.Raise vbObjectError + 7601, , "업무 데이터가 없습니다."
+    previousEvents = Application.EnableEvents
+    previousScreen = Application.ScreenUpdating
+    wasProtected = ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios
+    Set before = CaptureTaskRowView(ws, lastRow)
+    Set originalOwned = StoredRows(ws, OWNED_PREFIX)
+    Set originalCollapsed = StoredRows(ws, COLLAPSED_PREFIX)
+    originalFlag = AreCompletedTasksHidden(ws)
+    On Error GoTo Failed
+    mChangingView = True
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    UnprotectTaskSheet ws
+    EnsureConfigSheet
+    LoadHolidaySettings holidays, workdays
+    ApplyHierarchySummaryValues ws, lastRow, holidays, workdays
+    ApplyView ws, lastRow, Not originalFlag
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    Application.EnableEvents = previousEvents
+    Application.ScreenUpdating = previousScreen
+    mChangingView = False
+    Exit Sub
+Failed:
+    errNumber = Err.Number
+    errText = Err.Description
+    On Error Resume Next
+    ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).Hidden = False
+    Set rows = before("AllHidden")
+    SetRowsHidden rows, True
+    StoreRows ws, OWNED_PREFIX, originalOwned
+    StoreRows ws, COLLAPSED_PREFIX, originalCollapsed
+    DeleteStoredNames ws, FILTER_NAME
+    If originalFlag Then AddLocalName ws, FILTER_NAME, "=1"
+    UpdateCompletedTaskButton ws
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    Application.EnableEvents = previousEvents
+    Application.ScreenUpdating = previousScreen
+    mChangingView = False
+    On Error GoTo 0
+    Err.Raise errNumber, "ToggleCompletedTaskFilter", errText
+End Sub
+
+Public Sub MaintainCompletedTaskView(ByVal ws As Worksheet)
+    Dim lastRow As Long, r As Long, owned As Range, needsUpdate As Boolean, wasProtected As Boolean
+    If mChangingView Or Not IsCompletedTaskSheet(ws) Then Exit Sub
+    If Not AreCompletedTasksHidden(ws) Then Exit Sub
+    lastRow = GetLastDataRow(ws)
+    Set owned = StoredRows(ws, OWNED_PREFIX)
+    For r = DATA_START_ROW To lastRow
+        If HasTaskContent(ws, r) Then
+            If CStr(ws.Cells(r, COL_STATUS).Value2) = STATUS_DONE Then
+                If Not ws.Rows(r).Hidden Then needsUpdate = True
+            ElseIf ContainsRow(owned, ws, r) Then
+                needsUpdate = True
+            End If
+        End If
+    Next r
+    If Not needsUpdate Then Exit Sub
+    On Error GoTo Finished
+    mChangingView = True
+    wasProtected = ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios
+    UnprotectTaskSheet ws
+    ApplyView ws, lastRow, True
+Finished:
+    On Error Resume Next
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    mChangingView = False
+End Sub

@@ -1,11 +1,16 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 기존 디자인의 완료 숨김 버튼 선택/생성과 이관 후 상태 반영
+' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
+' 2026-10-20 김좌현 수정 : 항목 숨김 버튼과 선택 항목 제거 및 순서 정리
+' 2026-10-20 김좌현 수정 : 새로고침 버튼 통합 및 기존 생성 버튼 연결 전환
 
 Private Const AUTOMATION_SECURITY_FORCE_DISABLE As Long = 3
 Private Const FILE_DIALOG_PICKER As Long = 3
 Private Const PPT_OLE_PREFIX As String = "oleGanttPpt_"
 Private Const TEMP_PPT_OLE_PREFIX As String = "tmpGanttPptOle_"
 Private Const BUTTON_SETUP_SHEET_NAME As String = "_버튼생성"
+Private Const BUTTON_OPTION_COUNT As Long = 6
 
 Public Sub 데이터_가져오기()
     Dim targetBook As Workbook
@@ -219,12 +224,11 @@ Public Sub 버튼_생성_선택()
 
     optionCaptions = Array( _
         "데이터 가져오기", _
-        "간트차트 생성", _
-        "새로고침", _
+        "간트차트 새로고침", _
         "초기화", _
-        "항목 숨김", _
         "개체삽입", _
-        "TXT 출력")
+        "TXT 출력", _
+        "완료 숨김")
 
     setupSheet.Range("A2").Value = "버튼"
     setupSheet.Range("B2").Value = "순서"
@@ -297,14 +301,15 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     Dim setupSheet As Worksheet
     Dim targetSheet As Worksheet
     Dim targetSheetName As String
-    Dim selectedIndexes(1 To 7) As Long
-    Dim selectedOrders(1 To 7) As Long
+    Dim selectedIndexes(1 To BUTTON_OPTION_COUNT) As Long
+    Dim selectedOrders(1 To BUTTON_OPTION_COUNT) As Long
     Dim selectedCount As Long
     Dim optionIndex As Long
     Dim optionOrder As Long
     Dim firstIndex As Long
     Dim secondIndex As Long
     Dim swapValue As Long
+    Dim completedTemplate As Shape, completedOrder As Long, completedTemplateTop As Double
 
     On Error GoTo EH
 
@@ -312,7 +317,7 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     targetSheetName = CStr(setupSheet.Range("Z1").Value2)
     Set targetSheet = ThisWorkbook.Worksheets(targetSheetName)
 
-    For optionIndex = 1 To 7
+    For optionIndex = 1 To BUTTON_OPTION_COUNT
         If IsSetupOptionChecked(setupSheet, optionIndex) Then
             optionOrder = GetSetupOptionOrder(setupSheet, optionIndex)
             If optionOrder < 1 Then
@@ -353,12 +358,26 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     Next firstIndex
 
     UnprotectTaskSheet targetSheet
+    Set completedTemplate = GetCompletedButtonTemplate(targetSheet)
+    If Not completedTemplate Is Nothing Then
+        completedTemplateTop = completedTemplate.Top
+        Set completedTemplate = completedTemplate.Duplicate
+        completedTemplate.Top = completedTemplateTop
+        completedTemplate.Name = "tmpCompletedButtonTemplate"
+        completedTemplate.Visible = msoFalse
+    End If
     DeleteManagedButtons targetSheet
 
     For firstIndex = 1 To selectedCount
         CreateSelectedButtonByIndex targetSheet, selectedIndexes(firstIndex), firstIndex
+        If selectedIndexes(firstIndex) = 6 Then completedOrder = firstIndex
     Next firstIndex
 
+    If completedOrder > 0 Then
+        CreateVersionButton targetSheet, COMPLETED_TASK_BUTTON_NAME, CompletedTaskButtonCaption(targetSheet), _
+                            "칸트차트_완료숨김", completedOrder, 72
+    End If
+    If Not completedTemplate Is Nothing Then completedTemplate.Delete
     ApplyCalculatedColumnsProtection targetSheet, GetLastDataRow(targetSheet)
     targetSheet.Activate
     setupSheet.Visible = xlSheetVeryHidden
@@ -369,7 +388,11 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
     Exit Sub
 
 EH:
-    MsgBox "선택한 버튼을 생성하는 중 오류가 발생했습니다: " & Err.Description, vbExclamation
+    Dim buttonError As String
+    buttonError = Err.Description
+    On Error Resume Next
+    If Not completedTemplate Is Nothing Then completedTemplate.Delete
+    MsgBox "선택한 버튼을 생성하는 중 오류가 발생했습니다: " & buttonError, vbExclamation
 End Sub
 
 Private Function IsSetupOptionChecked(ByVal setupSheet As Worksheet, _
@@ -391,17 +414,16 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 1
             CreateVersionButton ws, "btnDataImport", "데이터 가져오기", "데이터_가져오기", buttonOrder, 72
         Case 2
-            CreateVersionButton ws, "btnGanttCreate", "생성", "칸트차트_생성", buttonOrder, 72
-        Case 3
             CreateVersionButton ws, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", buttonOrder, 72
-        Case 4
+        Case 3
             CreateVersionButton ws, "btnGanttReset", "초기화", "칸트차트_초기화", buttonOrder, 72
-        Case 5
-            CreateVersionButton ws, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", buttonOrder, 72
-        Case 6
+        Case 4
             CreateVersionButton ws, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", buttonOrder, 72
-        Case 7
+        Case 5
             CreateVersionButton ws, "btnPeriodTextReport", "TXT 출력", "기간보고TXT_생성", buttonOrder, 72
+        Case 6
+            CreateVersionButton ws, COMPLETED_TASK_BUTTON_NAME, CompletedTaskButtonCaption(ws), _
+                                "칸트차트_완료숨김", buttonOrder, 72
     End Select
 End Sub
 
@@ -435,7 +457,7 @@ Private Sub DeleteManagedButtons(ByVal ws As Worksheet)
 
     buttonNames = Array( _
         "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
-        "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
+        "btnGanttReset", "btnGanttObjectInsert", COMPLETED_TASK_BUTTON_NAME, _
         "btnPersonalDevReport", "btnTeamDevReport", "btnModuleDevReport", _
         "btnPeriodTextReport", "btnWeeklyPptReport", "btnDailyProgressReport", _
         "btnDailyProgressHistoryView", "btnDailyProgressHistoryReset", _
@@ -472,13 +494,29 @@ Private Sub ConfigureSetupActionButton(ByVal button As Shape, _
     End With
 End Sub
 
+' Duplicate an existing button so manually adjusted fonts and geometry survive.
+Private Function GetCompletedButtonTemplate(ByVal ws As Worksheet) As Shape
+    Dim candidate As Variant, button As Shape
+    For Each candidate In Array("btnGanttRefresh", "btnPeriodTextReport", "btnGanttObjectInsert", _
+                                "btnGanttReset", "tmpCompletedButtonTemplate", "btnDataImport", COMPLETED_TASK_BUTTON_NAME)
+        Set button = Nothing
+        On Error Resume Next
+        Set button = ws.Shapes(CStr(candidate))
+        On Error GoTo 0
+        If Not button Is Nothing Then
+            Set GetCompletedButtonTemplate = button
+            Exit Function
+        End If
+    Next candidate
+End Function
+
 Public Sub CreateVersionButton(ByVal ws As Worksheet, _
                                ByVal buttonName As String, _
                                ByVal buttonCaption As String, _
                                ByVal macroName As String, _
                                ByVal buttonOrder As Long, _
                                ByVal buttonWidth As Double)
-    Dim button As Shape
+    Dim button As Shape, template As Shape
     Dim anchorCell As Range
     Dim buttonLeft As Double
     Dim buttonTop As Double
@@ -488,10 +526,31 @@ Public Sub CreateVersionButton(ByVal ws As Worksheet, _
     buttonLeft = anchorCell.Left + ((buttonOrder - 1) * 80)
     buttonTop = anchorCell.Top + anchorCell.Height - 22
 
+    If buttonName = COMPLETED_TASK_BUTTON_NAME Then
+        Set template = GetCompletedButtonTemplate(ws)
+        If Not template Is Nothing Then
+            buttonTop = template.Top
+            Set button = template.Duplicate
+            On Error Resume Next
+            ws.Shapes(buttonName).Delete
+            On Error GoTo 0
+            With button
+                .Name = buttonName
+                .OnAction = macroName
+                .Left = buttonLeft
+                .Top = buttonTop
+                .Width = template.Width
+                .Height = template.Height
+                .Placement = xlFreeFloating
+                .Visible = msoTrue
+                .TextFrame2.TextRange.Text = buttonCaption
+            End With
+            Exit Sub
+        End If
+    End If
     On Error Resume Next
     ws.Shapes(buttonName).Delete
     On Error GoTo 0
-
     Set button = ws.Shapes.AddShape( _
         msoShapeRoundedRectangle, buttonLeft, buttonTop, buttonWidth, 22)
 
@@ -533,7 +592,7 @@ Public Function GetNextVersionButtonOrder(ByVal ws As Worksheet) As Long
 
     buttonNames = Array( _
         "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
-        "btnGanttReset", "btnGanttHideTask", "btnGanttObjectInsert", _
+        "btnGanttReset", "btnGanttObjectInsert", COMPLETED_TASK_BUTTON_NAME, _
         "btnPeriodTextReport")
 
     For Each buttonName In buttonNames
@@ -556,6 +615,70 @@ Private Function VersionShapeExistsOnSheet(ByVal ws As Worksheet, _
     On Error GoTo 0
 
     VersionShapeExistsOnSheet = Not targetShape Is Nothing
+End Function
+
+' Converts managed legacy buttons and workbook-qualified custom assignments.
+' Called on open and refresh; keeps the existing refresh button when both exist.
+Public Sub UpgradeGanttRefreshButtons(ByVal ws As Worksheet)
+    Dim createButton As Shape, refreshButton As Shape, button As Shape
+    Dim macroName As String, wasProtected As Boolean, needsUpdate As Boolean
+    Dim errNumber As Long, errDescription As String
+
+    If Not IsTaskSheet(ws) Then Exit Sub
+    On Error GoTo Failed
+    On Error Resume Next
+    Set createButton = ws.Shapes("btnGanttCreate")
+    Set refreshButton = ws.Shapes("btnGanttRefresh")
+    On Error GoTo Failed
+    needsUpdate = Not createButton Is Nothing
+    For Each button In ws.Shapes
+        macroName = GetGanttButtonMacroName(button)
+        If macroName = "칸트차트_생성" Then needsUpdate = True
+        If button.Name = "btnGanttRefresh" Then
+            If macroName <> "칸트차트_새로고침" Or _
+               button.TextFrame2.TextRange.Text <> "새로고침" Then needsUpdate = True
+        End If
+    Next button
+    ' Leave already migrated workbooks unchanged when opened.
+    If Not needsUpdate Then Exit Sub
+    wasProtected = ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios
+    If wasProtected Then UnprotectTaskSheet ws
+    If Not createButton Is Nothing Then
+        If refreshButton Is Nothing Then
+            createButton.Name = "btnGanttRefresh"
+        Else
+            createButton.Delete
+        End If
+    End If
+    For Each button In ws.Shapes
+        macroName = GetGanttButtonMacroName(button)
+        If button.Name = "btnGanttRefresh" Or macroName = "칸트차트_생성" Then
+            button.OnAction = "칸트차트_새로고침"
+            button.TextFrame2.TextRange.Text = "새로고침"
+        End If
+    Next button
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    Exit Sub
+Failed:
+    errNumber = Err.Number
+    errDescription = Err.Description
+    If wasProtected Then
+        On Error Resume Next
+        ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+        On Error GoTo 0
+    End If
+    Err.Raise errNumber, "UpgradeGanttRefreshButtons", errDescription
+End Sub
+
+Private Function GetGanttButtonMacroName(ByVal button As Shape) As String
+    Dim macroName As String
+    ' Some embedded objects do not expose OnAction.
+    On Error Resume Next
+    macroName = CStr(button.OnAction)
+    On Error GoTo 0
+    If InStrRev(macroName, "!") > 0 Then macroName = Mid$(macroName, InStrRev(macroName, "!") + 1)
+    If InStrRev(macroName, ".") > 0 Then macroName = Mid$(macroName, InStrRev(macroName, ".") + 1)
+    GetGanttButtonMacroName = macroName
 End Function
 
 Public Sub UpgradeTaskReportButtons(ByVal ws As Worksheet)
@@ -767,6 +890,7 @@ Private Function RefreshMigratedSheet(ByVal ws As Worksheet) As Boolean
     Dim chartEndDate As Date
     Dim holidayDict As Object
     Dim workdayDict As Object
+    Dim rowView As Object
 
     On Error GoTo RefreshFailed
 
@@ -784,6 +908,7 @@ Private Function RefreshMigratedSheet(ByVal ws As Worksheet) As Boolean
     chartEndDate = maxDate
     Call TryGetDisplayDateRange(chartStartDate, chartEndDate)
 
+    Set rowView = CaptureTaskRowView(ws, lastRow)
     UnprotectTaskSheet ws
     SetupDataHeaders ws
     SynchronizeTaskHierarchyModules ws, lastRow, False
@@ -796,7 +921,8 @@ Private Function RefreshMigratedSheet(ByVal ws As Worksheet) As Boolean
     DrawTaskBars ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     ShowAllDateColumns ws
-    ApplyDisplayTaskRowFilter ws, lastRow, chartStartDate, chartEndDate
+    RestoreTaskRowView ws, lastRow, rowView
+    ApplyCompletedTaskVisibility ws, lastRow
     ApplyCalculatedColumnsProtection ws, lastRow
 
     RefreshMigratedSheet = True

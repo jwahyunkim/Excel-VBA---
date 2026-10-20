@@ -1,8 +1,9 @@
 Attribute VB_Name = "modTaskType"
 Option Explicit
+' 2026-10-20 김좌현 수정 : config 타입 목록 이동 및 기존 값 보존 이전
 
-Public Const TASK_TYPE_TITLE_CELL As String = "L9"
-Public Const TASK_TYPE_CONFIG_RANGE As String = "L10:L29"
+Public Const TASK_TYPE_TITLE_CELL As String = "E7"
+Public Const TASK_TYPE_CONFIG_RANGE As String = "E8:E27"
 Public Const TASK_TYPE_LIST_NAME As String = "GanttTaskTypes"
 Private Const TASK_TYPE_HELPER_RANGE As String = "AB1:AB20"
 
@@ -19,6 +20,16 @@ Public Sub EnsureTaskTypeConfig()
         Exit Sub
     End If
 
+    ' Move the existing list once; an intentionally empty list stays empty.
+    If CStr(ws.Range("L9").Value2) = "허용 타입 목록" Then
+        If Application.CountA(ws.Range(TASK_TYPE_CONFIG_RANGE)) = 0 And _
+           CStr(ws.Range(TASK_TYPE_TITLE_CELL).Value2) <> "허용 타입 목록" Then
+            ws.Range(TASK_TYPE_CONFIG_RANGE).Value2 = ws.Range("L10:L29").Value2
+            ws.Range(TASK_TYPE_TITLE_CELL).Value2 = "허용 타입 목록"
+        End If
+        ws.Range("L9:L29").Clear
+        ws.Range("M10").Clear
+    End If
     initialized = (CStr(ws.Range(TASK_TYPE_TITLE_CELL).Value2) = "허용 타입 목록")
     If Not initialized And Application.CountA(ws.Range(TASK_TYPE_CONFIG_RANGE)) = 0 Then
         defaults = Array("개발", "ETC", "유지보수", "프로젝트")
@@ -27,19 +38,25 @@ Public Sub EnsureTaskTypeConfig()
         Next count
     End If
     ws.Range(TASK_TYPE_TITLE_CELL).Value2 = "허용 타입 목록"
-    ws.Columns("L").ColumnWidth = 22
+    ws.Columns("E").ColumnWidth = 36
     With ws.Range(TASK_TYPE_TITLE_CELL)
         .Font.Bold = True
-        .Interior.Color = RGB(221, 235, 247)
+        .Interior.Color = RGB(37, 55, 75)
+        .Font.Color = RGB(255, 255, 255)
         .Borders.LineStyle = xlContinuous
+        .Borders.Color = RGB(216, 222, 229)
+        .Borders.Weight = xlHairline
     End With
     With ws.Range(TASK_TYPE_CONFIG_RANGE)
         .NumberFormat = "@"
         .Borders.LineStyle = xlContinuous
+        .Borders.Color = RGB(216, 222, 229)
+        .Borders.Weight = xlHairline
         .Locked = False
     End With
-    ws.Range("M10").Value2 = "L10:L29에 타입 추가 (최대 20개)"
-    ws.Columns("M").ColumnWidth = 38
+    ws.Range("E29").Value2 = "타입은 최대 20개까지 입력하세요."
+    ws.Range("E30").Value2 = "빈칸과 중복은 선택 목록에서 제외됩니다."
+    ws.Range("E29:E30").Font.Size = 9
 
     ' Keep empty reserve cells and duplicates out of the dropdown.
     Set seen = CreateObject("Scripting.Dictionary")

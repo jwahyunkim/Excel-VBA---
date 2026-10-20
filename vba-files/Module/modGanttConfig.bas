@@ -1,5 +1,8 @@
 Attribute VB_Name = "modGanttConfig"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 휴일 표 제목 공간 확보에 따른 헤더/입력 시작 행 변경
+' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 필터 설정 상수 제거
+' 2026-10-20 김좌현 수정 : 완료 숨김 및 숨김 제외 설정 상수 제거
 
 Public Const GANTT_HEADER_ROW_MONTH As Long = 1
 Public Const GANTT_HEADER_ROW_WEEK As Long = 2
@@ -78,8 +81,8 @@ Public Const WR_CUSTOM_START_ROW As Long = 3
 Public Const WR_CUSTOM_END_ROW As Long = 197
 Public Const WR_MODULE_LIST_COLUMN As String = "K"
 Public Const LEGACY_CONFIG_SHEET_NAME As String = "휴일설정"
-Public Const HOLIDAY_HEADER_ROW As Long = 1
-Public Const HOLIDAY_DATA_START_ROW As Long = 2
+Public Const HOLIDAY_HEADER_ROW As Long = 3
+Public Const HOLIDAY_DATA_START_ROW As Long = 4
 
 Public Const HOLIDAY_COL_DATE As String = "A"
 Public Const HOLIDAY_COL_TYPE As String = "B"
@@ -88,18 +91,11 @@ Public Const HOLIDAY_COL_DESC As String = "C"
 Public Const HOLIDAY_TYPE_HOLIDAY As String = "휴일"
 Public Const HOLIDAY_TYPE_WORKDAY As String = "근무일"
 
-Public Const HIDE_SETTING_TITLE_CELL As String = "F1"
-Public Const HIDE_SETTING_LEVEL_LABEL_CELL As String = "F2"
-Public Const HIDE_SETTING_LEVEL_VALUE_CELL As String = "G2"
 Public Const DISPLAY_SETTING_TITLE_CELL As String = "I1"
 Public Const DISPLAY_SETTING_START_LABEL_CELL As String = "I2"
 Public Const DISPLAY_SETTING_START_VALUE_CELL As String = "J2"
 Public Const DISPLAY_SETTING_END_LABEL_CELL As String = "I3"
 Public Const DISPLAY_SETTING_END_VALUE_CELL As String = "J3"
-Public Const DISPLAY_SETTING_GANTT_ONLY_LABEL_CELL As String = "I4"
-Public Const DISPLAY_SETTING_GANTT_ONLY_VALUE_CELL As String = "J4"
-Public Const DISPLAY_SETTING_REPORT_ONLY_LABEL_CELL As String = "I5"
-Public Const DISPLAY_SETTING_REPORT_ONLY_VALUE_CELL As String = "J5"
 Public Const INPUT_SETTING_TITLE_CELL As String = "I7"
 Public Const TASK_FOLD_TITLE_CELL As String = "I12"
 Public Const TASK_FOLD_START_VALUE_CELL As String = "J13"
@@ -200,10 +196,6 @@ Public Const WEEKLY_REPORT_PAGE_MODE_ALL As String = "전체 통합"
 Public Const WEEKLY_REPORT_PAGE_MODE_MODULE As String = "분류 기준마다 파일 분리"
 Public Const WEEKLY_REPORT_PAGE_MODE_LEGACY_MODULE As String = "모듈별 페이지"
 Public Const WEEKLY_REPORT_PAGE_MODE_CUSTOM As String = "커스텀 파일"
-Public Const HIDE_EXCLUDE_NO_HEADER_CELL As String = "F5"
-Public Const HIDE_EXCLUDE_DATE_HEADER_CELL As String = "G5"
-Public Const HIDE_EXCLUDE_NO_START_CELL As String = "F6"
-Public Const HIDE_EXCLUDE_DATE_START_CELL As String = "G6"
 
 Public Const STATUS_NORMAL As String = "정상"
 Public Const STATUS_CAUTION As String = "주의"
@@ -213,8 +205,6 @@ Public Const STATUS_DONE As String = "완료"
 Public Const STATUS_HOLD As String = "보류"
 Public Const STATUS_WEEKLY_REPORT As String = "주간보고"
 Public Const STATUS_ERROR As String = "오류"
-Public Const REPORT_FILTER_ALL As String = "전체"
-Public Const REPORT_FILTER_EMPTY As String = "빈값"
 Public Const REPORT_STATUS_PLANNED As String = "Planned"
 Public Const REPORT_STATUS_IN_PROGRESS As String = "In Progress"
 Public Const REPORT_STATUS_COMPLETED As String = "Completed"

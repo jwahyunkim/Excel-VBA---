@@ -1,7 +1,11 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-20 김좌현 수정 : 완료 숨김 버튼과 새로고침 시 행 보기 상태 유지
+' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
+' 2026-10-20 김좌현 수정 : 미사용 항목 숨기기 매크로와 전용 버튼 생성 제거
 
-Public Sub 칸트차트_생성()
+' 2026-10-20 김좌현 수정 : 생성/새로고침을 새로고침 진입점으로 통합
+Public Sub 칸트차트_새로고침()
     RefreshGanttSheet
 End Sub
 
@@ -21,6 +25,7 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     Dim errorText As String
     Dim detailColumnHidden As Variant
     Dim detailScrollColumn As Long, detailScrollRow As Long
+    Dim rowView As Object
 
     previousScreenUpdating = Application.ScreenUpdating
     previousEnableEvents = Application.EnableEvents
@@ -68,11 +73,13 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     chartEndDate = maxDate
 
     hasDisplayRange = TryGetDisplayDateRange(chartStartDate, chartEndDate)
+    Set rowView = CaptureTaskRowView(ws, lastRow)
 
     Application.ScreenUpdating = False
     Application.EnableEvents = False
 
     UnprotectTaskSheet ws
+    UpgradeGanttRefreshButtons ws
     SynchronizeTaskHierarchyModules ws, lastRow, True
     ShowTaskInputErrorReasons ws, lastRow
     UpdateTaskNumbers ws, lastRow
@@ -85,7 +92,8 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     DrawTaskBars ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     ShowAllDateColumns ws
-    ApplyDisplayTaskRowFilter ws, lastRow, chartStartDate, chartEndDate
+    RestoreTaskRowView ws, lastRow, rowView
+    ApplyCompletedTaskVisibility ws, lastRow
     RestoreTaskDetailColumnHidden ws, detailColumnHidden
     If detailScrollColumn > 0 And Not ActiveWindow Is Nothing Then
         ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollColumn = detailScrollColumn
@@ -98,7 +106,7 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     DoEvents
     AlignAllGanttPptArtifactsToNoteCells ws
 
-    If showCompletionMessage Then MsgBox "칸트차트 생성 완료", vbInformation
+    If showCompletionMessage Then MsgBox "간트차트 새로고침 완료", vbInformation
     Exit Sub
 
 EH:
@@ -112,8 +120,12 @@ EH:
     End If
 End Sub
 
-Public Sub 칸트차트_새로고침()
-    칸트차트_생성
+Public Sub 칸트차트_완료숨김()
+    On Error GoTo Failed
+    ToggleCompletedTaskFilter ActiveSheet
+    Exit Sub
+Failed:
+    MsgBox "완료 항목 표시를 변경할 수 없습니다: " & Err.Description, vbExclamation
 End Sub
 
 Public Sub 칸트차트_초기화()
@@ -138,6 +150,7 @@ Public Sub 칸트차트_초기화()
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
 
+    ClearCompletedTaskFilter ws, lastRow
     ShowAllTaskRows ws, lastRow
     ClearCalculatedArea ws, lastRow
     ClearGanttArea ws
@@ -156,66 +169,16 @@ EH:
     MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
 End Sub
 
-Public Sub 칸트차트_항목숨기기()
-    Dim ws As Worksheet
-    Dim lastRow As Long
-
-    On Error GoTo EH
-
-    Set ws = ActiveSheet
-
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
-        MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
-        Exit Sub
-    End If
-
-    EnsureConfigSheet
-
-    If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
-    lastRow = GetLastDataRow(ws)
-    If lastRow < DATA_START_ROW Then
-        MsgBox "데이터가 없습니다.", vbExclamation
-        Exit Sub
-    End If
-
-    Application.ScreenUpdating = False
-    Application.EnableEvents = False
-
-    UnprotectTaskSheet ws
-    UpdateTaskNumbers ws, lastRow
-    HideCompletedTaskRows ws, lastRow
-    ApplyCalculatedColumnsProtection ws, lastRow
-
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
-
-    MsgBox "항목 숨김 완료", vbInformation
-    Exit Sub
-
-EH:
-    Application.EnableEvents = True
-    Application.ScreenUpdating = True
-    MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
-End Sub
-
-Public Sub 칸트차트_생성버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttCreate", "생성", "칸트차트_생성", 1
-End Sub
-
 Public Sub 칸트차트_새로고침버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", 2
+    CreateGanttActionButton ActiveSheet, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", 1
 End Sub
 
 Public Sub 칸트차트_초기화버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttReset", "초기화", "칸트차트_초기화", 3
-End Sub
-
-Public Sub 칸트차트_항목숨기기버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttHideTask", "항목 숨김", "칸트차트_항목숨기기", 4
+    CreateGanttActionButton ActiveSheet, "btnGanttReset", "초기화", "칸트차트_초기화", 2
 End Sub
 
 Public Sub 칸트차트_개체삽입버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 5
+    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 3
 End Sub
 
 Public Sub 칸트차트_개체삽입()
