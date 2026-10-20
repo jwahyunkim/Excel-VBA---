@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$WorkbookPath, [string]$SavePath, [switch]$ViewOnly)
+param([string]$WorkbookPath, [string]$SavePath, [switch]$ViewOnly, [switch]$SelectedColumnsOnly)
 
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
@@ -67,6 +67,20 @@ function Assert-TaskDetailOutline($Sheet, [int]$FirstColumn, [int]$LastColumn, [
     if ($Sheet.Columns.Item(8).OutlineLevel -ne 1 -or
         $Sheet.Rows.Item(53).OutlineLevel -ne 2 -or $Sheet.Rows.Item(61).OutlineLevel -ne 3) {
         throw "$Context changed the request/Gantt boundaries or row outlines"
+    }
+}
+function Assert-TaskSelectedColumns($Window, $Sheet, [int[]]$Selected, [string]$Context) {
+    if (-not $Window.FreezePanes -or $Window.SplitRow -ne 4 -or $Window.SplitColumn -le 0) {
+        $states = 1..24 | ForEach-Object { "${_}:$($Sheet.Columns.Item($_).Hidden)/$($Sheet.Columns.Item($_).OutlineLevel)" }
+        throw "$Context did not freeze: freeze=$($Window.FreezePanes), split=$($Window.SplitColumn)/$($Window.SplitRow); $($states -join ' ')"
+    }
+    $frozenRange = $Window.Panes.Item(1).VisibleRange
+    $frozenColumns = @()
+    for ($column = $frozenRange.Column; $column -lt $frozenRange.Column + $frozenRange.Columns.Count; $column++) {
+        if (-not $Sheet.Columns.Item($column).Hidden) { $frozenColumns += $column }
+    }
+    if (($frozenColumns -join ',') -ne ($Selected -join ',')) {
+        throw "$Context has incorrect visible frozen columns: $($frozenColumns -join ',') (split=$($Window.SplitColumn))"
     }
 }
 try {
@@ -492,7 +506,7 @@ End Function
     $prepareResult = [string]$taskExcel.Run("'$($taskBook.Name)'!PrepareTaskFoldRegression")
     Write-Output ('Fold settings preparation: ' + $prepareResult)
     if ($prepareResult -ne 'PASS') { throw $prepareResult }
-    if ($ViewOnly) {
+    if ($ViewOnly -or $SelectedColumnsOnly) {
         Write-Output 'Running native view regression; previously verified bar/hierarchy synthetic cases skipped'
     }
     else {
@@ -518,6 +532,8 @@ End Function
     }
     $taskWindow = $taskExcel.ActiveWindow
     Assert-TaskExpandedView $taskWindow 'Initial expanded reopen'
+    $taskFoldConfig = $taskBook.Worksheets.Item('config')
+    if (-not $SelectedColumnsOnly) {
     # Expanded sheet activation must clear a previous request/header freeze.
     $taskWindow.FreezePanes = $false
     $taskWindow.SplitColumn = 0
@@ -772,6 +788,83 @@ End Function
         -not $taskSheet.Columns.Item(12).Hidden -or -not $taskSheet.Columns.Item(23).Hidden) {
         throw 'Invalid fold settings lost their error guide or changed the existing collapsed group'
     }
+    }
+    # 2026-10-19 김좌현 수정 : noncontiguous selected columns, including a column inside I:W.
+    Write-Output 'Testing multiple fixed column configuration'
+    $taskFoldConfig.Range('J13').Value2 = 'I'
+    $taskFoldConfig.Range('J14').Value2 = 'W'
+    $taskFoldConfig.Range('J15').Value2 = ' g, a, b, k, b '
+    Write-Output 'Multiple fixed column settings applied'
+    $taskSheet.Activate()
+    if ($taskFoldConfig.Range('J15').Value2 -cne 'A,B,G,K') {
+        throw 'Multiple fixed columns were not sorted, normalized and deduplicated'
+    }
+    $taskSheet.Outline.ShowLevels([Type]::Missing, 1)
+    Write-Output 'Multiple fixed column groups collapsed'
+    Start-Sleep -Seconds 2
+    $taskExcel.Run("'$($taskBook.Name)'!TaskOutlineViewTick")
+    Assert-TaskSelectedColumns $taskWindow $taskSheet @(1, 2, 7, 11) 'A,B,G,K collapse'
+    if (-not $taskWindow.FreezePanes -or
+        $taskWindow.SplitRow -ne 4 -or $taskWindow.Panes.Item(1).ScrollColumn -ne 1 -or
+        $taskWindow.Panes.Item(4).ScrollColumn -ne 24) {
+        throw "A,B,G,K view mismatch: freeze=$($taskWindow.FreezePanes), split=$($taskWindow.SplitColumn)/$($taskWindow.SplitRow), left=$($taskWindow.Panes.Item(1).ScrollColumn), right=$($taskWindow.Panes.Item($taskWindow.Panes.Count).ScrollColumn)"
+    }
+    for ($taskColumn = 1; $taskColumn -le 23; $taskColumn++) {
+        $selected = $taskColumn -in @(1, 2, 7, 11)
+        if ($taskSheet.Columns.Item($taskColumn).Hidden -eq $selected -or
+            $taskSheet.Columns.Item($taskColumn).OutlineLevel -ne $(if ($selected) { 1 } else { 2 })) {
+            throw "Multiple fixed columns have incorrect visibility or grouping at $taskColumn"
+        }
+    }
+    $taskWindow.Panes.Item(4).ScrollColumn = 30
+    $selectedScrollColumn = $taskWindow.Panes.Item(4).ScrollColumn
+    $taskExcel.Run("'$($taskBook.Name)'!RefreshGanttSheet", $false)
+    Assert-TaskSelectedColumns $taskWindow $taskSheet @(1, 2, 7, 11) 'A,B,G,K refresh'
+    if ($taskWindow.Panes.Item(4).ScrollColumn -ne $selectedScrollColumn -or $taskSheet.Columns.Item(11).Hidden) {
+        throw "Refreshing multiple fixed columns: expected scroll=$selectedScrollColumn, actual=$($taskWindow.Panes.Item(4).ScrollColumn), K hidden=$($taskSheet.Columns.Item(11).Hidden)"
+    }
+    $taskBook.Save()
+    $taskBook.Close($false)
+    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
+    $taskBook = Open-TaskTestWorkbook $taskExcel $taskTemp
+    $taskSheet = $taskBook.Worksheets.Item('Sheet1')
+    $taskFoldConfig = $taskBook.Worksheets.Item('config')
+    $taskWindow = $taskExcel.ActiveWindow
+    Assert-TaskSelectedColumns $taskWindow $taskSheet @(1, 2, 7, 11) 'A,B,G,K reopen'
+    if (-not $taskBook.Saved -or -not $taskWindow.FreezePanes -or
+        $taskWindow.Panes.Item(4).ScrollColumn -ne $selectedScrollColumn -or
+        $taskSheet.Columns.Item(11).Hidden -or -not $taskSheet.Columns.Item(3).Hidden) {
+        throw 'Reopening multiple fixed columns changed the saved view or expanded the group'
+    }
+    $taskSheet.Outline.ShowLevels([Type]::Missing, 2)
+    Start-Sleep -Seconds 2
+    $taskExcel.Run("'$($taskBook.Name)'!TaskOutlineViewTick")
+    Assert-TaskExpandedView $taskWindow 'Multiple fixed columns expansion'
+    for ($taskColumn = 1; $taskColumn -le 24; $taskColumn++) {
+        if ($taskSheet.Columns.Item($taskColumn).Hidden) {
+            throw "Expansion did not restore column $taskColumn"
+        }
+    }
+    # Invalid lists must retain the previous groups and display.
+    foreach ($invalidSelection in @('A,,G', 'A,B,X', 'A,1,G')) {
+        $taskFoldConfig.Activate()
+        $taskFoldConfig.Range('J15').Value2 = $invalidSelection
+        if ($taskSheet.Columns.Item(3).OutlineLevel -ne 2 -or
+            $taskSheet.Columns.Item(11).OutlineLevel -ne 1) {
+            throw "Invalid selection '$invalidSelection' changed the previous groups"
+        }
+    }
+    $taskFoldConfig.Range('J15').Value2 = 'A,B,G'
+    $taskSheet.Activate()
+    $taskSheet.Outline.ShowLevels([Type]::Missing, 1)
+    Start-Sleep -Seconds 2
+    $taskExcel.Run("'$($taskBook.Name)'!TaskOutlineViewTick")
+    Assert-TaskSelectedColumns $taskWindow $taskSheet @(1, 2, 7) 'A,B,G replacement'
+    if ($taskWindow.Panes.Item(4).ScrollColumn -ne 24 -or
+        -not $taskSheet.Columns.Item(11).Hidden) {
+        throw 'Changing the selected fixed columns retained K or the previous freeze boundary'
+    }
+    Write-Output 'PASS: multiple fixed columns A,B,G,K, in-range selection, normalization, native levels, refresh, saved reopen and invalid input'
     # Deliver the original default I:W setting, expanded from A.
     $taskFoldConfig.Range('J13').Value2 = 'I'
     $taskFoldConfig.Range('J14').Value2 = 'W'
@@ -802,7 +895,12 @@ End Function
     if ($taskExcel.Workbooks.Count -ne 0) {
         throw 'Outline event cleanup left a workbook open after closing'
     }
-    Write-Output 'PASS: independent fold ranges and collapsed display start, normalization, invalid input, old outline cleanup, custom reopen; native levels 1/2 synchronize collapse freeze and expanded A view, manual expanded scrolling, clean reopen, saved row/date positions, protected outlines, full refresh and outline event close cleanup'
+    if ($SelectedColumnsOnly) {
+        Write-Output 'PASS: selected column view, default outline restoration, clean expanded reopen and event close cleanup'
+    }
+    else {
+        Write-Output 'PASS: independent fold ranges and collapsed display start, normalization, invalid input, old outline cleanup, custom reopen; native levels 1/2 synchronize collapse freeze and expanded A view, manual expanded scrolling, clean reopen, saved row/date positions, protected outlines, full refresh and outline event close cleanup'
+    }
     if ($SavePath) {
         Copy-Item -LiteralPath $taskTemp -Destination ([IO.Path]::GetFullPath($SavePath))
         Write-Output ('UPDATED COPY: ' + [IO.Path]::GetFullPath($SavePath))
