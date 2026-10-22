@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttBars"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 날짜 캐시와 연속 구간 일괄 서식으로 셀 렌더 비용 감소, 직접 호출 테두리 정리 유지
 ' 2026-10-22 김좌현 수정 : 지연 완료 배경 모서리를 기본 노란색으로 변경하고 표시 크기 확대
 ' 2026-10-22 김좌현 수정 : 셀 배경의 급격한 색 전환으로 지연 완료 로즈 모서리 표시, 도형/메모/셀 값 추가 없음
 ' 2026-10-22 김좌현 수정 : 진행 지연을 설명 행의 연분홍으로 통일하고 완료 지연은 셀마다 사선 한 개, 막대 문구 제거
@@ -25,22 +26,25 @@ Public Sub ClearTaskBarVisuals(ByVal ws As Worksheet)
 End Sub
 
 Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long, _
-                                    ByVal startCol As Long, ByVal endCol As Long, _
-                                    Optional ByVal holidayDict As Object = Nothing, _
-                                    Optional ByVal workdayDict As Object = Nothing)
+                                     ByVal startCol As Long, ByVal endCol As Long, _
+                                     Optional ByVal holidayDict As Object = Nothing, _
+                                     Optional ByVal workdayDict As Object = Nothing, _
+                                     Optional ByVal bordersAlreadyReset As Boolean = False)
     Dim holidays As Object, workdays As Object
     Dim firstDate As Date, lastDate As Date, d As Date
     Dim r As Long, c As Long, level As Long
-    Dim inRootGroup As Boolean, hasChildren As Boolean
+    Dim inRootGroup As Boolean, hasChildren As Boolean, hasContent As Boolean, validTask As Boolean
     Dim planStart As Variant, planEnd As Variant
     Dim actualStart As Variant, actualEnd As Variant, drawEnd As Variant
-    Dim statusDate As Variant
-    Dim blankFill As Long
+    Dim statusDate As Variant, blankFill As Long, barColor As Long
     Dim cell As Range, timeline As Range
-    Dim barMask() As Boolean
+    Dim barMask() As Boolean, workingDates() As Boolean, dates() As Date
     Dim statusCols() As Long
     Dim delayPeriods As Collection, delayPeriod As Variant
-    Dim hasDelay As Boolean, hasOpenDelay As Boolean
+    Dim hasDelay As Boolean, hasOpenDelay As Boolean, gradientFill As Boolean
+    Dim planValid As Boolean, actualValid As Boolean, planFirst As Date, planLast As Date
+    Dim actualFirst As Date, actualLast As Date, fillColor As Long, fontColor As Long
+    Dim runStart As Long, runFill As Long, runFont As Long
 
     ClearTaskBarVisuals ws
     If lastRow < DATA_START_ROW Or endCol < startCol Then Exit Sub
@@ -57,96 +61,130 @@ Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long,
     ws.Range(ws.Cells(1, startCol), ws.Cells(lastRow, endCol)).EntireColumn.ColumnWidth = 4.5
     ReDim barMask(DATA_START_ROW To lastRow, startCol To endCol)
     ReDim statusCols(DATA_START_ROW To lastRow)
+    ReDim workingDates(startCol To endCol)
+    ReDim dates(startCol To endCol)
+    ' 2026-10-22 김좌현 수정 : 날짜별 근무일 판정과 공통 셀 서식은 렌더 한 번에 처리
+    For c = startCol To endCol
+        dates(c) = firstDate + c - startCol
+        workingDates(c) = IsWorkingDay(dates(c), holidays, workdays)
+    Next c
+    Set timeline = ws.Range(ws.Cells(DATA_START_ROW, startCol), ws.Cells(lastRow, endCol))
+    timeline.ClearContents
+    With timeline
+        .NumberFormat = "@"
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .IndentLevel = 0
+        .WrapText = False
+        .Font.Bold = False
+        .Font.Size = 11
+        .Font.Color = RGB(51, 65, 85)
+        .Interior.Pattern = xlSolid
+        .Borders(xlDiagonalUp).LineStyle = xlNone
+        .Borders(xlDiagonalDown).LineStyle = xlNone
+    End With
 
     For r = DATA_START_ROW To lastRow
         level = GetTaskLevel(ws, r)
         hasChildren = HasChildTask(ws, r, lastRow)
-        If HasTaskContent(ws, r) Then
+        hasContent = HasTaskContent(ws, r)
+        If hasContent Then
             If level = 1 Then inRootGroup = hasChildren
         End If
         blankFill = TimelineBackground(level, hasChildren, inRootGroup)
-        If Not HasTaskContent(ws, r) Then blankFill = RGB(255, 255, 255)
-        Set timeline = ws.Range(ws.Cells(r, startCol), ws.Cells(r, endCol))
-        timeline.ClearContents
-        With timeline
-            .NumberFormat = "@"
-            .HorizontalAlignment = xlCenter
-            .VerticalAlignment = xlCenter
-            .IndentLevel = 0
-            .WrapText = False
-            .Font.Bold = False
-            .Font.Size = 11
-            .Font.Color = RGB(51, 65, 85)
-        End With
-        For c = startCol To endCol
-            d = firstDate + c - startCol
-            Set cell = ws.Cells(r, c)
-            cell.Interior.Pattern = xlSolid
-            cell.Interior.Color = blankFill
-            ClearOwnedTaskBarBorders cell, d, c > startCol, c < endCol
-            If d = Date Then
-                cell.Interior.Color = RGB(224, 252, 244)
-            ElseIf Not IsWorkingDay(d, holidays, workdays) Then
-                cell.Interior.Color = RGB(245, 245, 245)
+        If Not hasContent Then blankFill = RGB(255, 255, 255)
+        validTask = False
+        If hasContent Then validTask = Not HasTaskError(ws, r)
+        planValid = False: actualValid = False
+        Set delayPeriods = Nothing
+        barColor = LevelBarColor(level)
+        If validTask Then
+            planStart = ws.Cells(r, COL_PLAN_START).Value
+            planEnd = ws.Cells(r, COL_PLAN_END).Value
+            actualStart = ws.Cells(r, COL_ACTUAL_START).Value
+            actualEnd = ws.Cells(r, COL_ACTUAL_END).Value
+            drawEnd = Empty
+            If IsDate(actualStart) Then
+                If IsDate(actualEnd) Then
+                    drawEnd = DateValue(actualEnd)
+                ElseIf DateValue(actualStart) <= Date And GetTaskProgressValue(ws, r) < 1 Then
+                    drawEnd = Date
+                End If
             End If
-        Next c
-        If Not HasTaskContent(ws, r) Then GoTo NextTask
-        If HasTaskError(ws, r) Then GoTo NextTask
-
-        planStart = ws.Cells(r, COL_PLAN_START).Value
-        planEnd = ws.Cells(r, COL_PLAN_END).Value
-        actualStart = ws.Cells(r, COL_ACTUAL_START).Value
-        actualEnd = ws.Cells(r, COL_ACTUAL_END).Value
-        drawEnd = Empty
-        If IsDate(actualStart) Then
-            If IsDate(actualEnd) Then
-                drawEnd = DateValue(actualEnd)
-            ElseIf DateValue(actualStart) <= Date And GetTaskProgressValue(ws, r) < 1 Then
-                drawEnd = Date
+            If IsDate(planStart) And IsDate(planEnd) Then
+                planValid = True
+                planFirst = DateValue(planStart): planLast = DateValue(planEnd)
             End If
+            If IsDate(actualStart) And IsDate(drawEnd) Then
+                actualValid = True
+                actualFirst = DateValue(actualStart): actualLast = DateValue(drawEnd)
+            End If
+            Set delayPeriods = GetTaskDelayPeriods(ws, r, lastRow)
+            statusDate = LastVisibleWorkingDate(actualStart, drawEnd, firstDate, lastDate, holidays, workdays)
+            If Not IsEmpty(statusDate) Then statusCols(r) = startCol + CLng(statusDate - firstDate)
         End If
-        Set delayPeriods = GetTaskDelayPeriods(ws, r, lastRow)
-        statusDate = LastVisibleWorkingDate(actualStart, drawEnd, firstDate, lastDate, holidays, workdays)
-        If Not IsEmpty(statusDate) Then statusCols(r) = startCol + CLng(statusDate - firstDate)
 
+        runStart = 0
         For c = startCol To endCol
-            d = firstDate + c - startCol
-            Set cell = ws.Cells(r, c)
-            If IsWorkingDay(d, holidays, workdays) Then
-                If DateFallsInPeriod(d, planStart, planEnd) Then
-                    barMask(r, c) = True
-                    cell.Interior.Color = RGB(203, 213, 225)
-                    cell.Font.Color = RGB(71, 85, 105)
-                End If
-                If DateFallsInPeriod(d, actualStart, drawEnd) Then
-                    barMask(r, c) = True
-                    cell.Interior.Color = LevelBarColor(level)
-                    cell.Font.Color = RGB(255, 255, 255)
-                End If
+            d = dates(c)
+            If Not bordersAlreadyReset Then ClearOwnedTaskBarBorders ws.Cells(r, c), d, c > startCol, c < endCol
+            fillColor = blankFill
+            fontColor = RGB(51, 65, 85)
+            gradientFill = False
+            If d = Date Then
+                fillColor = RGB(224, 252, 244)
+            ElseIf Not workingDates(c) Then
+                fillColor = RGB(245, 245, 245)
             End If
-            hasDelay = False
-            hasOpenDelay = False
-            For Each delayPeriod In delayPeriods
-                If d >= delayPeriod(0) And d <= delayPeriod(1) Then
-                    hasDelay = True
-                    If Not CBool(delayPeriod(2)) Then
-                        hasOpenDelay = True
-                        Exit For
+            If validTask Then
+                If workingDates(c) Then
+                    If planValid And d >= planFirst And d <= planLast Then
+                        barMask(r, c) = True
+                        fillColor = RGB(203, 213, 225)
+                        fontColor = RGB(71, 85, 105)
+                    End If
+                    If actualValid And d >= actualFirst And d <= actualLast Then
+                        barMask(r, c) = True
+                        fillColor = barColor
+                        fontColor = RGB(255, 255, 255)
                     End If
                 End If
-            Next delayPeriod
-            If hasDelay Then
-                barMask(r, c) = True
-                If hasOpenDelay Then
-                    cell.Interior.Color = RGB(255, 235, 235)
-                    cell.Font.Color = RGB(112, 26, 66)
-                Else
-                    ApplyCompletedDelayCornerFill cell, LevelBarColor(level)
-                    cell.Font.Color = RGB(255, 255, 255)
+                hasDelay = False: hasOpenDelay = False
+                For Each delayPeriod In delayPeriods
+                    If d >= delayPeriod(0) And d <= delayPeriod(1) Then
+                        hasDelay = True
+                        If Not CBool(delayPeriod(2)) Then
+                            hasOpenDelay = True
+                            Exit For
+                        End If
+                    End If
+                Next delayPeriod
+                If hasDelay Then
+                    barMask(r, c) = True
+                    If hasOpenDelay Then
+                        fillColor = RGB(255, 235, 235)
+                        fontColor = RGB(112, 26, 66)
+                    Else
+                        gradientFill = True
+                        fontColor = RGB(255, 255, 255)
+                    End If
                 End If
             End If
+            ' 2026-10-22 김좌현 수정 : 최종 배경색/글자색이 같은 연속 구간은 한 범위로 칠함
+            If gradientFill Then
+                If runStart > 0 Then PaintTaskBarRun ws, r, runStart, c - 1, runFill, runFont
+                runStart = 0
+                Set cell = ws.Cells(r, c)
+                ApplyCompletedDelayCornerFill cell, barColor
+                cell.Font.Color = fontColor
+            ElseIf runStart = 0 Then
+                runStart = c: runFill = fillColor: runFont = fontColor
+            ElseIf fillColor <> runFill Or fontColor <> runFont Then
+                PaintTaskBarRun ws, r, runStart, c - 1, runFill, runFont
+                runStart = c: runFill = fillColor: runFont = fontColor
+            End If
         Next c
-NextTask:
+        If runStart > 0 Then PaintTaskBarRun ws, r, runStart, endCol, runFill, runFont
     Next r
 
     DrawTaskBarFrames ws, barMask, lastRow, startCol, endCol
@@ -159,6 +197,14 @@ NextTask:
     Next r
 End Sub
 
+Private Sub PaintTaskBarRun(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                            ByVal firstCol As Long, ByVal lastCol As Long, _
+                            ByVal fillColor As Long, ByVal fontColor As Long)
+    With ws.Range(ws.Cells(rowNum, firstCol), ws.Cells(rowNum, lastCol))
+        .Interior.Color = fillColor
+        .Font.Color = fontColor
+    End With
+End Sub
 Private Sub ApplyCompletedDelayCornerFill(ByVal cell As Range, ByVal barColor As Long)
     ' A sharp 45-degree color transition clips a small triangle into the
     ' top-left corner. This is the cell's fill, with no objects or cell content.
@@ -179,8 +225,6 @@ Private Sub ClearOwnedTaskBarBorders(ByVal cell As Range, ByVal d As Date, _
                                     ByVal hasPreviousDate As Boolean, ByVal hasNextDate As Boolean)
     Dim edge As Variant
     Dim color As Long, weight As XlBorderWeight
-    cell.Borders(xlDiagonalUp).LineStyle = xlNone
-    cell.Borders(xlDiagonalDown).LineStyle = xlNone
     For Each edge In Array(xlEdgeLeft, xlEdgeTop, xlEdgeBottom, xlEdgeRight)
         color = cell.Borders(CLng(edge)).Color
         If IsStatusBorder(color) Or IsHierarchyBarBorder(color) Then

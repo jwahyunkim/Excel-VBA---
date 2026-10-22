@@ -1,5 +1,8 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 날짜 열 너비 일괄 적용과 덮어쓰는 열 맞춤 제거로 간트 새로고침 가속
+' 2026-10-22 김좌현 수정 : 간트 서식 중복 제거, 실제 표시 영역만 초기화와 선택적 너비/계층 갱신
+' 2026-10-22 김좌현 수정 : 웹 설정/업무 ID/작업시간 열 이전과 표시 및 보호 통합
 ' 2026-10-22 김좌현 수정 : 상태에는 괄호 안 지연 일수만 표시하고 지연 완료도 기존 완료 초록 유지
 ' 2026-10-22 김좌현 수정 : 오늘 날짜 헤더와 빈 배경을 민트색으로 구분
 ' 2026-10-21 김좌현 수정 : 원래 상태값을 유지하면서 지연 일수와 하위 지연 및 완료일 누락 표시
@@ -75,7 +78,71 @@ Public Sub UpdateTaskNumbers(ws As Worksheet, ByVal lastRow As Long)
     Next r
 End Sub
 
+' 2026-10-22 김좌현 수정 : 기존 레이아웃 이전 후 웹 설정 열과 분 단위 작업시간을 한 번만 삽입
 Public Sub EnsureTaskSheetLayout(ByVal ws As Worksheet)
+    Dim previousEnableEvents As Boolean, wasProtected As Boolean
+    Dim insertedWebColumns As Boolean, legacyRequestColumn As Long
+    Dim errorNumber As Long, errorDescription As String
+    If ws Is Nothing Then Exit Sub
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
+       IsWebUtilitySheet(ws) Then Exit Sub
+    previousEnableEvents = Application.EnableEvents
+    wasProtected = (ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios)
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    If wasProtected Then ws.Unprotect
+
+    If CStr(ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2) <> "웹등록" Then
+        legacyRequestColumn = FindHeaderColumnByName(ws, "요청 내용")
+        If legacyRequestColumn = 0 Then legacyRequestColumn = FindHeaderColumnByName(ws, "내용")
+        If legacyRequestColumn > 0 Then MigrateTaskWebFoldSettings ws
+        EnsureLegacyTaskSheetLayout ws
+        ' Native insertion keeps values, formulas, names and cell-anchored objects together.
+        ws.Columns(COL_WEB_ENABLED & ":" & COL_WEB_TASK_ID).Insert Shift:=xlToRight
+        insertedWebColumns = True
+    ElseIf CStr(ws.Cells(HEADER_ROW, COL_REQUEST).Value2) <> "요청 내용" Then
+        Err.Raise vbObjectError + 7180, "EnsureTaskSheetLayout", _
+                  "웹 등록 열 뒤의 요청 내용 위치를 확인하세요. 기존 데이터를 자동으로 덮어쓰지 않았습니다."
+    End If
+
+    If CStr(ws.Cells(HEADER_ROW, COL_WORK_MINUTES).Value2) <> "작업시간(분)" Then
+        If Len(CStr(ws.Cells(HEADER_ROW, COL_WORK_MINUTES).Value2)) > 0 And _
+           CStr(ws.Cells(HEADER_ROW, COL_WORK_MINUTES).Value2) <> "진행률" Then _
+            Err.Raise vbObjectError + 7181, "EnsureTaskSheetLayout", _
+                      "실제 종료일 다음의 작업시간 열 위치를 확인하세요."
+        ws.Columns(COL_WORK_MINUTES).Insert Shift:=xlToRight
+        ws.Columns(COL_WORK_MINUTES).Hidden = True
+    End If
+    ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2 = "웹등록"
+    ws.Cells(HEADER_ROW, COL_WEB_LEVEL).Value2 = "등록기준"
+    ws.Cells(HEADER_ROW, COL_WEB_REQUESTER).Value2 = "웹요청자"
+    ws.Cells(HEADER_ROW, COL_WEB_ACTION).Value2 = "웹처리구분"
+    ws.Cells(HEADER_ROW, COL_WEB_STATUS).Value2 = "웹진행상태"
+    ws.Cells(HEADER_ROW, COL_WEB_MODULE).Value2 = "웹모듈/업무"
+    ws.Cells(HEADER_ROW, COL_WEB_HANDLER).Value2 = "웹처리자"
+    ws.Cells(HEADER_ROW, COL_WEB_PROGRAM_ID).Value2 = "프로그램ID"
+    ws.Cells(HEADER_ROW, COL_WEB_RESULT).Value2 = "웹등록결과"
+    ws.Cells(HEADER_ROW, COL_WEB_TASK_ID).Value2 = "웹업무ID"
+    ws.Cells(HEADER_ROW, COL_WORK_MINUTES).Value2 = "작업시간(분)"
+    If insertedWebColumns Then
+        ws.Columns(COL_WEB_ENABLED & ":" & COL_WEB_RESULT).Hidden = True
+        ws.Columns(COL_WORK_MINUTES).Hidden = True
+    End If
+    If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
+    ApplyWebTaskValidation ws
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    Application.EnableEvents = previousEnableEvents
+    Exit Sub
+Failed:
+    errorNumber = Err.Number
+    errorDescription = Err.Description
+    On Error Resume Next
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    Application.EnableEvents = previousEnableEvents
+    On Error GoTo 0
+    Err.Raise errorNumber, "EnsureTaskSheetLayout", errorDescription
+End Sub
+Private Sub EnsureLegacyTaskSheetLayout(ByVal ws As Worksheet)
     Dim i As Long
     Dim r As Long
     Dim lastMigrationRow As Long
@@ -88,8 +155,8 @@ Public Sub EnsureTaskSheetLayout(ByVal ws As Worksheet)
     Dim errorDescription As String
 
     If ws Is Nothing Then Exit Sub
-    If ws.Name = CONFIG_SHEET_NAME Or _
-       ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
+       IsWebUtilitySheet(ws) Then Exit Sub
 
     previousEnableEvents = Application.EnableEvents
     wasProtected = (ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios)
@@ -97,93 +164,93 @@ Public Sub EnsureTaskSheetLayout(ByVal ws As Worksheet)
     Application.EnableEvents = False
     If wasProtected Then ws.Unprotect
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_NO).Value)) <> "No." Then
-        ws.Columns(COL_NO).Insert Shift:=xlToRight
+    If Trim$(CStr(ws.Cells(HEADER_ROW, "B").Value)) <> "No." Then
+        ws.Columns("B").Insert Shift:=xlToRight
     End If
-    ws.Cells(HEADER_ROW, COL_NO).Value = "No."
+    ws.Cells(HEADER_ROW, "B").Value = "No."
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_TYPE).Value)) <> "타입" Then
-        ws.Columns(COL_TYPE).Insert Shift:=xlToRight
+    If Trim$(CStr(ws.Cells(HEADER_ROW, "D").Value)) <> "타입" Then
+        ws.Columns("D").Insert Shift:=xlToRight
     End If
-    ws.Cells(HEADER_ROW, COL_TYPE).Value = "타입"
+    ws.Cells(HEADER_ROW, "D").Value = "타입"
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value)) <> "대분류" Then
-        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value)) = "모듈" Then
-            ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value = "대분류"
+    If Trim$(CStr(ws.Cells(HEADER_ROW, "E").Value)) <> "대분류" Then
+        If Trim$(CStr(ws.Cells(HEADER_ROW, "E").Value)) = "모듈" Then
+            ws.Cells(HEADER_ROW, "E").Value = "대분류"
         Else
-            ws.Columns(COL_MAJOR_CATEGORY).Insert Shift:=xlToRight
+            ws.Columns("E").Insert Shift:=xlToRight
         End If
     End If
-    ws.Cells(HEADER_ROW, COL_MAJOR_CATEGORY).Value = "대분류"
+    ws.Cells(HEADER_ROW, "E").Value = "대분류"
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MIDDLE_CATEGORY).Value)) <> "중분류" Then
-        ws.Columns(COL_MIDDLE_CATEGORY).Insert Shift:=xlToRight
+    If Trim$(CStr(ws.Cells(HEADER_ROW, "F").Value)) <> "중분류" Then
+        ws.Columns("F").Insert Shift:=xlToRight
     End If
-    ws.Cells(HEADER_ROW, COL_MIDDLE_CATEGORY).Value = "중분류"
+    ws.Cells(HEADER_ROW, "F").Value = "중분류"
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value)) <> "소분류" Then
-        If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value)) = "프로그램" Then
-            ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value = "소분류"
+    If Trim$(CStr(ws.Cells(HEADER_ROW, "G").Value)) <> "소분류" Then
+        If Trim$(CStr(ws.Cells(HEADER_ROW, "G").Value)) = "프로그램" Then
+            ws.Cells(HEADER_ROW, "G").Value = "소분류"
         Else
-            ws.Columns(COL_MINOR_CATEGORY).Insert Shift:=xlToRight
+            ws.Columns("G").Insert Shift:=xlToRight
         End If
     End If
-    ws.Cells(HEADER_ROW, COL_MINOR_CATEGORY).Value = "소분류"
+    ws.Cells(HEADER_ROW, "G").Value = "소분류"
 
     ' Insert the second content column once. Excel shifts values, formulas and
     ' cell-anchored embedded objects together; the old H content remains intact.
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_MODIFICATION).Value)) <> "수정 내용" Then
-        ws.Columns(COL_MODIFICATION).Insert Shift:=xlToRight
-        ws.Columns(COL_MODIFICATION).ColumnWidth = ws.Columns(COL_REQUEST).ColumnWidth
+    If Trim$(CStr(ws.Cells(HEADER_ROW, "I").Value)) <> "수정 내용" Then
+        ws.Columns("I").Insert Shift:=xlToRight
+        ws.Columns("I").ColumnWidth = ws.Columns("H").ColumnWidth
         On Error Resume Next
-        ws.Columns(COL_MODIFICATION).Validation.Delete
+        ws.Columns("I").Validation.Delete
         On Error GoTo MigrationError
     End If
-    ws.Cells(HEADER_ROW, COL_REQUEST).Value = "요청 내용"
-    ws.Cells(HEADER_ROW, COL_MODIFICATION).Value = "수정 내용"
+    ws.Cells(HEADER_ROW, "H").Value = "요청 내용"
+    ws.Cells(HEADER_ROW, "I").Value = "수정 내용"
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_OWNER).Value)) <> "담당" Then
-        ws.Columns(COL_OWNER).Insert Shift:=xlToRight
+    If Trim$(CStr(ws.Cells(HEADER_ROW, "J").Value)) <> "담당" Then
+        ws.Columns("J").Insert Shift:=xlToRight
     End If
-    ws.Cells(HEADER_ROW, COL_OWNER).Value = "담당"
+    ws.Cells(HEADER_ROW, "J").Value = "담당"
 
     ' Newly inserted classification columns can inherit validation from adjacent cells.
     On Error Resume Next
-    ws.Range(COL_TYPE & DATA_START_ROW & ":" & _
-             COL_MINOR_CATEGORY & ws.Rows.Count).Validation.Delete
+    ws.Range("D" & DATA_START_ROW & ":" & _
+             "G" & ws.Rows.Count).Validation.Delete
     On Error GoTo MigrationError
     EnsureTaskTypeConfig
     ApplyTaskTypeValidation ws
 
     ' Remove the retired development-report column from existing workbooks.
-    If Trim$(CStr(ws.Range(COL_WEEKLY_REPORT & HEADER_ROW).Value)) = "개발진행" Then
-        ws.Columns(COL_WEEKLY_REPORT).Delete Shift:=xlToLeft
+    If Trim$(CStr(ws.Range("T" & HEADER_ROW).Value)) = "개발진행" Then
+        ws.Columns("T").Delete Shift:=xlToLeft
     End If
 
-    If Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "보고 상태" And _
-       Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value)) <> "주간보고" Then
-        ws.Columns(COL_WEEKLY_REPORT).Insert Shift:=xlToRight
+    If Trim$(CStr(ws.Cells(HEADER_ROW, "T").Value)) <> "보고 상태" And _
+       Trim$(CStr(ws.Cells(HEADER_ROW, "T").Value)) <> "주간보고" Then
+        ws.Columns("T").Insert Shift:=xlToRight
     End If
-    ws.Cells(HEADER_ROW, COL_WEEKLY_REPORT).Value = "보고 상태"
+    ws.Cells(HEADER_ROW, "T").Value = "보고 상태"
 
     lastMigrationRow = Application.Max( _
-        ws.Cells(ws.Rows.Count, COL_REQUEST).End(xlUp).Row, _
-        ws.Cells(ws.Rows.Count, COL_MODIFICATION).End(xlUp).Row, _
-        ws.Cells(ws.Rows.Count, COL_MANUAL_STATUS).End(xlUp).Row)
+        ws.Cells(ws.Rows.Count, "H").End(xlUp).Row, _
+        ws.Cells(ws.Rows.Count, "I").End(xlUp).Row, _
+        ws.Cells(ws.Rows.Count, "S").End(xlUp).Row)
 
     For r = DATA_START_ROW To lastMigrationRow
-        manualStatusText = Trim$(CStr(ws.Cells(r, COL_MANUAL_STATUS).Value))
+        manualStatusText = Trim$(CStr(ws.Cells(r, "S").Value))
 
         If manualStatusText = STATUS_WEEKLY_REPORT Then
-            ws.Cells(r, COL_WEEKLY_REPORT).Value = REPORT_STATUS_IN_PROGRESS
-            ws.Cells(r, COL_MANUAL_STATUS).ClearContents
+            ws.Cells(r, "T").Value = REPORT_STATUS_IN_PROGRESS
+            ws.Cells(r, "S").ClearContents
         ElseIf manualStatusText = "개발진행" Or manualStatusText = "개발 진행" Then
-            ws.Cells(r, COL_MANUAL_STATUS).ClearContents
+            ws.Cells(r, "S").ClearContents
         End If
-        NormalizeReportStatusCell ws.Cells(r, COL_WEEKLY_REPORT)
+        NormalizeReportStatusCell ws.Cells(r, "T")
     Next r
 
-    Set targetRange = ws.Range(COL_NO & HEADER_ROW & ":" & ws.Cells(HEADER_ROW, ws.Columns.Count).Address(False, False))
+    Set targetRange = ws.Range("B" & HEADER_ROW & ":" & ws.Cells(HEADER_ROW, ws.Columns.Count).Address(False, False))
 
     On Error Resume Next
     If ws.AutoFilterMode Then ws.AutoFilterMode = False
@@ -218,7 +285,7 @@ MigrationError:
     Err.Raise errorNumber, "EnsureTaskSheetLayout", errorDescription
 End Sub
 
-Public Sub ClearCalculatedArea(ws As Worksheet, ByVal lastRow As Long)
+Public Sub ClearCalculatedArea(ws As Worksheet, ByVal lastRow As Long, Optional ByVal clearFormats As Boolean = True)
     Dim normalProgressCol As Long
     Dim planDaysCol As Long
     Dim actualDaysCol As Long
@@ -233,39 +300,37 @@ Public Sub ClearCalculatedArea(ws As Worksheet, ByVal lastRow As Long)
     
     If normalProgressCol > 0 And planDaysCol > 0 And actualDaysCol > 0 And statusCol > 0 Then
         ws.Range(ws.Cells(DATA_START_ROW, normalProgressCol), ws.Cells(lastRow, normalProgressCol)).ClearContents
-        ws.Range(ws.Cells(DATA_START_ROW, normalProgressCol), ws.Cells(lastRow, normalProgressCol)).ClearFormats
+        If clearFormats Then ws.Range(ws.Cells(DATA_START_ROW, normalProgressCol), ws.Cells(lastRow, normalProgressCol)).ClearFormats
         
         ws.Range(ws.Cells(DATA_START_ROW, planDaysCol), ws.Cells(lastRow, actualDaysCol)).ClearContents
-        ws.Range(ws.Cells(DATA_START_ROW, planDaysCol), ws.Cells(lastRow, actualDaysCol)).ClearFormats
+        If clearFormats Then ws.Range(ws.Cells(DATA_START_ROW, planDaysCol), ws.Cells(lastRow, actualDaysCol)).ClearFormats
         
         ws.Range(ws.Cells(DATA_START_ROW, statusCol), ws.Cells(lastRow, statusCol)).ClearContents
-        ws.Range(ws.Cells(DATA_START_ROW, statusCol), ws.Cells(lastRow, statusCol)).ClearFormats
+        If clearFormats Then ws.Range(ws.Cells(DATA_START_ROW, statusCol), ws.Cells(lastRow, statusCol)).ClearFormats
     Else
         ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).ClearContents
-        ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).ClearFormats
+        If clearFormats Then ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).ClearFormats
         
         ws.Range(COL_PLAN_DAYS & DATA_START_ROW & ":" & COL_ACTUAL_DAYS & lastRow).ClearContents
-        ws.Range(COL_PLAN_DAYS & DATA_START_ROW & ":" & COL_ACTUAL_DAYS & lastRow).ClearFormats
+        If clearFormats Then ws.Range(COL_PLAN_DAYS & DATA_START_ROW & ":" & COL_ACTUAL_DAYS & lastRow).ClearFormats
         
         ws.Range(COL_STATUS & DATA_START_ROW & ":" & COL_STATUS & lastRow).ClearContents
-        ws.Range(COL_STATUS & DATA_START_ROW & ":" & COL_STATUS & lastRow).ClearFormats
+        If clearFormats Then ws.Range(COL_STATUS & DATA_START_ROW & ":" & COL_STATUS & lastRow).ClearFormats
     End If
 End Sub
 
 Public Sub ClearGanttArea(ws As Worksheet)
-    Dim startCol As Long
-    Dim lastCol As Long
-
+    Dim startCol As Long, lastCol As Long, lastRow As Long, chartArea As Range
+    InvalidateGanttRenderCache ws
     ClearTaskBarVisuals ws
     startCol = ws.Range(COL_GANTT_START & "1").Column
-    lastCol = ws.Columns.Count
-
-    On Error Resume Next
-    ws.Range(ws.Cells(1, startCol), ws.Cells(ws.Rows.Count, lastCol)).UnMerge
-    On Error GoTo 0
-
-    ws.Range(ws.Cells(1, startCol), ws.Cells(ws.Rows.Count, lastCol)).ClearFormats
-    ws.Range(ws.Cells(1, startCol), ws.Cells(ws.Rows.Count, lastCol)).ClearContents
+    lastCol = ws.Cells(GANTT_HEADER_ROW_DATE, ws.Columns.Count).End(xlToLeft).Column
+    lastRow = Application.Max(GetLastDataRow(ws), ws.UsedRange.Row + ws.UsedRange.Rows.Count - 1)
+    If lastCol < startCol Then Exit Sub
+    Set chartArea = ws.Range(ws.Cells(1, startCol), ws.Cells(lastRow, lastCol))
+    chartArea.UnMerge
+    chartArea.ClearFormats
+    chartArea.ClearContents
 End Sub
 
 Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object)
@@ -285,6 +350,8 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
 
     ws.Range(ws.Cells(GANTT_HEADER_ROW_MONTH, startCol), ws.Cells(GANTT_HEADER_ROW_DATE, endCol)).ClearContents
     ws.Range(ws.Cells(GANTT_HEADER_ROW_MONTH, startCol), ws.Cells(GANTT_HEADER_ROW_DATE, endCol)).ClearFormats
+
+    ws.Range(ws.Cells(1, startCol), ws.Cells(1, endCol)).EntireColumn.ColumnWidth = 3
 
     curCol = startCol
     weekStartCol = startCol
@@ -355,7 +422,6 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
             End With
         End If
 
-        ws.Columns(curCol).ColumnWidth = 3
         curCol = curCol + 1
     Next d
 
@@ -904,7 +970,8 @@ Private Function HasHoldIncludedStatusText(ByVal statusText As String) As Boolea
     HasHoldIncludedStatusText = (InStr(1, statusText, STATUS_DONE_WITH_HOLD_SUFFIX, vbTextCompare) > 0)
 End Function
 
-Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object)
+Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object, _
+                          Optional ByVal fitLayout As Boolean = True, Optional ByVal rebuildHierarchy As Boolean = True)
     Dim startCol As Long
     Dim endCol As Long
     Dim r As Long
@@ -1007,32 +1074,9 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
         End If
     Next r
 
+    ' The final renderer paints weekend/today backgrounds once.
     For c = startCol To endCol
         d = chartStartDate + (c - startCol)
-
-        If Not IsWorkingDay(d, holidayDict, workdayDict) Then
-            For r = DATA_START_ROW To lastRow
-                If HasTaskContent(ws, r) Then
-                    If ws.Cells(r, c).Value = "" Then
-                        ws.Cells(r, c).Interior.Color = RGB(245, 245, 245)
-                    End If
-                End If
-            Next r
-        End If
-
-        If CLng(d) = CLng(Date) Then
-            For r = DATA_START_ROW To lastRow
-                If HasTaskContent(ws, r) Then
-                    If ws.Cells(r, c).Value = "" Then
-                        If Not IsTaskPlannedOnDate(ws, r, d, holidayDict, workdayDict) And _
-                           Not IsTaskActualOnDate(ws, r, d, holidayDict, workdayDict) Then
-                            ws.Cells(r, c).Interior.Color = RGB(224, 252, 244)
-                        End If
-                    End If
-                End If
-            Next r
-        End If
-        
         If c > startCol Then
             prevDate = chartStartDate + (c - startCol - 1)
             
@@ -1046,15 +1090,10 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
         End If
     Next c
 
-    ws.Columns(COL_NO).ColumnWidth = 6
-    ws.Columns(COL_LEVEL).ColumnWidth = 7
+    If fitLayout Then
     ws.Range(COL_REQUEST & ":" & COL_MODIFICATION).WrapText = False
-    ws.Columns(COL_TYPE).ColumnWidth = 12
-    ws.Columns(COL_MAJOR_CATEGORY).ColumnWidth = 14
-    ws.Columns(COL_MIDDLE_CATEGORY).ColumnWidth = 14
-    ws.Columns(COL_MINOR_CATEGORY).ColumnWidth = 14
-    ws.Range(COL_REQUEST & ":" & COL_MODIFICATION).Columns.AutoFit
-    ws.Columns(COL_OWNER).ColumnWidth = 12
+    ws.Columns(COL_WORK_MINUTES).ColumnWidth = 13
+    If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
     ws.Columns(COL_NOTE).ColumnWidth = 4.5
     ws.Columns(COL_PLAN_START).ColumnWidth = 11
     ws.Columns(COL_PLAN_END).ColumnWidth = 11
@@ -1063,11 +1102,8 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_PROGRESS).ColumnWidth = 9
     ws.Columns(COL_NORMAL_PROGRESS).ColumnWidth = 11
     ws.Columns(COL_MANUAL_PROGRESS).ColumnWidth = 11
-    ws.Columns(COL_MANUAL_STATUS).ColumnWidth = 11
-    ws.Columns(COL_WEEKLY_REPORT).ColumnWidth = 12
     ws.Columns(COL_PLAN_DAYS).ColumnWidth = 9
     ws.Columns(COL_ACTUAL_DAYS).ColumnWidth = 10
-    ws.Columns(COL_STATUS).ColumnWidth = 15
 
     ' 새로고침 후 화면의 문자열이 열 너비 때문에 잘리지 않도록
     ' 분류, 업무명, 담당자 및 상태 열을 실제 내용에 맞춘다.
@@ -1080,6 +1116,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Range(COL_STATUS & HEADER_ROW & ":" & _
              COL_STATUS & lastRow).Columns.AutoFit
     ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).AutoFit
+    End If
 
     ws.Rows(GANTT_HEADER_ROW_MONTH).RowHeight = 20
     ws.Rows(GANTT_HEADER_ROW_WEEK).RowHeight = 20
@@ -1089,7 +1126,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Range(COL_PLAN_START & DATA_START_ROW & ":" & COL_ACTUAL_END & lastRow).NumberFormat = "yyyy-mm-dd"
     ws.Range(COL_PROGRESS & DATA_START_ROW & ":" & COL_PROGRESS & lastRow).NumberFormat = "0%"
     ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).NumberFormat = "0%"
-    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol
+    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol, fitLayout, rebuildHierarchy, True
     RestoreTaskDetailColumnHidden ws, detailColumnHidden
     ActiveWindow.DisplayGridlines = False
 End Sub
@@ -1104,8 +1141,8 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
     Dim changedClassificationOrLevel As Boolean
 
     If ws Is Nothing Or Target Is Nothing Then Exit Sub
-    If ws.Name = CONFIG_SHEET_NAME Or _
-       ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
+       IsWebUtilitySheet(ws) Then Exit Sub
 
     Set watchedRange = Union( _
         ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
@@ -1696,6 +1733,10 @@ Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Lo
 
     ws.Rows("1:" & HEADER_ROW).Locked = True
     ws.Rows(DATA_START_ROW & ":" & ws.Rows.Count).Locked = False
+    ' 2026-10-22 김좌현 수정 : 정렬/삽입과 함께 이동하는 웹 업무 ID를 사용자 편집에서 보호
+    ws.Columns(COL_WEB_TASK_ID).Locked = True
+    ApplyWebTaskProtection ws
+    If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
 
     ws.Protect DrawingObjects:=False, Contents:=True, Scenarios:=True, _
                UserInterfaceOnly:=True, AllowFiltering:=True, _

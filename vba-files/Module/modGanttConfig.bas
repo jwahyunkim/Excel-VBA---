@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttConfig"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 웹 등록 설정·영구 업무 ID·작업시간 삽입에 맞춰 업무 열 좌표 변경
 ' 2026-10-20 김좌현 수정 : 휴일 표 제목 공간 확보에 따른 헤더/입력 시작 행 변경
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 필터 설정 상수 제거
 ' 2026-10-20 김좌현 수정 : 완료 숨김 및 숨김 제외 설정 상수 제거
@@ -21,24 +22,39 @@ Public Const COL_MINOR_CATEGORY As String = "G"
 ' Legacy internal names are retained so older VBA entry points keep working.
 Public Const COL_MODULE As String = COL_MAJOR_CATEGORY
 Public Const COL_PROGRAM As String = COL_MINOR_CATEGORY
-Public Const COL_REQUEST As String = "H"
+' 2026-10-22 김좌현 수정 : 웹 등록 설정/영구 업무 ID/분 단위 작업시간 열 정의
+Public Const COL_WEB_ENABLED As String = "H"
+Public Const COL_WEB_LEVEL As String = "I"
+Public Const COL_WEB_REQUESTER As String = "J"
+Public Const COL_WEB_ACTION As String = "K"
+Public Const COL_WEB_STATUS As String = "L"
+Public Const COL_WEB_MODULE As String = "M"
+Public Const COL_WEB_HANDLER As String = "N"
+Public Const COL_WEB_PROGRAM_ID As String = "O"
+Public Const COL_WEB_RESULT As String = "P"
+Public Const COL_WEB_TASK_ID As String = "Q"
+Public Const COL_WORK_MINUTES As String = "Z"
+Public Const WEB_CONFIG_SHEET_NAME As String = "config_web"
+Public Const WEB_PREVIEW_SHEET_NAME As String = "웹등록_미리보기"
+Public Const WEB_LOG_SHEET_NAME As String = "웹등록_이력"
+Public Const COL_REQUEST As String = "R"
 Public Const COL_TASK As String = COL_REQUEST
-Public Const COL_MODIFICATION As String = "I"
-Public Const COL_OWNER As String = "J"
-Public Const COL_NOTE As String = "K"
-Public Const COL_PLAN_START As String = "L"
-Public Const COL_PLAN_END As String = "M"
-Public Const COL_ACTUAL_START As String = "N"
-Public Const COL_ACTUAL_END As String = "O"
-Public Const COL_PROGRESS As String = "P"
-Public Const COL_NORMAL_PROGRESS As String = "Q"
-Public Const COL_MANUAL_PROGRESS As String = "R"
-Public Const COL_MANUAL_STATUS As String = "S"
-Public Const COL_WEEKLY_REPORT As String = "T"
-Public Const COL_PLAN_DAYS As String = "U"
-Public Const COL_ACTUAL_DAYS As String = "V"
-Public Const COL_STATUS As String = "W"
-Public Const COL_GANTT_START As String = "X"
+Public Const COL_MODIFICATION As String = "S"
+Public Const COL_OWNER As String = "T"
+Public Const COL_NOTE As String = "U"
+Public Const COL_PLAN_START As String = "V"
+Public Const COL_PLAN_END As String = "W"
+Public Const COL_ACTUAL_START As String = "X"
+Public Const COL_ACTUAL_END As String = "Y"
+Public Const COL_PROGRESS As String = "AA"
+Public Const COL_NORMAL_PROGRESS As String = "AB"
+Public Const COL_MANUAL_PROGRESS As String = "AC"
+Public Const COL_MANUAL_STATUS As String = "AD"
+Public Const COL_WEEKLY_REPORT As String = "AE"
+Public Const COL_PLAN_DAYS As String = "AF"
+Public Const COL_ACTUAL_DAYS As String = "AG"
+Public Const COL_STATUS As String = "AH"
+Public Const COL_GANTT_START As String = "AI"
 
 Public Const CONFIG_SHEET_NAME As String = "config"
 Public Const OUTPUT_CONFIG_SHEET_NAME As String = "config_outfoot"
