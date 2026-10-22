@@ -2,6 +2,7 @@
 param([string]$WorkbookPath, [string]$SavePath, [switch]$ViewOnly, [switch]$SelectedColumnsOnly)
 
 # 2026-10-20 김좌현 수정 : 행 필터 제거 후 열 접기 상태 복구 삽입 위치 변경
+# 2026-10-21 김좌현 수정 : 지연 구간/일수 표시를 반영하고 외곽선 예제 날짜를 독립적으로 고정
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 if (-not $WorkbookPath) {
@@ -96,10 +97,14 @@ try {
     $taskInitialWindow = $taskBook.Windows.Item(1)
     $taskOriginalScrollRow = [int]$taskInitialWindow.Panes.Item($taskInitialWindow.Panes.Count).ScrollRow
     $taskComponents = $taskBook.VBProject.VBComponents
-    foreach ($taskModuleName in @('modGanttBars', 'modGanttHierarchy')) {
+    foreach ($taskModuleName in @('modGanttBars', 'modGanttHierarchy', 'modGanttDate', 'modGanttSheet')) {
         try { $component = $taskComponents.Item($taskModuleName) }
         catch { $component = $taskComponents.Add(1); $component.Name = $taskModuleName }
-        $source = [IO.File]::ReadAllText((Join-Path $taskRoot ('vba-files/Module/' + $taskModuleName + '.bas')))
+        # 2026-10-21 김좌현 수정 : 지연 계산 의존 모듈도 현재 소스와 동일하게 불러오고 CP949 보존
+        $sourceBytes = [IO.File]::ReadAllBytes((Join-Path $taskRoot ('vba-files/Module/' + $taskModuleName + '.bas')))
+        try { $source = [Text.UTF8Encoding]::new($false, $true).GetString($sourceBytes) }
+        catch { $source = [Text.Encoding]::GetEncoding(949).GetString($sourceBytes) }
+        $source = $source.TrimStart([char]0xFEFF)
         $source = $source -replace '(?m)^Attribute VB_Name = .*\r?\n', ''
         $code = $component.CodeModule
         if ($code.CountOfLines -gt 0) { $code.DeleteLines(1, $code.CountOfLines) }
@@ -420,6 +425,15 @@ Public Function RunGanttHierarchyRegression() As String
         End If
     Next existingShape
     lastRow = GetLastDataRow(original)
+    ' 2026-10-21 김좌현 수정 : 외곽선 예제의 날짜를 현재 사용자 입력과 독립적으로 고정
+    UnprotectTaskSheet original
+    For r = 52 To 74
+        original.Cells(r, COL_PLAN_START).Value = original.Range("AJ4").Value
+        original.Cells(r, COL_PLAN_END).Value = original.Range("AL4").Value
+        original.Cells(r, COL_ACTUAL_START).Value = original.Range("AL4").Value
+        original.Cells(r, COL_ACTUAL_END).Value = original.Range("AL4").Value
+        original.Cells(r, COL_PROGRESS).Value2 = 1
+    Next r
     dataBefore = original.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_STATUS & lastRow).Value2
     ReDim hiddenBefore(DATA_START_ROW To lastRow)
     For r = DATA_START_ROW To lastRow
@@ -455,7 +469,14 @@ Public Function RunGanttHierarchyRegression() As String
     Check original.Range("AL53").Interior.Color = RGB(52, 120, 212), "53 child cell"
     Check original.Range("AL61").Interior.Color = RGB(0, 140, 134), "61 detail cell"
     Check original.Range("AJ52").Interior.Color = RGB(203, 213, 225), "52 plan cell"
-    Check Application.CountA(original.Range("X5:BA" & lastRow)) = 0, "timeline captions remain"
+    For r = DATA_START_ROW To lastRow
+        For c = taskCol To lastCol
+            If Len(CStr(original.Cells(r, c).Value2)) > 0 Then
+                Check original.Cells(r, c).Interior.Color = RGB(244, 114, 182), "caption outside delay period"
+                Check IsNumeric(original.Cells(r, c).Value2) Or CStr(original.Cells(r, c).Value2) = "하위", "legacy timeline marker remains"
+            End If
+        Next c
+    Next r
     Check Application.CountA(original.Range("L3:W3")) = 0, "legend remains"
     Check original.Range("AL52").Borders(xlEdgeRight).Color = RGB(22, 163, 74), "52 right status"
     Check original.Range("AL52").Borders(xlEdgeBottom).Color <> RGB(22, 163, 74), "52 bottom status remains"

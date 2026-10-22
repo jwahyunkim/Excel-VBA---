@@ -1,9 +1,16 @@
 Attribute VB_Name = "modGanttBars"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 지연 완료 배경 모서리를 기본 노란색으로 변경하고 표시 크기 확대
+' 2026-10-22 김좌현 수정 : 셀 배경의 급격한 색 전환으로 지연 완료 로즈 모서리 표시, 도형/메모/셀 값 추가 없음
+' 2026-10-22 김좌현 수정 : 진행 지연을 설명 행의 연분홍으로 통일하고 완료 지연은 셀마다 사선 한 개, 막대 문구 제거
+' 2026-10-22 김좌현 수정 : 오늘 민트 표시와 진행 중 지연 분홍/지연 완료 빗금 구분
+' 2026-10-21 김좌현 수정 : 진행 중 및 완료 지연 구간에 주말·공휴일을 포함해 분홍색과 지연 일수 표시
 
 Private Const BAR_PREFIX As String = "gtBar_"
 Private Const KEY_PREFIX As String = "gtKey_"
 Private Const FRAME_COLOR As Long = 15820387 ' RGB(99, 102, 241)
+Private Const DELAY_CORNER_COLOR As Long = 65535 ' RGB(255, 255, 0), #FFFF00
+Private Const DELAY_CORNER_STOP As Double = 0.12
 
 ' Remove objects left by the previous implementation. All current output
 ' uses native cells and formatting; no drawing objects are created.
@@ -32,6 +39,8 @@ Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long,
     Dim cell As Range, timeline As Range
     Dim barMask() As Boolean
     Dim statusCols() As Long
+    Dim delayPeriods As Collection, delayPeriod As Variant
+    Dim hasDelay As Boolean, hasOpenDelay As Boolean
 
     ClearTaskBarVisuals ws
     If lastRow < DATA_START_ROW Or endCol < startCol Then Exit Sub
@@ -72,12 +81,13 @@ Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long,
         For c = startCol To endCol
             d = firstDate + c - startCol
             Set cell = ws.Cells(r, c)
+            cell.Interior.Pattern = xlSolid
             cell.Interior.Color = blankFill
             ClearOwnedTaskBarBorders cell, d, c > startCol, c < endCol
-            If Not IsWorkingDay(d, holidays, workdays) Then
+            If d = Date Then
+                cell.Interior.Color = RGB(224, 252, 244)
+            ElseIf Not IsWorkingDay(d, holidays, workdays) Then
                 cell.Interior.Color = RGB(245, 245, 245)
-            ElseIf d = Date Then
-                cell.Interior.Color = RGB(255, 199, 206)
             End If
         Next c
         If Not HasTaskContent(ws, r) Then GoTo NextTask
@@ -91,28 +101,50 @@ Public Sub RenderHierarchyTaskBars(ByVal ws As Worksheet, ByVal lastRow As Long,
         If IsDate(actualStart) Then
             If IsDate(actualEnd) Then
                 drawEnd = DateValue(actualEnd)
-            ElseIf DateValue(actualStart) <= Date Then
+            ElseIf DateValue(actualStart) <= Date And GetTaskProgressValue(ws, r) < 1 Then
                 drawEnd = Date
             End If
         End If
+        Set delayPeriods = GetTaskDelayPeriods(ws, r, lastRow)
         statusDate = LastVisibleWorkingDate(actualStart, drawEnd, firstDate, lastDate, holidays, workdays)
         If Not IsEmpty(statusDate) Then statusCols(r) = startCol + CLng(statusDate - firstDate)
 
         For c = startCol To endCol
             d = firstDate + c - startCol
-            If Not IsWorkingDay(d, holidays, workdays) Then GoTo NextDate
             Set cell = ws.Cells(r, c)
-            If DateFallsInPeriod(d, planStart, planEnd) Then
-                barMask(r, c) = True
-                cell.Interior.Color = RGB(203, 213, 225)
-                cell.Font.Color = RGB(71, 85, 105)
+            If IsWorkingDay(d, holidays, workdays) Then
+                If DateFallsInPeriod(d, planStart, planEnd) Then
+                    barMask(r, c) = True
+                    cell.Interior.Color = RGB(203, 213, 225)
+                    cell.Font.Color = RGB(71, 85, 105)
+                End If
+                If DateFallsInPeriod(d, actualStart, drawEnd) Then
+                    barMask(r, c) = True
+                    cell.Interior.Color = LevelBarColor(level)
+                    cell.Font.Color = RGB(255, 255, 255)
+                End If
             End If
-            If DateFallsInPeriod(d, actualStart, drawEnd) Then
+            hasDelay = False
+            hasOpenDelay = False
+            For Each delayPeriod In delayPeriods
+                If d >= delayPeriod(0) And d <= delayPeriod(1) Then
+                    hasDelay = True
+                    If Not CBool(delayPeriod(2)) Then
+                        hasOpenDelay = True
+                        Exit For
+                    End If
+                End If
+            Next delayPeriod
+            If hasDelay Then
                 barMask(r, c) = True
-                cell.Interior.Color = LevelBarColor(level)
-                cell.Font.Color = RGB(255, 255, 255)
+                If hasOpenDelay Then
+                    cell.Interior.Color = RGB(255, 235, 235)
+                    cell.Font.Color = RGB(112, 26, 66)
+                Else
+                    ApplyCompletedDelayCornerFill cell, LevelBarColor(level)
+                    cell.Font.Color = RGB(255, 255, 255)
+                End If
             End If
-NextDate:
         Next c
 NextTask:
     Next r
@@ -127,10 +159,28 @@ NextTask:
     Next r
 End Sub
 
+Private Sub ApplyCompletedDelayCornerFill(ByVal cell As Range, ByVal barColor As Long)
+    ' A sharp 45-degree color transition clips a small triangle into the
+    ' top-left corner. This is the cell's fill, with no objects or cell content.
+    With cell.Interior
+        .Pattern = xlPatternLinearGradient
+        With .Gradient
+            .Degree = 45
+            .ColorStops.Clear
+            .ColorStops.Add(0).Color = DELAY_CORNER_COLOR
+            .ColorStops.Add(DELAY_CORNER_STOP).Color = DELAY_CORNER_COLOR
+            .ColorStops.Add(DELAY_CORNER_STOP + 0.00001).Color = barColor
+            .ColorStops.Add(1).Color = barColor
+        End With
+    End With
+End Sub
+
 Private Sub ClearOwnedTaskBarBorders(ByVal cell As Range, ByVal d As Date, _
                                     ByVal hasPreviousDate As Boolean, ByVal hasNextDate As Boolean)
     Dim edge As Variant
     Dim color As Long, weight As XlBorderWeight
+    cell.Borders(xlDiagonalUp).LineStyle = xlNone
+    cell.Borders(xlDiagonalDown).LineStyle = xlNone
     For Each edge In Array(xlEdgeLeft, xlEdgeTop, xlEdgeBottom, xlEdgeRight)
         color = cell.Borders(CLng(edge)).Color
         If IsStatusBorder(color) Or IsHierarchyBarBorder(color) Then

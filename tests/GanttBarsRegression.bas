@@ -1,5 +1,9 @@
 ﻿Attribute VB_Name = "GanttBarsRegression"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 셀 배경 모서리의 완료색/외곽선/도형 미생성 및 재생성 검증
+' 2026-10-22 김좌현 수정 : 연분홍 진행 지연과 셀 단일 사선 및 막대 무문구 회귀 검증
+' 2026-10-22 김좌현 수정 : 민트 오늘 배경과 지연 완료 빗금이 기존 간트 테두리와 호환되는지 검사
+' 2026-10-21 김좌현 수정 : 지연 구간의 분홍 채우기를 포함한 계층 외곽선 회귀 검사
 
 Private Const FIRST_ROW As Long = 5
 Private Const LAST_ROW As Long = 19
@@ -286,9 +290,18 @@ Private Function ExpectedStatusColor(ByVal status As String) As Long
     End Select
 End Function
 
+Private Function BarCellColor(ByVal cell As Range) As Long
+    If cell.Interior.Pattern = xlPatternLinearGradient Then
+        BarCellColor = cell.Interior.Gradient.ColorStops(4).Color
+    Else
+        BarCellColor = cell.Interior.Color
+    End If
+End Function
+
 Private Function IsBarFill(ByVal color As Long) As Boolean
     IsBarFill = (color = RGB(36, 59, 83) Or color = RGB(52, 120, 212) Or _
-                 color = RGB(0, 140, 134) Or color = RGB(203, 213, 225))
+                 color = RGB(0, 140, 134) Or color = RGB(203, 213, 225) Or _
+                 color = RGB(255, 235, 235) Or color = RGB(241, 245, 249))
 End Function
 
 Private Sub VerifyExpectedRow(ByVal ws As Worksheet, ByVal rowNum As Long, _
@@ -324,10 +337,10 @@ Private Sub VerifyExpectedRow(ByVal ws As Worksheet, ByVal rowNum As Long, _
             Check cell.Interior.Color = RGB(203, 213, 225), "plan fill or actual overlap priority " & label
         Else
             Check Not IsBarFill(cell.Interior.Color), "unexpected or stale period fill " & label
-            If Not ExpectedWorkingDay(d) Then
+            If d = Date Then
+                Check cell.Interior.Color = RGB(224, 252, 244), "today background outside period " & label
+            ElseIf Not ExpectedWorkingDay(d) Then
                 Check cell.Interior.Color = RGB(245, 245, 245), "nonworking background " & label
-            ElseIf d = Date Then
-                Check cell.Interior.Color = RGB(255, 199, 206), "today background outside period " & label
             End If
         End If
         Check Len(CStr(cell.Value2)) = 0, "timeline contains level number or symbol " & label
@@ -412,7 +425,7 @@ Private Sub VerifyCombinedFrameEdges(ByVal ws As Worksheet, Optional ByVal hiera
         frame = frames(frameIndex)
         For frameRow = CLng(frame(0)) To CLng(frame(1))
             For frameCol = FIRST_COL To LAST_COL
-                If IsBarFill(ws.Cells(frameRow, frameCol).Interior.Color) Then
+                If IsBarFill(BarCellColor(ws.Cells(frameRow, frameCol))) Then
                     If minCols(frameIndex) = 0 Or frameCol < minCols(frameIndex) Then minCols(frameIndex) = frameCol
                     If frameCol > maxCols(frameIndex) Then maxCols(frameIndex) = frameCol
                 End If
@@ -430,8 +443,9 @@ Private Sub VerifyCombinedFrameEdges(ByVal ws As Worksheet, Optional ByVal hiera
                         If CLng(edge) = xlEdgeRight Then actualCol = c
                         If CLng(edge) = xlEdgeLeft And c > FIRST_COL Then actualCol = c - 1
                         If actualCol > 0 Then
-                            permitted = (ws.Cells(r, actualCol).Interior.Color = _
-                                         ExpectedLevelColor(CLng(ws.Cells(r, "C").Value2)))
+                            permitted = (BarCellColor(ws.Cells(r, actualCol)) = _
+                                         ExpectedLevelColor(CLng(ws.Cells(r, "C").Value2)) Or _
+                                         ws.Cells(r, actualCol).Interior.Color = RGB(255, 235, 235))
                         End If
                     ElseIf ws.Cells(r, c).Borders(CLng(edge)).Color = RGB(99, 102, 241) Then
                         For frameIndex = 0 To UBound(frames)
@@ -488,6 +502,7 @@ Private Sub VerifyCombinedHierarchyFrames(ByVal ws As Worksheet, ByVal holidays 
         ws.Cells(r, "C").Value2 = levels(r - 5)
         ws.Cells(r, "H").Value2 = "Combined frame fixture"
         ws.Cells(r, "W").Value2 = STATUS_DONE
+        ws.Cells(r, "P").Value2 = 1
     Next r
     SetFixturePlan ws, 5, DateSerial(2026, 10, 15), DateSerial(2026, 10, 21)
     SetFixturePlan ws, 6, DateSerial(2026, 10, 16), DateSerial(2026, 10, 20)
@@ -534,7 +549,10 @@ Private Sub VerifyCombinedHierarchyFrames(ByVal ws As Worksheet, ByVal holidays 
     CheckNoOwnedBorders ws.Range("Z13"), "holiday outside combined frames"
     CheckNoOwnedBorders ws.Range("AI5"), "group enclosed dates beyond every period"
     VerifyCombinedFrameEdges ws, True
-    Check Application.CountA(ws.Range("X5:AI19")) = 0, "frame inserted numbers or symbols"
+    Check Application.CountA(ws.Range("X5:AI19")) = 0, "timeline must have no labels"
+    Check ws.Range("AF7").Interior.Pattern = xlPatternLinearGradient, "child native corner background missing"
+    Check ws.Range("AI11").Interior.Pattern = xlPatternLinearGradient, "standalone native corner background missing"
+    Check ws.Shapes.Count = 1 And ws.Comments.Count = 0, "native corner background created objects or notes"
     VerifyLegendCleared ws
     VerifySurroundingCells ws
     signature = TimelineSignature(ws, FIRST_ROW, LAST_ROW)
@@ -619,10 +637,19 @@ Private Sub VerifyInputValues(ByVal dataBefore As Variant, ByVal dataAfter As Va
 End Sub
 
 Private Function TimelineSignature(ByVal ws As Worksheet, ByVal firstRow As Long, ByVal lastRow As Long) As String
-    Dim r As Long, c As Long, cell As Range, signature As String
+    Dim r As Long, c As Long, cell As Range, signature As String, stopIndex As Long
     For r = firstRow To lastRow
         For c = FIRST_COL To LAST_COL
             Set cell = ws.Cells(r, c)
+            signature = signature & ":pattern=" & cell.Interior.Pattern
+            If cell.Interior.Pattern = xlPatternLinearGradient Then
+                signature = signature & ":angle=" & cell.Interior.Gradient.Degree
+                For stopIndex = 1 To cell.Interior.Gradient.ColorStops.Count
+                    With cell.Interior.Gradient.ColorStops(stopIndex)
+                        signature = signature & ":" & .Position & ":" & .Color
+                    End With
+                Next stopIndex
+            End If
             signature = signature & "|" & CStr(cell.Value2) & ":" & cell.Interior.Color & ":" & _
                         cell.Borders(xlEdgeLeft).LineStyle & ":" & cell.Borders(xlEdgeLeft).Color & ":" & _
                         cell.Borders(xlEdgeLeft).Weight & ":" & _

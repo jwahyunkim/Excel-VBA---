@@ -1,6 +1,8 @@
 Attribute VB_Name = "modGanttDate"
 
 Option Explicit
+' 2026-10-22 김좌현 수정 : 지연 구간에 실제 완료 여부를 포함해 진행 중/완료 표시 구분
+' 2026-10-21 김좌현 수정 : 마감 초과 판정과 주말·공휴일을 포함한 완료 지연 일수 및 하위 지연 구간 계산
 ' 2026-10-20 김좌현 수정 : 숨긴 행도 포함해 마지막 데이터 행 탐색
 
 Public Function GetLastDataRow(ws As Worksheet) As Long
@@ -49,7 +51,12 @@ Public Function GetMinMaxDate(ws As Worksheet, lastRow As Long, ByRef minDate As
         UpdateMinMaxDate v2, hasDate, minDate, maxDate
         UpdateMinMaxDate v3, hasDate, minDate, maxDate
         UpdateMinMaxDate v4, hasDate, minDate, maxDate
-        If IsDate(v3) And Not IsDate(v4) Then
+        If IsDate(v2) And Not IsDate(v4) Then
+            If DateValue(v2) < Date And GetTaskProgressValue(ws, r) < 1 Then
+                UpdateMinMaxDate Date, hasDate, minDate, maxDate
+            End If
+        End If
+        If IsDate(v3) And Not IsDate(v4) And GetTaskProgressValue(ws, r) < 1 Then
             If CDate(v3) <= Date Then UpdateMinMaxDate Date, hasDate, minDate, maxDate
         End If
     Next r
@@ -467,6 +474,11 @@ Public Function GetTaskStatus(ws As Worksheet, ByVal rowNum As Long, ByVal holid
         Exit Function
     End If
 
+    If DateValue(planE) < Date Then
+        GetTaskStatus = STATUS_DELAY
+        Exit Function
+    End If
+
     expectedProgress = GetExpectedProgress(CDate(planS), CDate(planE), holidayDict, workdayDict)
     progressGap = expectedProgress - actualProgress
     
@@ -477,6 +489,69 @@ Public Function GetTaskStatus(ws As Worksheet, ByVal rowNum As Long, ByVal holid
     Else
         GetTaskStatus = STATUS_DELAY
     End If
+End Function
+
+Public Function GetTaskDelayEndDate(ByVal ws As Worksheet, ByVal rowNum As Long) As Variant
+    Dim actualEnd As Variant
+    GetTaskDelayEndDate = Empty
+    actualEnd = ws.Cells(rowNum, COL_ACTUAL_END).Value
+    If IsDate(actualEnd) Then
+        GetTaskDelayEndDate = DateValue(actualEnd)
+    ElseIf GetTaskProgressValue(ws, rowNum) < 1 Then
+        GetTaskDelayEndDate = Date
+    End If
+End Function
+
+Public Function GetTaskDelayDays(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                                 ByVal holidayDict As Object, ByVal workdayDict As Object) As Variant
+    Dim planEnd As Variant, delayEnd As Variant
+    GetTaskDelayDays = ""
+    If Not HasTaskContent(ws, rowNum) Then Exit Function
+    If HasTaskError(ws, rowNum) Then Exit Function
+    planEnd = ws.Cells(rowNum, COL_PLAN_END).Value
+    delayEnd = GetTaskDelayEndDate(ws, rowNum)
+    If Not IsDate(planEnd) Or Not IsDate(delayEnd) Then Exit Function
+    GetTaskDelayDays = 0
+    If DateValue(delayEnd) <= DateValue(planEnd) Then Exit Function
+    GetTaskDelayDays = DateDiff("d", DateValue(planEnd), DateValue(delayEnd))
+End Function
+
+Public Function HasDelayedDescendantTask(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                                         ByVal lastRow As Long, ByVal holidayDict As Object, _
+                                         ByVal workdayDict As Object) As Boolean
+    Dim r As Long, subtreeEnd As Long, days As Variant
+    subtreeEnd = GetTaskSubtreeEndRow(ws, rowNum, lastRow)
+    For r = rowNum + 1 To subtreeEnd
+        days = GetTaskDelayDays(ws, r, holidayDict, workdayDict)
+        If IsNumeric(days) Then
+            If CLng(days) > 0 Then
+                HasDelayedDescendantTask = True
+                Exit Function
+            End If
+        End If
+    Next r
+End Function
+
+Public Function GetTaskDelayPeriods(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                                    ByVal lastRow As Long) As Collection
+    Dim periods As New Collection
+    Dim r As Long, subtreeEnd As Long, planEnd As Variant, delayEnd As Variant
+    subtreeEnd = GetTaskSubtreeEndRow(ws, rowNum, lastRow)
+    For r = rowNum To subtreeEnd
+        If HasTaskContent(ws, r) Then
+            If Not HasTaskError(ws, r) Then
+                planEnd = ws.Cells(r, COL_PLAN_END).Value
+                delayEnd = GetTaskDelayEndDate(ws, r)
+                If IsDate(planEnd) And IsDate(delayEnd) Then
+                    If DateValue(delayEnd) > DateValue(planEnd) Then
+                        periods.Add Array(DateValue(planEnd) + 1, DateValue(delayEnd), _
+                                          IsDate(ws.Cells(r, COL_ACTUAL_END).Value))
+                    End If
+                End If
+            End If
+        End If
+    Next r
+    Set GetTaskDelayPeriods = periods
 End Function
 
 Public Function FindLevelMarkerDate(ws As Worksheet, ByVal rowNum As Long, ByVal holidayDict As Object, ByVal workdayDict As Object) As Variant
