@@ -1,6 +1,7 @@
 Attribute VB_Name = "modWebState"
 Option Explicit
 ' 2026-10-22 김좌현 수정 : 요청번호 연결과 최근 시도를 분리하고 등록 단위 편집 및 구조 잠금 추가
+' 2026-10-22 김좌현 수정 : 이력 삭제 후 새로고침 시 남은 웹 연결과 잠금 해제
 
 Public Const WEB_STATE_SHEET_NAME As String = "웹등록_연결"
 Private Const WEB_STATE_FIRST_ROW As Long = 2
@@ -67,6 +68,7 @@ Public Sub MigrateLegacyWebJournal()
         If Len(CStr(log.Cells(r, "L").Value2)) > 0 Then GoTo NextLegacy
         If seen.Exists(sourceId) Then GoTo NextLegacy
         seen(sourceId) = True
+        If WebTaskHasStateAnySite(sourceId) Then GoTo NextLegacy
         target = WebStateRow(sourceId)
         If target > 0 Then GoTo NextLegacy
         For j = log.Cells(log.Rows.Count, "A").End(xlUp).Row To 2 Step -1
@@ -99,6 +101,108 @@ Public Sub MigrateLegacyWebJournal()
 NextLegacy:
     Next r
 End Sub
+
+Private Function WebTaskHasStateAnySite(ByVal sourceId As String) As Boolean
+    Dim ws As Worksheet, r As Long
+    Set ws = WebStateSheet()
+    If ws Is Nothing Then Exit Function
+    For r = WEB_STATE_FIRST_ROW To ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+        If CStr(ws.Cells(r, "A").Value2) = sourceId Then
+            WebTaskHasStateAnySite = True
+            Exit Function
+        End If
+    Next r
+End Function
+
+Private Function WebHistoryKey(ByVal sourceId As String, ByVal site As String, ByVal requestNo As String) As String
+    site = LCase$(Trim$(site))
+    If Len(site) > 0 Then
+        If Right$(site, 1) <> "/" Then site = site & "/"
+    End If
+    WebHistoryKey = sourceId & vbNullChar & site & vbNullChar & requestNo
+End Function
+
+Public Function ReconcileDeletedWebHistory(ByVal ws As Worksheet) As Boolean
+    Dim stateWs As Worksheet, log As Worksheet, history As Object, outcomes As Object, cleared As Object
+    Dim entries As Variant, r As Long, lastRow As Long, taskLastRow As Long, owner As Long, sourceId As String, site As String
+    Dim requestNo As String, pendingNo As String, outcome As String, hasHistory As Boolean
+    Dim resultRange As Range, stateUnprotected As Boolean, errorNumber As Long, errorText As String
+    Set stateWs = WebStateSheet()
+    If stateWs Is Nothing Then Exit Function
+    Set history = CreateObject("Scripting.Dictionary")
+    Set outcomes = CreateObject("Scripting.Dictionary")
+    Set cleared = CreateObject("Scripting.Dictionary")
+    On Error Resume Next
+    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    On Error GoTo Failed
+    If Not log Is Nothing Then
+        lastRow = log.Cells(log.Rows.Count, "C").End(xlUp).Row
+        If lastRow >= 2 Then
+            entries = log.Range("C2:L" & lastRow).Value2
+            For r = 1 To UBound(entries, 1)
+                If Len(CStr(entries(r, 1))) > 0 And Len(CStr(entries(r, 3))) > 0 Then
+                    history(WebHistoryKey(CStr(entries(r, 1)), CStr(entries(r, 10)), CStr(entries(r, 2)))) = True
+                    outcomes(WebHistoryKey(CStr(entries(r, 1)), CStr(entries(r, 10)), CStr(entries(r, 3)))) = True
+                End If
+            Next r
+        End If
+    End If
+    For r = WEB_STATE_FIRST_ROW To stateWs.Cells(stateWs.Rows.Count, "A").End(xlUp).Row
+        sourceId = CStr(stateWs.Cells(r, "A").Value2)
+        site = CStr(stateWs.Cells(r, "B").Value2)
+        outcome = CStr(stateWs.Cells(r, "I").Value2)
+        If Len(sourceId) = 0 Or Len(outcome) = 0 Then GoTo NextState
+        If outcome = "이력 삭제" Then
+            If site = WebCurrentSite() Then cleared(sourceId) = True
+            GoTo NextState
+        End If
+        requestNo = CStr(stateWs.Cells(r, "D").Value2)
+        pendingNo = CStr(stateWs.Cells(r, "E").Value2)
+        If Len(requestNo) = 0 Then requestNo = pendingNo
+        hasHistory = history.Exists(WebHistoryKey(sourceId, site, requestNo))
+        If Len(requestNo) = 0 Then hasHistory = outcomes.Exists(WebHistoryKey(sourceId, site, outcome))
+        If Len(pendingNo) > 0 Then hasHistory = hasHistory Or history.Exists(WebHistoryKey(sourceId, site, pendingNo))
+        If CStr(stateWs.Cells(r, "H").Value2) = "이전 이력" Then _
+            hasHistory = hasHistory Or history.Exists(WebHistoryKey(sourceId, vbNullString, requestNo))
+        If Not hasHistory Then
+            If Not stateUnprotected Then stateWs.Unprotect: stateUnprotected = True
+            stateWs.Range("C" & r & ":O" & r).ClearContents
+            stateWs.Cells(r, "H").Value2 = "이력 삭제"
+            stateWs.Cells(r, "I").Value2 = "이력 삭제"
+            stateWs.Cells(r, "J").Value2 = Format$(Now, "yyyy-mm-dd hh:nn:ss")
+            If site = WebCurrentSite() Then cleared(sourceId) = True
+            ReconcileDeletedWebHistory = True
+        End If
+NextState:
+    Next r
+    If stateUnprotected Then stateWs.Protect UserInterfaceOnly:=True
+    If cleared.Count = 0 Then Exit Function
+    taskLastRow = GetLastDataRow(ws)
+    For r = DATA_START_ROW To taskLastRow
+        If cleared.Exists(GetWebTaskId(ws, r)) Then
+            owner = WebRegistrationRootRow(ws, r, taskLastRow)
+            If owner = r Then
+                Set resultRange = ws.Range(COL_WEB_RESULT & r & ":" & COL_WEB_RESULT & GetTaskSubtreeEndRow(ws, r, taskLastRow))
+            ElseIf owner = 0 Then
+                Set resultRange = ws.Cells(r, COL_WEB_RESULT)
+            Else
+                GoTo NextTask
+            End If
+            If Application.CountA(resultRange) > 0 Then
+                resultRange.ClearContents
+                ReconcileDeletedWebHistory = True
+            End If
+        End If
+NextTask:
+    Next r
+    Exit Function
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If stateUnprotected Then stateWs.Protect UserInterfaceOnly:=True
+    On Error GoTo 0
+    Err.Raise errorNumber, "ReconcileDeletedWebHistory", errorText
+End Function
 
 Public Sub RememberWebGroupBases(ByVal ws As Worksheet)
     Dim r As Long, raw As Variant, key As String
@@ -418,6 +522,7 @@ Public Function WebTaskStructureIssue(ByVal ws As Worksheet) As String
     Next taskWs
     For r = WEB_STATE_FIRST_ROW To stateWs.Cells(stateWs.Rows.Count, "A").End(xlUp).Row
         sourceId = CStr(stateWs.Cells(r, "A").Value2)
+        If CStr(stateWs.Cells(r, "I").Value2) = "이력 삭제" Then GoTo NextState
         If Not WebHasAnyConnection(sourceId) Then GoTo NextState
         taskRow = 0: foundAnywhere = rowMap.Exists(sourceId)
         If foundAnywhere Then
