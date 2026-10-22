@@ -1,6 +1,8 @@
 ' Append to modWebUpload only in a disposable workbook. No real network calls.
 ' 2026-10-22 김좌현 수정 : 등록단위 동기화·신규/갱신·서버충돌·요청번호 연결 및 미확인 복구 검증
 ' 2026-10-22 김좌현 수정 : 기존 갱신 기본값과 신규 등록 명시 선택, 연결 소실 및 모드 변조 차단 검증
+' 2026-10-22 김좌현 수정 : 이력 삭제 후 새로고침의 선택적 잠금 해제와 저장 후 재복구 방지 검증
+' 2026-10-22 김좌현 수정 : 반복 웹 초기화의 저장 상태 복원과 신규 식별값·이력 정리 변경 감지 검증
 Public Function RunWebUploadRegression() As String
     Dim ws As Worksheet, config As Worksheet, preview As Worksheet, log As Worksheet
     Dim form As Object, item As Object, state As Object, server As Object, session As Object, items As Collection
@@ -405,11 +407,281 @@ Public Function RunWebUploadRegression() As String
     WebUploadRegressionContains WebTaskStructureIssue(ws), "다른 등록 단위", "registered child cannot become independent registration unit", checked
     ws.Cells(7, COL_LEVEL).Value2 = 3
     WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "restored child ownership accepted", checked
+    stage = "deleted journal entries release only unsupported web connections on refresh"
+    WebUploadRegressionHistoryRefresh ws, config, checked
+    stage = "initialization preserves clean saves without hiding persistent changes"
+    WebUploadRegressionInitializationSavedState ws, checked
     WebUploadRegressionAssert Not mWebBusy And Not Application.EnableEvents, "busy and events restored", checked
     RunWebUploadRegression = "PASS: " & CStr(checked) & " web upload integration assertions"
     Exit Function
 Failed:
     RunWebUploadRegression = "FAIL during " & stage & ": " & Err.Source & " / " & Err.Description
+End Function
+
+Private Sub WebUploadRegressionHistoryRefresh(ByVal ws As Worksheet, ByVal config As Worksheet, ByRef checked As Long)
+    Dim log As Worksheet, connection As Worksheet, state As Object, item As Object
+    Dim selectedId As String, neighborId As String, currentSite As String, oldSite As String
+    Dim businessSnapshot As String, identitySnapshot As String, selectionSnapshot As String, connectionSnapshot As String
+    Dim neighborSnapshot As String, oldSiteSnapshot As String, legacySnapshot As String
+    Dim r As Long, legacyRow As Long, oldStateRow As Long, logLastRow As Long, previousAlerts As Boolean
+    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    Set connection = ThisWorkbook.Worksheets(WEB_STATE_SHEET_NAME)
+    currentSite = WebCurrentSite()
+    oldSite = "http://history-old.invalid/support/"
+    selectedId = GetWebTaskId(ws, 6)
+    neighborId = GetWebTaskId(ws, 8)
+    ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_ENABLED & "8").Value2 = "Y"
+    Set mPreviewSource = ws
+    Set item = BuildWebItemForRow(ws, 8)
+    RecordWebOutcome item, "등록완료", "RQHISTORYNEIGHBOR", "unrelated history fixture"
+    Set item = BuildWebItemForRow(ws, 6)
+    config.Range("B2").Value2 = oldSite
+    RecordWebOutcome item, "등록완료", "RQHISTORYOLD", "valid old-site history fixture"
+    config.Range("B2").Value2 = currentSite
+    RecordWebOutcome item, "갱신실패", "RQOWNERSHIP", "latest history fixture"
+    ws.Cells(9, COL_WEB_LEVEL).Value2 = 1
+    Set item = BuildWebItemForRow(ws, 9)
+    RecordWebOutcome item, "등록실패", "RQHISTORYFAILED", "failed registration retains its journal without a state request number"
+    connectionSnapshot = WebUploadRegressionRangeSnapshot(connection.Range("A2:O" & connection.Cells(connection.Rows.Count, "A").End(xlUp).Row))
+    WebUploadMockReset "success"
+    RefreshWebHistoryState ws
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(connection.Range("A2:O" & connection.Cells(connection.Rows.Count, "A").End(xlUp).Row)), connectionSnapshot, "valid current and former-site history preserve all connection values", checked
+    WebUploadRegressionContains CStr(ws.Cells(9, COL_WEB_RESULT).Value2), "등록실패", "failed registration display survives while its candidate-number journal remains", checked
+    WebUploadRegressionClearHistory log, GetWebTaskId(ws, 9), currentSite
+    RefreshWebHistoryState ws
+    connectionSnapshot = WebUploadRegressionRangeSnapshot(connection.Range("A2:O" & connection.Cells(connection.Rows.Count, "A").End(xlUp).Row))
+    log.Unprotect
+    log.Rows(log.Cells(log.Rows.Count, "A").End(xlUp).Row).Delete
+    log.Protect UserInterfaceOnly:=True
+    RefreshWebHistoryState ws
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(connection.Range("A2:O" & connection.Cells(connection.Rows.Count, "A").End(xlUp).Row)), connectionSnapshot, "deleting only latest attempt retains earlier evidence for same request", checked
+    ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    WebUploadRegressionAssert ws.Cells(6, COL_WEB_REQUESTER).Locked And ws.Cells(8, COL_WEB_REQUESTER).Locked, "supported requests remain locked before journal removal", checked
+    businessSnapshot = WebUploadRegressionBusinessSnapshot(ws)
+    identitySnapshot = WebUploadRegressionIdSnapshot(ws)
+    selectionSnapshot = WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8"))
+    Set state = WebTaskState(neighborId)
+    neighborSnapshot = WebUploadRegressionStateSnapshot(state)
+    For r = 2 To connection.Cells(connection.Rows.Count, "A").End(xlUp).Row
+        If CStr(connection.Cells(r, "A").Value2) = selectedId And CStr(connection.Cells(r, "B").Value2) = oldSite Then oldStateRow = r: Exit For
+    Next r
+    WebUploadRegressionAssert oldStateRow > 0, "former-site connection fixture exists", checked
+    oldSiteSnapshot = WebUploadRegressionRangeSnapshot(connection.Range("A" & oldStateRow & ":O" & oldStateRow))
+    WebUploadRegressionClearHistory log, selectedId, currentSite
+    Set mPreviewItems = New Collection
+    mPreviewItems.Add item
+    Set mPreviewSource = ws
+    mPreviewSnapshot = "stale-deleted-history-preview"
+    mPreviewMode = "기존 갱신"
+    Set mLinkSource = ws
+    mLinkSourceId = selectedId
+    mLinkRequestNo = "RQOWNERSHIP"
+    RefreshWebHistoryState ws
+    Set state = WebTaskState(selectedId)
+    WebUploadRegressionEqual CStr(state("RequestNo")) & CStr(state("PendingNo")), "", "deleting all matching history clears current-site binding", checked
+    WebUploadRegressionEqual CStr(state("Outcome")), "이력 삭제", "deleted history leaves an explicit tombstone", checked
+    WebUploadRegressionEqual WebUploadRegressionBusinessSnapshot(ws), businessSnapshot, "history reconciliation preserves body dates minutes and report data", checked
+    WebUploadRegressionEqual WebUploadRegressionIdSnapshot(ws), identitySnapshot, "history reconciliation preserves stable task IDs", checked
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8")), selectionSnapshot, "history reconciliation preserves Y selection basis and web values", checked
+    WebUploadRegressionEqual CStr(ws.Cells(6, COL_WEB_RESULT).Value2) & CStr(ws.Cells(7, COL_WEB_RESULT).Value2), "", "unsupported root and child result displays are cleared", checked
+    WebUploadRegressionAssert Not ws.Cells(6, COL_WEB_REQUESTER).Locked And Not ws.Cells(7, COL_WEB_REQUESTER).Locked, "deleted current-site history releases root and inherited requester", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_REQUESTER).Font.Color), CStr(ws.Cells(7, COL_REQUEST).Font.Color), "released requester is no longer grey", checked
+    Set state = WebTaskState(neighborId)
+    WebUploadRegressionEqual WebUploadRegressionStateSnapshot(state), neighborSnapshot, "other registration unit keeps its request and baseline", checked
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(connection.Range("A" & oldStateRow & ":O" & oldStateRow)), oldSiteSnapshot, "valid former-site evidence keeps its separate binding", checked
+    WebUploadRegressionAssert ws.Cells(8, COL_WEB_REQUESTER).Locked And WebGroupIsLocked(ws, 5), "remaining requests keep their requester and group locks", checked
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "history tombstone does not invalidate a supported other-site connection", checked
+    WebUploadRegressionAssert ws.ProtectContents And Not Application.EnableEvents, "history refresh restores protected sheet and event state", checked
+    WebUploadRegressionAssert mPreviewItems Is Nothing And Len(mPreviewSnapshot) = 0 And Len(mPreviewMode) = 0, "history deletion invalidates prepared upload", checked
+    WebUploadRegressionAssert mLinkSource Is Nothing And Len(mLinkSourceId) = 0, "history deletion invalidates pending connection review", checked
+    WebUploadRegressionAssert Not ThisWorkbook.Saved, "history reconciliation does not auto-save the workbook", checked
+
+    log.Unprotect
+    legacyRow = log.Cells(log.Rows.Count, "A").End(xlUp).Row + 1
+    log.Cells(legacyRow, "A").Value = Now
+    log.Cells(legacyRow, "B").Value2 = ws.Name
+    log.Cells(legacyRow, "C").Value2 = selectedId
+    log.Cells(legacyRow, "D").Value2 = "RQHISTORYLEGACY"
+    log.Cells(legacyRow, "E").Value2 = "등록완료"
+    log.Protect UserInterfaceOnly:=True
+    legacySnapshot = WebUploadRegressionRangeSnapshot(log.Range("A" & legacyRow & ":M" & legacyRow))
+    MigrateLegacyWebJournal
+    Set state = WebTaskState(selectedId)
+    WebUploadRegressionEqual CStr(state("RequestNo")), "", "same-site legacy migration does not restore deleted history", checked
+    config.Range("B2").Value2 = "http://history-future.invalid/support/"
+    MigrateLegacyWebJournal
+    Set state = WebTaskState(selectedId)
+    WebUploadRegressionEqual CStr(state("RequestNo")) & CStr(state("PendingNo")), "", "site changes cannot revive obsolete legacy request", checked
+    config.Range("B2").Value2 = currentSite
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(log.Range("A" & legacyRow & ":M" & legacyRow)), legacySnapshot, "history reconciliation does not rewrite remaining journal rows", checked
+
+    WebUploadRegressionClearHistory log, neighborId, currentSite
+    EnsureConfigSheet
+    ws.Activate
+    RefreshGanttOnly False
+    Set state = WebTaskState(neighborId)
+    WebUploadRegressionEqual CStr(state("Outcome")), "이력 삭제", "Gantt-only refresh reconciles removed task history", checked
+    WebUploadRegressionEqual CStr(state("RequestNo")), "", "Gantt-only refresh clears unsupported neighbor binding", checked
+    WebUploadRegressionAssert Not ws.Cells(8, COL_WEB_REQUESTER).Locked, "Gantt-only refresh removes requester lock", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_ENABLED).Value2), "Y", "Gantt-only refresh preserves upload selection", checked
+    WebUploadRegressionAssert WebTaskHasOtherSiteConnection(selectedId), "Gantt-only refresh retains supported former-site binding", checked
+    WebUploadRegressionAssert Not Application.EnableEvents, "Gantt-only refresh restores disabled events", checked
+
+    previousAlerts = Application.DisplayAlerts
+    Application.DisplayAlerts = False
+    log.Delete
+    Application.DisplayAlerts = previousAlerts
+    Set log = Nothing
+    RefreshGanttSheet False
+    For r = 2 To connection.Cells(connection.Rows.Count, "A").End(xlUp).Row
+        WebUploadRegressionEqual CStr(connection.Cells(r, "D").Value2) & CStr(connection.Cells(r, "E").Value2), "", "all-refresh clears every unsupported site after journal sheet deletion", checked
+        WebUploadRegressionEqual CStr(connection.Cells(r, "I").Value2), "이력 삭제", "deleted journal sheet retains inactive state identities", checked
+    Next r
+    WebUploadRegressionAssert Not WebGroupIsLocked(ws, 5) And Not ws.Cells(5, COL_WEB_LEVEL).Locked, "all-refresh unlocks basis when every history record is removed", checked
+    WebUploadRegressionAssert Not ws.Cells(6, COL_WEB_REQUESTER).Locked And Not ws.Cells(8, COL_WEB_REQUESTER).Locked, "all-refresh releases all unsupported requester locks", checked
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8")), selectionSnapshot, "both refresh paths preserve all web selections", checked
+
+    ws.Unprotect
+    ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "8").Value2 = 3
+    Set item = BuildWebItemForRow(ws, 7)
+    Set mPreviewSource = ws
+    RecordWebOutcome item, "등록완료", "RQHISTORYCHILD", "new child registration after deleting old parent history"
+    RefreshWebHistoryState ws
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_RESULT).Value2), "등록완료 RQHISTORYCHILD", "old parent tombstone does not clear a new child unit result", checked
+    Set state = WebTaskState(GetWebTaskId(ws, 7))
+    WebUploadRegressionEqual CStr(state("RequestNo")), "RQHISTORYCHILD", "old parent tombstone preserves the new child connection", checked
+    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    WebUploadRegressionClearHistory log, GetWebTaskId(ws, 7), currentSite
+    RefreshWebHistoryState ws
+    ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "8").Value2 = 2
+    ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+
+    Set item = BuildWebItemForRow(ws, 8)
+    Set mPreviewSource = ws
+    RecordWebOutcome item, "등록 시작", "RQHISTORYUNKNOWN", "unresolved history fixture"
+    RecordWebOutcome item, "결과 미확인", "RQHISTORYUNKNOWN", "unresolved history fixture"
+    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    log.Unprotect
+    logLastRow = log.Cells(log.Rows.Count, "A").End(xlUp).Row
+    log.Range("A2:M" & Application.Max(2, logLastRow)).ClearContents
+    log.Protect UserInterfaceOnly:=True
+    PrepareWebTaskSheet ws
+    Set state = WebTaskState(neighborId)
+    WebUploadRegressionEqual CStr(state("PendingNo")), "", "setup refresh releases candidate whose entire journal was cleared", checked
+    WebUploadRegressionAssert Not WebStateUnresolved(state) And Not WebGroupIsLocked(ws, 5), "clearing unresolved history releases its group", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_ENABLED).Value2), "Y", "unresolved history reset retains upload selection", checked
+    WebUploadRegressionAssert ws.ProtectContents And Not ws.Cells(8, COL_WEB_REQUESTER).Locked, "setup refresh reapplies protection with requester editable", checked
+    WebUploadRegressionEqual CStr(WebUploadMockOpenCount + WebUploadMockReadCount + WebUploadMockLoadCount), "0", "history and both Gantt refresh paths perform no web reads", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount + WebUploadMockUpdateCount), "0", "history refresh performs no web writes", checked
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "remaining hierarchy remains valid after history removal", checked
+End Sub
+
+Private Sub WebUploadRegressionInitializationSavedState(ByVal ws As Worksheet, ByRef checked As Long)
+    Dim item As Object, state As Object, log As Worksheet
+    Dim previousId As String, generatedId As String, sourceId As String, businessSnapshot As String, selectionSnapshot As String
+    InitializeWebUpload
+    ThisWorkbook.Save
+    WebUploadRegressionAssert ThisWorkbook.Saved, "settled fixture begins initialization from a clean save", checked
+    InitializeWebUpload
+    WebUploadRegressionAssert ThisWorkbook.Saved, "unchanged web initialization preserves clean saved state", checked
+    InitializeWebUpload
+    WebUploadRegressionAssert ThisWorkbook.Saved, "repeated unchanged initialization remains clean", checked
+
+    previousId = GetWebTaskId(ws, 9)
+    UnprotectTaskSheet ws
+    ws.Cells(9, COL_WEB_TASK_ID).ClearContents
+    ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    ThisWorkbook.Save
+    WebUploadRegressionAssert ThisWorkbook.Saved And Len(GetWebTaskId(ws, 9)) = 0, "missing-ID fixture is persisted before initialization", checked
+    InitializeWebUpload
+    generatedId = GetWebTaskId(ws, 9)
+    WebUploadRegressionAssert Len(generatedId) = 36 And generatedId <> previousId, "initialization generates a new persistent GUID for missing identity", checked
+    WebUploadRegressionAssert Not ThisWorkbook.Saved, "generated GUID remains a meaningful unsaved change", checked
+    InitializeWebUpload
+    WebUploadRegressionAssert Not ThisWorkbook.Saved, "initialization does not clear an existing dirty state", checked
+    WebUploadRegressionEqual GetWebTaskId(ws, 9), generatedId, "dirty-state initialization keeps the generated identity stable", checked
+
+    Set item = BuildWebItemForRow(ws, 8)
+    sourceId = CStr(item("SourceId"))
+    Set mPreviewSource = ws
+    RecordWebOutcome item, "등록완료", "RQOPENSAVE", "saved-state reconciliation fixture"
+    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    WebUploadRegressionClearHistory log, sourceId, WebCurrentSite()
+    businessSnapshot = WebUploadRegressionBusinessSnapshot(ws)
+    selectionSnapshot = WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8"))
+    ThisWorkbook.Save
+    Set state = WebTaskState(sourceId)
+    WebUploadRegressionAssert ThisWorkbook.Saved And CStr(state("RequestNo")) = "RQOPENSAVE", "deleted-history fixture is saved with prior binding still present", checked
+    InitializeWebUpload
+    Set state = WebTaskState(sourceId)
+    WebUploadRegressionEqual CStr(state("Outcome")), "이력 삭제", "initialization reconciles a persisted history deletion", checked
+    WebUploadRegressionEqual CStr(state("RequestNo")) & CStr(state("PendingNo")), "", "initialization clears unsupported persisted request numbers", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_RESULT).Value2), "", "initialization clears unsupported persisted result display", checked
+    WebUploadRegressionAssert Not ThisWorkbook.Saved, "history reconciliation remains a meaningful unsaved change", checked
+    WebUploadRegressionEqual WebUploadRegressionBusinessSnapshot(ws), businessSnapshot, "saved-state handling preserves business values", checked
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8")), selectionSnapshot, "saved-state handling preserves Y selection and web fields", checked
+    WebUploadRegressionAssert ws.ProtectContents And Not ws.Cells(8, COL_WEB_REQUESTER).Locked, "meaningful initialization preserves protection and releases requester", checked
+End Sub
+
+Public Function RunSavedWebHistoryRegression() As String
+    Dim ws As Worksheet, state As Object, r As Variant, checked As Long
+    Dim businessSnapshot As String, identitySnapshot As String
+    On Error GoTo Failed
+    Set ws = ThisWorkbook.Worksheets("WebUploadFixture")
+    businessSnapshot = WebUploadRegressionBusinessSnapshot(ws)
+    identitySnapshot = WebUploadRegressionIdSnapshot(ws)
+    InitializeWebUpload
+    WebUploadRegressionEqual WebCurrentSite(), "http://fixture.invalid/support/", "saved history fixture retains original site", checked
+    WebUploadRegressionEqual WebUploadRegressionBusinessSnapshot(ws), businessSnapshot, "reopening after history deletion preserves business data", checked
+    WebUploadRegressionEqual WebUploadRegressionIdSnapshot(ws), identitySnapshot, "reopening preserves persistent task identities", checked
+    WebUploadRegressionEqual CStr(ws.Cells(6, COL_REQUEST).Value2), "세부 그룹", "original group body survives save and reopen", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_MODIFICATION).Value2), "같은 등록 단위 안의 본문 변경", "child body survives save and reopen", checked
+    For Each r In Array(6, 8)
+        Set state = WebTaskState(GetWebTaskId(ws, CLng(r)))
+        WebUploadRegressionEqual CStr(state("Outcome")), "이력 삭제", "deleted-history tombstone survives reopening", checked
+        WebUploadRegressionEqual CStr(state("RequestNo")) & CStr(state("PendingNo")), "", "reopening does not revive confirmed or candidate request", checked
+        WebUploadRegressionAssert Not WebTaskHasOtherSiteConnection(GetWebTaskId(ws, CLng(r))), "reopening does not revive old-site state", checked
+        WebUploadRegressionEqual CStr(ws.Cells(CLng(r), COL_WEB_ENABLED).Value2), "Y", "reopening preserves explicit web selection", checked
+        WebUploadRegressionEqual CStr(ws.Cells(CLng(r), COL_WEB_RESULT).Value2), "", "unsupported result remains empty after reopening", checked
+        WebUploadRegressionEqual CStr(ws.Cells(CLng(r), COL_WORK_MINUTES).Value2), "30", "work minutes survive history deletion and reopening", checked
+        WebUploadRegressionAssert Not ws.Cells(CLng(r), COL_WEB_REQUESTER).Locked, "requester remains editable after reopening", checked
+        WebUploadRegressionEqual CStr(ws.Cells(CLng(r), COL_WEB_REQUESTER).Font.Color), CStr(ws.Cells(CLng(r), COL_REQUEST).Font.Color), "requester stays in normal text color after reopening", checked
+    Next r
+    WebUploadRegressionAssert Not ws.Cells(7, COL_WEB_REQUESTER).Locked, "inherited child requester stays editable", checked
+    WebUploadRegressionAssert Not WebGroupIsLocked(ws, 5) And Not ws.Cells(5, COL_WEB_LEVEL).Locked, "group basis remains unlocked after reopening", checked
+    WebUploadRegressionAssert ws.ProtectContents And Not Application.EnableEvents, "reopening preserves protection and disabled events", checked
+    RunSavedWebHistoryRegression = "PASS: " & CStr(checked) & " saved web history assertions"
+    Exit Function
+Failed:
+    RunSavedWebHistoryRegression = "FAIL during saved web history: " & Err.Source & " / " & Err.Description
+End Function
+
+Private Sub WebUploadRegressionClearHistory(ByVal log As Worksheet, ByVal sourceId As String, ByVal site As String)
+    Dim r As Long
+    log.Unprotect
+    For r = 2 To log.Cells(log.Rows.Count, "A").End(xlUp).Row
+        If CStr(log.Cells(r, "C").Value2) = sourceId And CStr(log.Cells(r, "L").Value2) = site Then
+            log.Range("A" & r & ":M" & r).ClearContents
+        End If
+    Next r
+    log.Protect UserInterfaceOnly:=True
+End Sub
+
+Private Function WebUploadRegressionRangeSnapshot(ByVal cells As Range) As String
+    Dim cell As Range, value As String
+    For Each cell In cells.Cells
+        value = CStr(cell.Value2)
+        WebUploadRegressionRangeSnapshot = WebUploadRegressionRangeSnapshot & CStr(Len(value)) & ":" & value
+    Next cell
+End Function
+
+Private Function WebUploadRegressionStateSnapshot(ByVal state As Object) As String
+    Dim field As Variant, value As String
+    For Each field In Array("SourceId", "Site", "Account", "RequestNo", "PendingNo", "GroupId", "Basis", _
+                            "Operation", "Outcome", "AttemptedAt", "ConfirmedAt", "Baseline", "Members", "PendingSnapshot", "RequesterCode")
+        value = CStr(state(CStr(field)))
+        WebUploadRegressionStateSnapshot = WebUploadRegressionStateSnapshot & CStr(Len(value)) & ":" & value
+    Next field
 End Function
 
 Private Sub WebUploadRegressionSelectMode(ByVal executionMode As String)

@@ -140,6 +140,8 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     UnprotectTaskSheet ws
+    ' 2026-10-22 김좌현 수정 : 삭제한 웹등록 이력의 연결과 잠금을 두 새로고침에 반영
+    RefreshWebHistoryState ws
     If includeWebSetup Then
         EnsureConfigSheet
         SetupDataHeaders ws
