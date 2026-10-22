@@ -2,6 +2,7 @@
 ' 2026-10-22 김좌현 수정 : 등록단위 동기화·신규/갱신·서버충돌·요청번호 연결 및 미확인 복구 검증
 ' 2026-10-22 김좌현 수정 : 기존 갱신 기본값과 신규 등록 명시 선택, 연결 소실 및 모드 변조 차단 검증
 ' 2026-10-22 김좌현 수정 : 이력 삭제 후 새로고침의 선택적 잠금 해제와 저장 후 재복구 방지 검증
+' 2026-10-22 김좌현 수정 : 반복 웹 초기화의 저장 상태 복원과 신규 식별값·이력 정리 변경 감지 검증
 Public Function RunWebUploadRegression() As String
     Dim ws As Worksheet, config As Worksheet, preview As Worksheet, log As Worksheet
     Dim form As Object, item As Object, state As Object, server As Object, session As Object, items As Collection
@@ -408,6 +409,8 @@ Public Function RunWebUploadRegression() As String
     WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "restored child ownership accepted", checked
     stage = "deleted journal entries release only unsupported web connections on refresh"
     WebUploadRegressionHistoryRefresh ws, config, checked
+    stage = "initialization preserves clean saves without hiding persistent changes"
+    WebUploadRegressionInitializationSavedState ws, checked
     WebUploadRegressionAssert Not mWebBusy And Not Application.EnableEvents, "busy and events restored", checked
     RunWebUploadRegression = "PASS: " & CStr(checked) & " web upload integration assertions"
     Exit Function
@@ -571,6 +574,53 @@ Private Sub WebUploadRegressionHistoryRefresh(ByVal ws As Worksheet, ByVal confi
     WebUploadRegressionEqual CStr(WebUploadMockOpenCount + WebUploadMockReadCount + WebUploadMockLoadCount), "0", "history and both Gantt refresh paths perform no web reads", checked
     WebUploadRegressionEqual CStr(WebUploadMockPostCount + WebUploadMockUpdateCount), "0", "history refresh performs no web writes", checked
     WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "remaining hierarchy remains valid after history removal", checked
+End Sub
+
+Private Sub WebUploadRegressionInitializationSavedState(ByVal ws As Worksheet, ByRef checked As Long)
+    Dim item As Object, state As Object, log As Worksheet
+    Dim previousId As String, generatedId As String, sourceId As String, businessSnapshot As String, selectionSnapshot As String
+    InitializeWebUpload
+    ThisWorkbook.Save
+    WebUploadRegressionAssert ThisWorkbook.Saved, "settled fixture begins initialization from a clean save", checked
+    InitializeWebUpload
+    WebUploadRegressionAssert ThisWorkbook.Saved, "unchanged web initialization preserves clean saved state", checked
+    InitializeWebUpload
+    WebUploadRegressionAssert ThisWorkbook.Saved, "repeated unchanged initialization remains clean", checked
+
+    previousId = GetWebTaskId(ws, 9)
+    UnprotectTaskSheet ws
+    ws.Cells(9, COL_WEB_TASK_ID).ClearContents
+    ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    ThisWorkbook.Save
+    WebUploadRegressionAssert ThisWorkbook.Saved And Len(GetWebTaskId(ws, 9)) = 0, "missing-ID fixture is persisted before initialization", checked
+    InitializeWebUpload
+    generatedId = GetWebTaskId(ws, 9)
+    WebUploadRegressionAssert Len(generatedId) = 36 And generatedId <> previousId, "initialization generates a new persistent GUID for missing identity", checked
+    WebUploadRegressionAssert Not ThisWorkbook.Saved, "generated GUID remains a meaningful unsaved change", checked
+    InitializeWebUpload
+    WebUploadRegressionAssert Not ThisWorkbook.Saved, "initialization does not clear an existing dirty state", checked
+    WebUploadRegressionEqual GetWebTaskId(ws, 9), generatedId, "dirty-state initialization keeps the generated identity stable", checked
+
+    Set item = BuildWebItemForRow(ws, 8)
+    sourceId = CStr(item("SourceId"))
+    Set mPreviewSource = ws
+    RecordWebOutcome item, "등록완료", "RQOPENSAVE", "saved-state reconciliation fixture"
+    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    WebUploadRegressionClearHistory log, sourceId, WebCurrentSite()
+    businessSnapshot = WebUploadRegressionBusinessSnapshot(ws)
+    selectionSnapshot = WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8"))
+    ThisWorkbook.Save
+    Set state = WebTaskState(sourceId)
+    WebUploadRegressionAssert ThisWorkbook.Saved And CStr(state("RequestNo")) = "RQOPENSAVE", "deleted-history fixture is saved with prior binding still present", checked
+    InitializeWebUpload
+    Set state = WebTaskState(sourceId)
+    WebUploadRegressionEqual CStr(state("Outcome")), "이력 삭제", "initialization reconciles a persisted history deletion", checked
+    WebUploadRegressionEqual CStr(state("RequestNo")) & CStr(state("PendingNo")), "", "initialization clears unsupported persisted request numbers", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_RESULT).Value2), "", "initialization clears unsupported persisted result display", checked
+    WebUploadRegressionAssert Not ThisWorkbook.Saved, "history reconciliation remains a meaningful unsaved change", checked
+    WebUploadRegressionEqual WebUploadRegressionBusinessSnapshot(ws), businessSnapshot, "saved-state handling preserves business values", checked
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8")), selectionSnapshot, "saved-state handling preserves Y selection and web fields", checked
+    WebUploadRegressionAssert ws.ProtectContents And Not ws.Cells(8, COL_WEB_REQUESTER).Locked, "meaningful initialization preserves protection and releases requester", checked
 End Sub
 
 Public Function RunSavedWebHistoryRegression() As String

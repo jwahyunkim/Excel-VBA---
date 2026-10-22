@@ -4,6 +4,7 @@ Option Explicit
 ' 2026-10-22 김좌현 수정 : 등록 단위 동기화, 요청번호 연결과 충돌 확인을 포함한 신규/갱신 실행
 ' 2026-10-22 김좌현 수정 : 기존 갱신을 기본으로 하고 요청번호 없는 업무는 연결 필요로 차단
 ' 2026-10-22 김좌현 수정 : 삭제한 등록 이력을 새로고침에 반영하고 요청자 잠금 해제
+' 2026-10-22 김좌현 수정 : 웹 초기화의 실제 값이 같을 때만 저장 상태를 복원
 
 Private mPreviewItems As Collection
 Private mPreviewSource As Worksheet
@@ -676,12 +677,58 @@ Public Sub SynchronizeWebUnits(ByVal ws As Worksheet)
     Next r
 End Sub
 
+Private Function WebInitializationRangeSnapshot(ByVal cells As Range) As String
+    Dim values As Variant, parts() As String, r As Long, c As Long, i As Long, value As String
+    values = cells.Formula
+    ReDim parts(1 To UBound(values, 1) * UBound(values, 2))
+    For r = 1 To UBound(values, 1)
+        For c = 1 To UBound(values, 2)
+            If IsError(values(r, c)) Then
+                value = cells.Cells(r, c).Text
+            Else
+                value = CStr(values(r, c))
+            End If
+            i = i + 1
+            parts(i) = CStr(VarType(values(r, c))) & ":" & CStr(Len(value)) & ":" & value
+        Next c
+    Next r
+    WebInitializationRangeSnapshot = cells.Address & "|" & Join(parts, vbNullString)
+End Function
+
+Private Function WebInitializationSnapshot() As String
+    Dim ws As Worksheet, lastRow As Long, c As Long, lastColumn As Long, value As String
+    For Each ws In ThisWorkbook.Worksheets
+        value = vbNullString
+        lastColumn = 0
+        Select Case ws.Name
+            Case WEB_CONFIG_SHEET_NAME: lastColumn = 26
+            Case WEB_STATE_SHEET_NAME: lastColumn = 15
+            Case WEB_LOG_SHEET_NAME: lastColumn = 13
+        End Select
+        If lastColumn > 0 Then
+            lastRow = 1
+            For c = 1 To lastColumn
+                lastRow = Application.Max(lastRow, ws.Cells(ws.Rows.Count, c).End(xlUp).Row)
+            Next c
+            value = WebInitializationRangeSnapshot(ws.Range(ws.Cells(1, 1), ws.Cells(lastRow, lastColumn)))
+        ElseIf IsWebTaskSheet(ws) Then
+            lastRow = Application.Max(DATA_START_ROW, GetLastDataRow(ws))
+            value = WebInitializationRangeSnapshot(ws.Range("B" & HEADER_ROW & ":AE" & HEADER_ROW)) & _
+                    WebInitializationRangeSnapshot(ws.Range(COL_WEB_ENABLED & DATA_START_ROW & ":" & COL_WEB_TASK_ID & lastRow))
+        End If
+        If Len(value) > 0 Then WebInitializationSnapshot = WebInitializationSnapshot & _
+            CStr(Len(ws.Name)) & ":" & ws.Name & CStr(Len(value)) & ":" & value
+    Next ws
+End Function
+
 Public Sub InitializeWebUpload()
     Dim ws As Worksheet, eventsEnabled As Boolean, previousSheet As Object, errorNumber As Long, errorText As String
-    Dim stepName As String
+    Dim stepName As String, wasSaved As Boolean, initialValues As String
+    wasSaved = ThisWorkbook.Saved
     eventsEnabled = Application.EnableEvents
     Set previousSheet = ThisWorkbook.ActiveSheet
     On Error GoTo Failed
+    If wasSaved Then initialValues = WebInitializationSnapshot()
     Application.EnableEvents = False
     stepName = "웹 설정"
     EnsureWebConfigSheet
@@ -702,6 +749,9 @@ Public Sub InitializeWebUpload()
     MigrateLegacyWebJournal
     previousSheet.Activate
     Application.EnableEvents = eventsEnabled
+    If wasSaved Then
+        If initialValues = WebInitializationSnapshot() Then ThisWorkbook.Saved = True
+    End If
     Exit Sub
 Failed:
     errorNumber = Err.Number: errorText = Err.Description

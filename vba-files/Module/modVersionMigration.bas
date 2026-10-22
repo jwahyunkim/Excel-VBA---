@@ -3,6 +3,7 @@ Option Explicit
 ' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로 제거 후 기존 버튼을 모두 새로고침으로 이관
 ' 2026-10-22 김좌현 수정 : 모두/간트 새로고침 버튼 분리와 웹 등록 모드 버튼 배치 연결
 ' 2026-10-22 김좌현 수정 : 웹 설정/미리보기/이력 시트를 업무 이전 및 버튼 처리에서 제외
+' 2026-10-22 김좌현 수정 : 배포정보 등 업무 헤더가 없는 시트의 버튼 정비와 보호 해제 제외
 ' 2026-10-20 김좌현 수정 : 기존 디자인의 완료 숨김 버튼 선택/생성과 이관 후 상태 반영
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
 ' 2026-10-20 김좌현 수정 : 항목 숨김 버튼과 선택 항목 제거 및 순서 정리
@@ -632,6 +633,8 @@ Public Sub UpgradeGanttRefreshButtons(ByVal ws As Worksheet)
     Dim errNumber As Long, errDescription As String
 
     If Not IsTaskSheet(ws) Then Exit Sub
+    If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) <> "No." Or _
+       CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) <> "Level" Then Exit Sub
     On Error GoTo Failed
     On Error Resume Next
     Set createButton = ws.Shapes("btnGanttCreate")
