@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 새로고침 서명 계산의 열 번호를 한 번만 조회해 반복 Range 접근 제거
 ' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로를 제거하고 모두 새로고침으로 버튼 연결 통일
 ' 2026-10-22 김좌현 수정 : 모두/간트 새로고침 분리, 중복 렌더 제거와 변경된 레이아웃만 재구성
 ' 2026-10-22 김좌현 수정 : 웹 유틸리티 시트 제외 및 웹등록 설정/버튼 초기화
@@ -47,12 +48,14 @@ End Sub
 Private Function TaskRefreshSignature(ByVal ws As Worksheet, ByVal lastRow As Long, _
                                       ByVal structureOnly As Boolean) As String
     Dim values As Variant, r As Long, c As Long, result As String, value As Variant
+    Dim requestOffset As Long
+    requestOffset = ws.Range(COL_REQUEST & "1").Column - ws.Range(COL_LEVEL & "1").Column + 1
     values = ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_OWNER & lastRow).Value2
     result = CStr(lastRow) & "|"
     For r = 1 To UBound(values, 1)
         For c = 1 To UBound(values, 2)
             If c = 1 Or (Not structureOnly And _
-                (c <= 5 Or c >= ws.Range(COL_REQUEST & "1").Column - ws.Range(COL_LEVEL & "1").Column + 1)) Then
+                (c <= 5 Or c >= requestOffset)) Then
                 value = values(r, c)
                 If IsError(value) Then
                     result = result & "#ERR|"
@@ -70,14 +73,19 @@ Private Function TaskVisualSignature(ByVal ws As Worksheet, ByVal lastRow As Lon
                                      ByVal firstDate As Date, ByVal lastDate As Date, _
                                      ByVal holidays As Object, ByVal workdays As Object) As String
     Dim values As Variant, r As Long, c As Long, columnNumber As Long, result As String, value As Variant
+    Dim levelColumn As Long, minorCategoryColumn As Long, requestColumn As Long, workMinutesColumn As Long
+    levelColumn = ws.Range(COL_LEVEL & "1").Column
+    minorCategoryColumn = ws.Range(COL_MINOR_CATEGORY & "1").Column
+    requestColumn = ws.Range(COL_REQUEST & "1").Column
+    workMinutesColumn = ws.Range(COL_WORK_MINUTES & "1").Column
     values = ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_STATUS & lastRow).Value2
     result = CStr(lastRow) & "|" & CLng(firstDate) & "|" & CLng(lastDate) & "|" & CLng(Date) & "|"
     result = result & Join(holidays.Keys, ",") & "|" & Join(workdays.Keys, ",") & "|"
     For r = 1 To UBound(values, 1)
         For c = 1 To UBound(values, 2)
-            columnNumber = c + ws.Range(COL_LEVEL & "1").Column - 1
-            If columnNumber <= ws.Range(COL_MINOR_CATEGORY & "1").Column Or _
-               (columnNumber >= ws.Range(COL_REQUEST & "1").Column And columnNumber <> ws.Range(COL_WORK_MINUTES & "1").Column) Then
+            columnNumber = c + levelColumn - 1
+            If columnNumber <= minorCategoryColumn Or _
+               (columnNumber >= requestColumn And columnNumber <> workMinutesColumn) Then
                 value = values(r, c)
                 If IsError(value) Then
                     result = result & "#ERR|"

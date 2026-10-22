@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 날짜 열 너비 일괄 적용과 덮어쓰는 열 맞춤 제거로 간트 새로고침 가속
 ' 2026-10-22 김좌현 수정 : 간트 서식 중복 제거, 실제 표시 영역만 초기화와 선택적 너비/계층 갱신
 ' 2026-10-22 김좌현 수정 : 웹 설정/업무 ID/작업시간 열 이전과 표시 및 보호 통합
 ' 2026-10-22 김좌현 수정 : 상태에는 괄호 안 지연 일수만 표시하고 지연 완료도 기존 완료 초록 유지
@@ -350,6 +351,8 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
     ws.Range(ws.Cells(GANTT_HEADER_ROW_MONTH, startCol), ws.Cells(GANTT_HEADER_ROW_DATE, endCol)).ClearContents
     ws.Range(ws.Cells(GANTT_HEADER_ROW_MONTH, startCol), ws.Cells(GANTT_HEADER_ROW_DATE, endCol)).ClearFormats
 
+    ws.Range(ws.Cells(1, startCol), ws.Cells(1, endCol)).EntireColumn.ColumnWidth = 3
+
     curCol = startCol
     weekStartCol = startCol
     monthStartCol = startCol
@@ -419,7 +422,6 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
             End With
         End If
 
-        ws.Columns(curCol).ColumnWidth = 3
         curCol = curCol + 1
     Next d
 
@@ -1089,19 +1091,9 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     Next c
 
     If fitLayout Then
-    ws.Columns(COL_NO).ColumnWidth = 6
-    ws.Columns(COL_LEVEL).ColumnWidth = 7
     ws.Range(COL_REQUEST & ":" & COL_MODIFICATION).WrapText = False
-    ws.Columns(COL_TYPE).ColumnWidth = 12
-    ws.Columns(COL_MAJOR_CATEGORY).ColumnWidth = 14
-    ws.Columns(COL_MIDDLE_CATEGORY).ColumnWidth = 14
-    ws.Columns(COL_MINOR_CATEGORY).ColumnWidth = 14
-    ws.Range(COL_REQUEST & ":" & COL_MODIFICATION).Columns.AutoFit
-    ws.Columns(COL_WEB_ENABLED & ":" & COL_WEB_PROGRAM_ID).ColumnWidth = 14
-    ws.Columns(COL_WEB_RESULT).ColumnWidth = 28
     ws.Columns(COL_WORK_MINUTES).ColumnWidth = 13
     If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
-    ws.Columns(COL_OWNER).ColumnWidth = 12
     ws.Columns(COL_NOTE).ColumnWidth = 4.5
     ws.Columns(COL_PLAN_START).ColumnWidth = 11
     ws.Columns(COL_PLAN_END).ColumnWidth = 11
@@ -1110,11 +1102,8 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Columns(COL_PROGRESS).ColumnWidth = 9
     ws.Columns(COL_NORMAL_PROGRESS).ColumnWidth = 11
     ws.Columns(COL_MANUAL_PROGRESS).ColumnWidth = 11
-    ws.Columns(COL_MANUAL_STATUS).ColumnWidth = 11
-    ws.Columns(COL_WEEKLY_REPORT).ColumnWidth = 12
     ws.Columns(COL_PLAN_DAYS).ColumnWidth = 9
     ws.Columns(COL_ACTUAL_DAYS).ColumnWidth = 10
-    ws.Columns(COL_STATUS).ColumnWidth = 15
 
     ' 새로고침 후 화면의 문자열이 열 너비 때문에 잘리지 않도록
     ' 분류, 업무명, 담당자 및 상태 열을 실제 내용에 맞춘다.
@@ -1137,7 +1126,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Range(COL_PLAN_START & DATA_START_ROW & ":" & COL_ACTUAL_END & lastRow).NumberFormat = "yyyy-mm-dd"
     ws.Range(COL_PROGRESS & DATA_START_ROW & ":" & COL_PROGRESS & lastRow).NumberFormat = "0%"
     ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).NumberFormat = "0%"
-    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol, fitLayout, rebuildHierarchy
+    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol, fitLayout, rebuildHierarchy, True
     RestoreTaskDetailColumnHidden ws, detailColumnHidden
     ActiveWindow.DisplayGridlines = False
 End Sub

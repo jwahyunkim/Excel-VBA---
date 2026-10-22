@@ -1,5 +1,7 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 행별 들여쓰기·굵기·배경·최소 높이를 모아 적용하고 빈 행 및 루트 경계 유지
+' 2026-10-22 김좌현 수정 : 구조가 같은 행 그룹 재생성을 생략하고 초기화된 테두리를 렌더러에 전달
 ' 2026-10-22 김좌현 수정 : 3단계 웹모드 동기화와 중복 날짜 배경/계층 재생성 제거
 ' 2026-10-22 김좌현 수정 : 웹 설정/작업시간 3단 열 접기와 기존 접기 설정 이전 및 고정 창 보존
 ' 2026-10-20 김좌현 수정 : 숨긴 행의 틀 고정 좌표 보정과 화면 변경 중 재진입 방지
@@ -745,101 +747,138 @@ End Function
 ' the task summary calculation. Build them before applying display filters.
 Public Sub ApplyTaskHierarchyAppearance(ByVal ws As Worksheet, ByVal lastRow As Long, _
                                         ByVal startCol As Long, ByVal endCol As Long, _
-                                        Optional ByVal fitLayout As Boolean = True, Optional ByVal rebuildHierarchy As Boolean = True)
-    Dim r As Long
-    Dim c As Long
-    Dim taskLevel As Long
-    Dim hasChildren As Boolean
-    Dim inRootGroup As Boolean
-    Dim isWarning As Boolean
-    Dim statusText As String
-    Dim rowFill As Long
-    Dim chartFill As Long
-    Dim rowRange As Range
-    Dim taskRange As Range
-    Dim chartCell As Range
+                                        Optional ByVal fitLayout As Boolean = True, Optional ByVal rebuildHierarchy As Boolean = True, _
+                                        Optional ByVal bordersAlreadyReset As Boolean = False)
+    Dim r As Long, i As Long, taskLevel As Long, fillIndex As Long, contentRunStart As Long
+    Dim firstDataCol As Long, hasChildren As Boolean, inRootGroup As Boolean, isWarning As Boolean
+    Dim statusText As String, rowRange As Range, taskRange As Range, rootRow As Variant
+    Dim indentRanges(1 To 3) As Range, fillRanges(1 To 5) As Range
+    Dim heightRanges(1 To 3) As Range, boldTasks As Range, darkRoots As Range
+    Dim rowHeightGroup() As Long, fillColors As Variant, rootRows As Collection
 
     EnsureTaskDetailColumnOutline ws
     If lastRow < DATA_START_ROW Or endCol < startCol Then Exit Sub
-
+    firstDataCol = ws.Range(COL_NO & "1").Column
+    ReDim rowHeightGroup(DATA_START_ROW To lastRow)
+    Set rootRows = New Collection
+    fillColors = Array(RGB(255, 255, 255), RGB(243, 247, 251), RGB(250, 252, 254), _
+                       RGB(226, 234, 242), RGB(222, 233, 243))
     With ws.Range(COL_NO & DATA_START_ROW & ":" & COL_STATUS & lastRow).Font
         .Bold = False
         .Color = RGB(40, 50, 62)
     End With
 
+    ' 2026-10-22 김좌현 수정 : 기존 행 판정은 유지하고 동일 속성의 영역만 모아 일괄 서식 적용
     For r = DATA_START_ROW To lastRow
-        If Not HasTaskContent(ws, r) Then GoTo NextTask
-
+        If Not HasTaskContent(ws, r) Then
+            If contentRunStart > 0 Then
+                ApplyHierarchyBottomRun ws, contentRunStart, r - 1, firstDataCol, endCol
+                contentRunStart = 0
+            End If
+            GoTo NextTask
+        End If
+        If contentRunStart = 0 Then contentRunStart = r
         taskLevel = GetTaskLevel(ws, r)
         hasChildren = HasChildTask(ws, r, lastRow)
         If taskLevel = 1 Then inRootGroup = hasChildren
         statusText = CStr(ws.Cells(r, COL_STATUS).Value)
         isWarning = (statusText = STATUS_HOLD Or statusText = STATUS_DELAY Or _
-                     statusText = STATUS_TODAY Or _
-                     statusText = STATUS_ERROR)
-
-        Set rowRange = ws.Range(ws.Cells(r, ws.Range(COL_NO & "1").Column), _
-                                ws.Cells(r, endCol))
+                     statusText = STATUS_TODAY Or statusText = STATUS_ERROR)
         Set taskRange = ws.Range(COL_REQUEST & r & ":" & COL_MODIFICATION & r)
-        taskRange.IndentLevel = taskLevel - 1
-        taskRange.Font.Bold = (taskLevel < 3 And (inRootGroup Or hasChildren))
+        AddHierarchyAppearanceRange indentRanges(taskLevel), taskRange
+        If taskLevel < 3 And (inRootGroup Or hasChildren) Then _
+            AddHierarchyAppearanceRange boldTasks, taskRange
 
-        rowFill = RGB(255, 255, 255)
-        chartFill = rowFill
+        fillIndex = 1
         If inRootGroup Then
-            rowFill = RGB(243, 247, 251)
-            chartFill = rowFill
-            If taskLevel = 3 Then
-                rowFill = RGB(250, 252, 254)
-                chartFill = rowFill
-            End If
+            fillIndex = 2
+            If taskLevel = 3 Then fillIndex = 3
         End If
         If taskLevel = 1 And hasChildren Then
-            rowFill = RGB(226, 234, 242)
-            chartFill = rowFill
+            fillIndex = 4
         ElseIf taskLevel = 2 And hasChildren Then
-            rowFill = RGB(222, 233, 243)
-            chartFill = RGB(236, 242, 248)
+            fillIndex = 5
         End If
-
         ' Warning rows and status cells retain their existing status colors.
         If Not isWarning Then
-            ws.Range(COL_NO & r & ":" & COL_ACTUAL_DAYS & r).Interior.Color = rowFill
-            If taskLevel = 1 And hasChildren Then
-                With ws.Range(COL_NO & r & ":" & COL_MODIFICATION & r)
-                    .Interior.Color = RGB(44, 72, 98)
-                    .Font.Color = RGB(255, 255, 255)
-                    .Font.Bold = True
-                End With
-            End If
+            AddHierarchyAppearanceRange fillRanges(fillIndex), _
+                ws.Range(COL_NO & r & ":" & COL_ACTUAL_DAYS & r)
+            If taskLevel = 1 And hasChildren Then _
+                AddHierarchyAppearanceRange darkRoots, ws.Range(COL_NO & r & ":" & COL_MODIFICATION & r)
         End If
-
-        ' Date backgrounds are owned by RenderHierarchyTaskBars below.
-        With rowRange.Borders(xlEdgeBottom)
-            .LineStyle = xlContinuous
-            .Weight = xlThin
-            .Color = RGB(221, 229, 237)
-        End With
         If taskLevel = 1 And hasChildren Then
-            If ws.Rows(r).RowHeight < 30 Then ws.Rows(r).RowHeight = 30
-            SetHierarchyRule rowRange, xlEdgeTop, RGB(68, 96, 122), xlMedium
-            SetHierarchyRule rowRange, xlEdgeBottom, RGB(126, 150, 173), xlThin
+            rootRows.Add r
+            rowHeightGroup(r) = 1
         ElseIf taskLevel = 2 Then
-            If ws.Rows(r).RowHeight < 26 Then ws.Rows(r).RowHeight = 26
+            rowHeightGroup(r) = 2
         Else
-            If ws.Rows(r).RowHeight < 23 Then ws.Rows(r).RowHeight = 23
+            rowHeightGroup(r) = 3
         End If
-
 NextTask:
     Next r
+    If contentRunStart > 0 Then _
+        ApplyHierarchyBottomRun ws, contentRunStart, lastRow, firstDataCol, endCol
+
+    For i = 1 To 3
+        If Not indentRanges(i) Is Nothing Then indentRanges(i).IndentLevel = i - 1
+    Next i
+    If Not boldTasks Is Nothing Then boldTasks.Font.Bold = True
+    For i = 1 To 5
+        If Not fillRanges(i) Is Nothing Then fillRanges(i).Interior.Color = CLng(fillColors(i - 1))
+    Next i
+    If Not darkRoots Is Nothing Then
+        With darkRoots
+            .Interior.Color = RGB(44, 72, 98)
+            .Font.Color = RGB(255, 255, 255)
+            .Font.Bold = True
+        End With
+    End If
+    ' Root edges remain ordered per row so shared boundary precedence is unchanged.
+    For Each rootRow In rootRows
+        Set rowRange = ws.Range(ws.Cells(CLng(rootRow), firstDataCol), ws.Cells(CLng(rootRow), endCol))
+        SetHierarchyRule rowRange, xlEdgeTop, RGB(68, 96, 122), xlMedium
+        SetHierarchyRule rowRange, xlEdgeBottom, RGB(126, 150, 173), xlThin
+    Next rootRow
+    ' Read final row heights after font changes; preserve every height already above its minimum.
+    For r = DATA_START_ROW To lastRow
+        i = rowHeightGroup(r)
+        If i > 0 Then
+            Select Case i
+                Case 1
+                    If ws.Rows(r).RowHeight < 30 Then AddHierarchyAppearanceRange heightRanges(i), ws.Rows(r)
+                Case 2
+                    If ws.Rows(r).RowHeight < 26 Then AddHierarchyAppearanceRange heightRanges(i), ws.Rows(r)
+                Case Else
+                    If ws.Rows(r).RowHeight < 23 Then AddHierarchyAppearanceRange heightRanges(i), ws.Rows(r)
+            End Select
+        End If
+    Next r
+    If Not heightRanges(1) Is Nothing Then heightRanges(1).RowHeight = 30
+    If Not heightRanges(2) Is Nothing Then heightRanges(2).RowHeight = 26
+    If Not heightRanges(3) Is Nothing Then heightRanges(3).RowHeight = 23
 
     ' Fit the final bold text and native indentation, not the old text prefixes.
     If fitLayout Then ws.Range(COL_REQUEST & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
-
-    RebuildTaskHierarchyOutline ws, lastRow
-    RenderHierarchyTaskBars ws, lastRow, startCol, endCol
+    If rebuildHierarchy Then RebuildTaskHierarchyOutline ws, lastRow
+    RenderHierarchyTaskBars ws, lastRow, startCol, endCol, Nothing, Nothing, bordersAlreadyReset
 End Sub
 
+Private Sub AddHierarchyAppearanceRange(ByRef accumulated As Range, ByVal target As Range)
+    If accumulated Is Nothing Then
+        Set accumulated = target
+    Else
+        Set accumulated = Application.Union(accumulated, target)
+    End If
+End Sub
+
+Private Sub ApplyHierarchyBottomRun(ByVal ws As Worksheet, ByVal firstRow As Long, ByVal lastRow As Long, _
+                                    ByVal firstCol As Long, ByVal lastCol As Long)
+    Dim target As Range
+    Set target = ws.Range(ws.Cells(firstRow, firstCol), ws.Cells(lastRow, lastCol))
+    ' Adjacent content rows share internal borders; blank-row gaps are never included.
+    If lastRow > firstRow Then SetHierarchyRule target, xlInsideHorizontal, RGB(221, 229, 237), xlThin
+    SetHierarchyRule target, xlEdgeBottom, RGB(221, 229, 237), xlThin
+End Sub
 Private Sub SetHierarchyRule(ByVal target As Range, ByVal edge As XlBordersIndex, _
                              ByVal color As Long, ByVal weight As XlBorderWeight)
     With target.Borders(edge)

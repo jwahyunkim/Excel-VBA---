@@ -26,6 +26,7 @@
         "test:web-upload": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/test-web-upload.ps1",
         "test:web-transport": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/test-web-transport.ps1",
         "test:web-view": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/test-web-view.ps1",
+        "test:refresh": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/test-refresh-performance.ps1",
         "test:hierarchy": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/test-gantt-hierarchy.ps1",
         "test:release-security": "powershell -NoProfile -ExecutionPolicy Bypass -File ./tests/test-release-security.ps1"
     },
