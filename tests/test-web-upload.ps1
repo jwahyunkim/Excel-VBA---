@@ -75,6 +75,18 @@ try {
     $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunWebUploadRegression")
     if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
     Write-Output $webResult
+    # 2026-10-22 김좌현 수정 : 이력 삭제로 해제한 상태를 임시 파일에 저장하고 재열기 후 검증
+    $webPhase = 'save history-reconciled disposable workbook'
+    $webExcel.EnableEvents = $false
+    $webBook.Save()
+    $webBook.Close($false)
+    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($webBook)
+    $webBook = $null
+    $webPhase = 'reopen and verify deleted history stays released'
+    $webBook = $webExcel.Workbooks.Open($webTestCopy, 0, $false)
+    $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunSavedWebHistoryRegression")
+    if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
+    Write-Output $webResult
 }
 catch {
     Write-Error ('Web upload integration regression failed during ' + $webPhase + ': ' + $_.Exception.Message) -ErrorAction Continue

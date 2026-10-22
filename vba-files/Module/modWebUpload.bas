@@ -3,6 +3,7 @@ Option Explicit
 ' 2026-10-22 김좌현 수정 : 프로젝트 실적 웹 설정, 선택목록, 미리보기와 등록 이력 추가
 ' 2026-10-22 김좌현 수정 : 등록 단위 동기화, 요청번호 연결과 충돌 확인을 포함한 신규/갱신 실행
 ' 2026-10-22 김좌현 수정 : 기존 갱신을 기본으로 하고 요청번호 없는 업무는 연결 필요로 차단
+' 2026-10-22 김좌현 수정 : 삭제한 등록 이력을 새로고침에 반영하고 요청자 잠금 해제
 
 Private mPreviewItems As Collection
 Private mPreviewSource As Worksheet
@@ -437,6 +438,8 @@ Public Sub PrepareWebTaskSheet(ByVal ws As Worksheet)
             Next field
         End If
     Next r
+    stepName = "등록 이력 동기화"
+    RefreshWebHistoryState ws
     stepName = "등록 단위 동기화"
     SynchronizeWebUnits ws
     RememberWebGroupBases ws
@@ -469,6 +472,44 @@ Failed:
     Application.EnableEvents = eventsEnabled
     On Error GoTo 0
     Err.Raise errNumber, "PrepareWebTaskSheet", stepName & ": " & errText
+End Sub
+
+Public Sub RefreshWebHistoryState(ByVal ws As Worksheet)
+    Dim eventsEnabled As Boolean, wasProtected As Boolean, changed As Boolean
+    Dim errorNumber As Long, errorText As String
+    If Not IsWebTaskSheet(ws) Then Exit Sub
+    eventsEnabled = Application.EnableEvents
+    wasProtected = ws.ProtectContents
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    If wasProtected Then UnprotectTaskSheet ws
+    changed = ReconcileDeletedWebHistory(ws)
+    If changed Then
+        Set mPreviewItems = Nothing
+        mPreviewSnapshot = vbNullString
+        mPreviewMode = vbNullString
+        Set mLinkSource = Nothing
+        mLinkSourceId = vbNullString
+        mLinkRequestNo = vbNullString
+        mLinkServerFingerprint = vbNullString
+        mLinkPayloadFingerprint = vbNullString
+        mLinkSite = vbNullString
+        mLinkAccount = vbNullString
+    End If
+    If wasProtected Then
+        ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    ElseIf changed Then
+        ApplyWebTaskProtection ws
+    End If
+    Application.EnableEvents = eventsEnabled
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    Application.EnableEvents = eventsEnabled
+    On Error GoTo 0
+    Err.Raise errorNumber, "RefreshWebHistoryState", errorText
 End Sub
 
 Public Sub ApplyWebTaskValidation(ByVal ws As Worksheet)
