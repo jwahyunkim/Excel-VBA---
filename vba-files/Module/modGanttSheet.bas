@@ -1,5 +1,8 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 상태에는 괄호 안 지연 일수만 표시하고 지연 완료도 기존 완료 초록 유지
+' 2026-10-22 김좌현 수정 : 오늘 날짜 헤더와 빈 배경을 민트색으로 구분
+' 2026-10-21 김좌현 수정 : 원래 상태값을 유지하면서 지연 일수와 하위 지연 및 완료일 누락 표시
 ' 2026-10-20 김좌현 수정 : 완료 숨김에서도 동일한 계층/상태 재계산 사용
 ' 2026-10-20 김좌현 수정 : 간트 only/보고 only 필터 및 전용 판정 함수 제거
 ' 2026-10-20 김좌현 수정 : 완료 항목 숨김 처리와 전용 번호 변환 제거
@@ -343,8 +346,13 @@ Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal c
         End If
 
         If CLng(d) = CLng(Date) Then
-            ws.Cells(GANTT_HEADER_ROW_DAY, curCol).Interior.Color = RGB(255, 120, 120)
-            ws.Cells(GANTT_HEADER_ROW_DATE, curCol).Interior.Color = RGB(255, 120, 120)
+            ws.Cells(GANTT_HEADER_ROW_DAY, curCol).Value = "오늘"
+            With ws.Range(ws.Cells(GANTT_HEADER_ROW_DAY, curCol), _
+                          ws.Cells(GANTT_HEADER_ROW_DATE, curCol))
+                .Interior.Color = RGB(45, 212, 191)
+                .Font.Color = RGB(17, 94, 89)
+                .Font.Bold = True
+            End With
         End If
 
         ws.Columns(curCol).ColumnWidth = 3
@@ -723,13 +731,31 @@ End Sub
 
 Private Sub SetStatusValue(ws As Worksheet, ByVal rowNum As Long, ByVal lastRow As Long, ByVal holidayDict As Object, ByVal workdayDict As Object)
     If HasChildTask(ws, rowNum, lastRow) Then
-        ws.Cells(rowNum, COL_STATUS).Value = BuildParentStatusFromChildren(ws, rowNum, lastRow)
+        ws.Cells(rowNum, COL_STATUS).Value = BuildParentStatusFromChildren(ws, rowNum, lastRow, holidayDict, workdayDict)
     Else
         ws.Cells(rowNum, COL_STATUS).Value = GetTaskStatus(ws, rowNum, holidayDict, workdayDict)
     End If
+    ApplyTaskDelayStatusDisplay ws, rowNum, lastRow, holidayDict, workdayDict
 End Sub
 
-Private Function BuildParentStatusFromChildren(ws As Worksheet, ByVal rowNum As Long, ByVal lastRow As Long) As String
+Private Sub ApplyTaskDelayStatusDisplay(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                                        ByVal lastRow As Long, ByVal holidayDict As Object, _
+                                        ByVal workdayDict As Object)
+    Dim days As Variant
+    ws.Cells(rowNum, COL_STATUS).NumberFormat = "General"
+    If HasTaskError(ws, rowNum) Then Exit Sub
+    days = GetTaskDelayDays(ws, rowNum, holidayDict, workdayDict)
+    If IsNumeric(days) Then
+        If CLng(days) > 0 Then
+            ws.Cells(rowNum, COL_STATUS).NumberFormat = "@" & Chr$(34) & _
+                                                       "(" & CLng(days) & ")" & Chr$(34)
+        End If
+    End If
+End Sub
+
+Private Function BuildParentStatusFromChildren(ws As Worksheet, ByVal rowNum As Long, _
+                                                ByVal lastRow As Long, ByVal holidayDict As Object, _
+                                                ByVal workdayDict As Object) As String
     Dim currentLevel As Long
     Dim childRow As Long
     Dim childEndRow As Long
@@ -785,6 +811,7 @@ Private Function BuildParentStatusFromChildren(ws As Worksheet, ByVal rowNum As 
         End If
     Loop
     
+    If HasDelayedDescendantTask(ws, rowNum, lastRow, holidayDict, workdayDict) Then hasDelay = True
     If Not hasAnyChild Then
         BuildParentStatusFromChildren = ""
     ElseIf hasError Then
@@ -999,7 +1026,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
                     If ws.Cells(r, c).Value = "" Then
                         If Not IsTaskPlannedOnDate(ws, r, d, holidayDict, workdayDict) And _
                            Not IsTaskActualOnDate(ws, r, d, holidayDict, workdayDict) Then
-                            ws.Cells(r, c).Interior.Color = RGB(255, 199, 206)
+                            ws.Cells(r, c).Interior.Color = RGB(224, 252, 244)
                         End If
                     End If
                 End If
