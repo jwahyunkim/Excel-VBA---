@@ -1,5 +1,6 @@
 Attribute VB_Name = "modTextReport"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 웹 설정/미리보기/이력 시트의 TXT 출력 제외
 ' 2026-10-16 김좌현 수정 : 하위 업무 전체 기간 집계 및 예정/완료 표시
 ' 2026-10-16 김좌현 수정 : 상단 출력 기간에 해당하는 하위 업무만 기간 집계
 
@@ -69,7 +70,7 @@ Public Function ExportPeriodTextReport(ByVal ws As Worksheet, _
     Application.EnableEvents = False
     If ws Is Nothing Then _
         Err.Raise vbObjectError + 7501, "ExportPeriodTextReport", "업무 시트를 지정하세요."
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then _
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or IsWebUtilitySheet(ws) Then _
         Err.Raise vbObjectError + 7501, "ExportPeriodTextReport", "업무 시트에서 실행하세요."
     EnsureConfigSheet
     GetOutputReportPeriod reportStart, reportEnd

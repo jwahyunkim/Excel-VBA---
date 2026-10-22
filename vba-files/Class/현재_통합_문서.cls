@@ -8,12 +8,14 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-10-22 김좌현 수정 : 웹등록 초기화, 보호 비밀번호와 그룹별 등록 기준 이벤트 연결
 
 Private Sub Workbook_Open()
     ' 2026-10-20 김좌현 수정 : 기존 생성 버튼을 새로고침으로 전환
     Dim ws As Worksheet
     ' 2026-10-20 김좌현 수정 : 저장된 완료 숨김 상태에 맞춰 버튼 문구 복원
     InitializeReleaseSecurity
+    InitializeWebUpload
     For Each ws In ThisWorkbook.Worksheets
         UpgradeGanttRefreshButtons ws
         UpdateCompletedTaskButton ws
@@ -23,9 +25,23 @@ Private Sub Workbook_Open()
 End Sub
 
 Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+    Dim webConfig As Worksheet
+    On Error GoTo WebPasswordError
+    On Error Resume Next
+    Set webConfig = ThisWorkbook.Worksheets(WEB_CONFIG_SHEET_NAME)
+    On Error GoTo WebPasswordError
+    If Not webConfig Is Nothing Then
+        If Len(CStr(webConfig.Range("B4").Value2)) > 0 And CStr(webConfig.Range("B4").Value2) <> "********" Then
+            SetWebPasswordValue CStr(webConfig.Range("B4").Value2)
+        End If
+    End If
     StopTaskOutlineViewMonitor
     PrepareReleaseForSave SaveAsUI, Cancel
     If Cancel Then StartTaskOutlineViewMonitor
+    Exit Sub
+WebPasswordError:
+    Cancel = True
+    MsgBox "비밀번호를 보호 저장하지 못해 저장을 중단했습니다. config_web에서 다시 입력하세요.", vbExclamation
 End Sub
 
 Private Sub Workbook_SheetDeactivate(ByVal Sh As Object)
@@ -42,6 +58,16 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     On Error GoTo EH
 
     If Not TypeOf Sh Is Worksheet Then Exit Sub
+
+    If IsWebUtilitySheet(Sh) Then
+        If Sh.Name = WEB_CONFIG_SHEET_NAME Then
+            If Not Intersect(Target, Sh.Range("B4")) Is Nothing Then
+                Application.EnableEvents = False
+                If CStr(Sh.Range("B4").Value2) <> "********" Then SetWebPasswordValue CStr(Sh.Range("B4").Value2)
+            End If
+        End If
+        GoTo SafeExit
+    End If
 
     If Sh.Name = CONFIG_SHEET_NAME Or _
        Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
@@ -80,6 +106,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     End If
 
     Application.enableEvents = False
+    HandleWebTaskChange Sh, Target
     invalidTypeCell = GetInvalidTaskType(Sh, Target)
     If Len(invalidTypeCell) > 0 Then
         Application.Undo
@@ -134,7 +161,7 @@ Private Sub Workbook_SheetFollowHyperlink(ByVal Sh As Object, ByVal Target As Hy
     On Error GoTo SafeExit
 
     If Sh.Name = CONFIG_SHEET_NAME Or _
-       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
+       Sh.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or IsWebUtilitySheet(Sh) Then Exit Sub
 
     Set anchorCell = Target.Range
     If anchorCell Is Nothing Then Exit Sub

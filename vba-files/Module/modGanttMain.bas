@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 웹 유틸리티 시트 제외 및 웹등록 설정/버튼 초기화
 ' 2026-10-20 김좌현 수정 : 새로고침 실패 시 완료 숨김과 수동/계층 보기 및 보호 복원
 ' 2026-10-20 김좌현 수정 : 완료 숨김 버튼과 새로고침 시 행 보기 상태 유지
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
@@ -35,13 +36,14 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
     On Error GoTo EH
 
     Set ws = ActiveSheet
+    If Not IsWebUtilitySheet(ws) And ws.Name <> CONFIG_SHEET_NAME And ws.Name <> OUTPUT_CONFIG_SHEET_NAME Then EnsureTaskSheetLayout ws
     detailColumnHidden = CaptureTaskDetailColumnHidden(ws)
     If Not ActiveWindow Is Nothing Then
         detailScrollColumn = ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollColumn
         detailScrollRow = ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollRow
     End If
 
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or IsWebUtilitySheet(ws) Then
         If Not showCompletionMessage Then Err.Raise vbObjectError + 2120, , "config 시트에서는 실행할 수 없습니다."
         MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
@@ -85,6 +87,7 @@ Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = T
 
     UnprotectTaskSheet ws
     UpgradeGanttRefreshButtons ws
+    PrepareWebTaskSheet ws
     SynchronizeTaskHierarchyModules ws, lastRow, True
     ShowTaskInputErrorReasons ws, lastRow
     UpdateTaskNumbers ws, lastRow
@@ -160,7 +163,7 @@ Public Sub 칸트차트_초기화()
 
     Set ws = ActiveSheet
 
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or IsWebUtilitySheet(ws) Then
         MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
@@ -217,7 +220,7 @@ Public Sub 칸트차트_개체삽입()
 
     Set ws = ActiveSheet
 
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or IsWebUtilitySheet(ws) Then
         MsgBox "config 시트에서는 실행할 수 없습니다.", vbExclamation
         Exit Sub
     End If
@@ -372,7 +375,7 @@ Private Sub CreateGanttActionButton(ByVal ws As Worksheet, _
 
     If ws Is Nothing Then Exit Sub
 
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Then
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or IsWebUtilitySheet(ws) Then
         MsgBox "config 시트에는 버튼을 생성할 수 없습니다.", vbExclamation
         Exit Sub
     End If

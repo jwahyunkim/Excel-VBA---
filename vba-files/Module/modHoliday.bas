@@ -1,5 +1,6 @@
 Attribute VB_Name = "modHoliday"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 웹 유틸리티 시트의 업무 목록/입력 검증 제외
 ' 2026-10-20 김좌현 수정 : 휴일·근무일 표 제목 추가 및 기존 날짜 입력 보존 이전
 ' 2026-10-20 김좌현 수정 : config 영역 정렬 및 입력/안내 서식 통일
 ' 2026-10-20 김좌현 수정 : 간트 only/보고 only 설정 및 설정 읽기 함수 제거
@@ -1291,7 +1292,7 @@ Public Sub RefreshWeeklyReportModuleDropdown()
     Next r
 
     For Each taskWs In ThisWorkbook.Worksheets
-        If taskWs.Name <> CONFIG_SHEET_NAME And _
+        If Not IsWebUtilitySheet(taskWs) And taskWs.Name <> CONFIG_SHEET_NAME And _
            taskWs.Name <> WEEKLY_REPORT_CONFIG_SHEET_NAME And _
            (Trim$(CStr(taskWs.Range(COL_TASK & HEADER_ROW).Value2)) = "요청 내용" Or _
             Trim$(CStr(taskWs.Range("H" & HEADER_ROW).Value2)) = "내용" Or _
@@ -1376,7 +1377,7 @@ Public Sub RefreshTaskTextLengthValidation()
     On Error GoTo EH
 
     For Each ws In ThisWorkbook.Worksheets
-        If ws.Name <> CONFIG_SHEET_NAME And _
+        If Not IsWebUtilitySheet(ws) And ws.Name <> CONFIG_SHEET_NAME And _
            ws.Name <> WEEKLY_REPORT_CONFIG_SHEET_NAME And _
            CStr(ws.Range(COL_NO & HEADER_ROW).Value2) = "No." Then
             wasProtected = _

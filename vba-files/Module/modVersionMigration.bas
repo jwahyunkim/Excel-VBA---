@@ -1,5 +1,6 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 웹 설정/미리보기/이력 시트를 업무 이전 및 버튼 처리에서 제외
 ' 2026-10-20 김좌현 수정 : 기존 디자인의 완료 숨김 버튼 선택/생성과 이관 후 상태 반영
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
 ' 2026-10-20 김좌현 수정 : 항목 숨김 버튼과 선택 항목 제거 및 순서 정리
@@ -1143,7 +1144,7 @@ Private Sub ImportOutputReportConfig(ByVal sourceBook As Workbook, _
 End Sub
 
 Private Function IsTaskSheet(ByVal ws As Worksheet) As Boolean
-    IsTaskSheet = (StrComp(ws.Name, CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
+    IsTaskSheet = (Not IsWebUtilitySheet(ws) And StrComp(ws.Name, CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
                    StrComp(ws.Name, WEEKLY_REPORT_CONFIG_SHEET_NAME, vbTextCompare) <> 0 And _
                    StrComp(ws.Name, "config_주간보고", vbTextCompare) <> 0 And _
                    StrComp(ws.Name, "config_주간 보고", vbTextCompare) <> 0 And _
