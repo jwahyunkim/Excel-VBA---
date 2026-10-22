@@ -1,6 +1,8 @@
 ﻿[CmdletBinding()]
 param([string]$WorkbookPath, [string]$SavePath)
 
+# 2026-10-22 김좌현 수정 : 모두/간트 새로고침 분리 및 공통 버튼 정렬 검증
+# 2026-10-22 김좌현 수정 : 웹 설정/작업시간 이전의 값·수식·개체와 반복 실행 보존 검증
 # 2026-10-20 김좌현 수정 : 새로고침 통합과 기존 버튼 전환 회귀 검증
 # 2026-10-20 김좌현 수정 : 항목 숨김 제거 후 5개 버튼 구성 검증
 # 2026-10-20 김좌현 수정 : 표시 기간 유지 및 제거된 only 설정의 행 필터 미적용 검증
@@ -68,24 +70,32 @@ Public Function RunTaskLayoutRegression() As String
     Dim displayConfig As Worksheet, oldDisplaySettings As Variant
     Dim typeConfig As Worksheet, originalTypes As Variant, typeIndex As Long
     Dim hiddenBeforeRefresh() As Boolean
+    Dim oldRequestCol As Long, oldModificationCol As Long, oldOwnerCol As Long, oldManualCol As Long
+    Dim headerCell As Range
     Dim holidayValues As Variant, holidayStart As Long, holidayEnd As Long, holidayRows As Long
     Dim holidays As Object, workdays As Object, holidayKey As String
     On Error GoTo Failed
     Application.EnableEvents = False
     Set ws = ThisWorkbook.Worksheets("Sheet1")
     UnprotectTaskSheet ws
-    lastRow = ws.Cells(ws.Rows.Count, "H").End(xlUp).Row
-    headerBefore = CStr(ws.Range("I4").Value2)
-    wasLegacy = (headerBefore <> "수정 내용")
-    requests = ws.Range("H5:H" & lastRow).Value2
-    If wasLegacy Then
-        details = ws.Range("I5:N" & lastRow).Value2
-        manual = ws.Range("Q5:S" & lastRow).Value2
-    Else
-        modifications = ws.Range("I5:I" & lastRow).Value2
-        details = ws.Range("J5:O" & lastRow).Value2
-        manual = ws.Range("R5:T" & lastRow).Value2
-    End If
+    Set headerCell = ws.Rows(HEADER_ROW).Find(What:="요청 내용", LookAt:=xlWhole, MatchCase:=False)
+    If headerCell Is Nothing Then Set headerCell = ws.Rows(HEADER_ROW).Find(What:="내용", LookAt:=xlWhole, MatchCase:=False)
+    Check Not headerCell Is Nothing, "original request header missing"
+    oldRequestCol = headerCell.Column
+    lastRow = ws.Cells(ws.Rows.Count, oldRequestCol).End(xlUp).Row
+    Set headerCell = ws.Rows(HEADER_ROW).Find(What:="수정 내용", LookAt:=xlWhole, MatchCase:=False)
+    wasLegacy = (headerCell Is Nothing)
+    If Not wasLegacy Then oldModificationCol = headerCell.Column
+    Set headerCell = ws.Rows(HEADER_ROW).Find(What:="담당", LookAt:=xlWhole, MatchCase:=False)
+    Check Not headerCell Is Nothing, "original owner header missing"
+    oldOwnerCol = headerCell.Column
+    Set headerCell = ws.Rows(HEADER_ROW).Find(What:="진행률 수동", LookAt:=xlWhole, MatchCase:=False)
+    Check Not headerCell Is Nothing, "original manual progress header missing"
+    oldManualCol = headerCell.Column
+    requests = ws.Range(ws.Cells(5, oldRequestCol), ws.Cells(lastRow, oldRequestCol)).Value2
+    If Not wasLegacy Then modifications = ws.Range(ws.Cells(5, oldModificationCol), ws.Cells(lastRow, oldModificationCol)).Value2
+    details = ws.Range(ws.Cells(5, oldOwnerCol), ws.Cells(lastRow, oldOwnerCol + 5)).Value2
+    manual = ws.Range(ws.Cells(5, oldManualCol), ws.Cells(lastRow, oldManualCol + 2)).Value2
     Set typeConfig = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     holidayStart = HOLIDAY_DATA_START_ROW
     If CStr(typeConfig.Range("A1").Value2) = "날짜" Then holidayStart = 2
@@ -107,20 +117,24 @@ Public Function RunTaskLayoutRegression() As String
     Next typeIndex
     Check Len(CStr(typeConfig.Range("L9").Value2)) = 0, "old type title survived"
     Check Len(CStr(typeConfig.Range("M10").Value2)) = 0, "old type guide survived"
-    Check CStr(ws.Range("H4").Value2) = "요청 내용", "request header"
-    Check CStr(ws.Range("I4").Value2) = "수정 내용", "modification header"
-    Check CStr(ws.Range("J4").Value2) = "담당", "owner header shifted twice"
-    Check CStr(ws.Range("K4").Value2) = "비고", "note header shifted twice"
-    Check CStr(ws.Range("L4").Value2) = "계획 시작일", "date header shifted twice"
+    Check CStr(ws.Range("R4").Value2) = "요청 내용", "request header"
+    Check CStr(ws.Range("H4").Value2) = "웹등록", "web block missing"
+    Check CStr(ws.Range("Q4").Value2) = "웹업무ID", "persistent task ID missing"
+    Check CStr(ws.Range("Z4").Value2) = "작업시간(분)", "minutes column missing"
+    Check ws.Columns("Q").Hidden, "private ID exposed"
+    Check CStr(ws.Range("S4").Value2) = "수정 내용", "modification header"
+    Check CStr(ws.Range("T4").Value2) = "담당", "owner header shifted twice"
+    Check CStr(ws.Range("U4").Value2) = "비고", "note header shifted twice"
+    Check CStr(ws.Range("V4").Value2) = "계획 시작일", "date header shifted twice"
     For r = 1 To UBound(requests, 1)
-        Check CStr(ws.Cells(r + 4, "H").Value2) = CStr(requests(r, 1)), "request lost row " & r
-        If wasLegacy Then Check Len(CStr(ws.Cells(r + 4, "I").Value2)) = 0, "new modification not blank"
-        If Not wasLegacy Then Check CStr(ws.Cells(r + 4, "I").Value2) = CStr(modifications(r, 1)), "modification lost row " & r
+        Check CStr(ws.Cells(r + 4, COL_REQUEST).Value2) = CStr(requests(r, 1)), "request lost row " & r
+        If wasLegacy Then Check Len(CStr(ws.Cells(r + 4, COL_MODIFICATION).Value2)) = 0, "new modification not blank"
+        If Not wasLegacy Then Check CStr(ws.Cells(r + 4, COL_MODIFICATION).Value2) = CStr(modifications(r, 1)), "modification lost row " & r
         For c = 1 To 6
-            Check CStr(ws.Cells(r + 4, c + 9).Value2) = CStr(details(r, c)), "owner/note/date lost row " & r & " column " & c
+            Check CStr(ws.Cells(r + 4, c + ws.Range(COL_OWNER & "1").Column - 1).Value2) = CStr(details(r, c)), "owner/note/date lost row " & r & " column " & c
         Next c
         For c = 1 To 3
-            Check CStr(ws.Cells(r + 4, c + 17).Value2) = CStr(manual(r, c)), "manual/status lost row " & r
+            Check CStr(ws.Cells(r + 4, c + ws.Range(COL_MANUAL_PROGRESS & "1").Column - 1).Value2) = CStr(manual(r, c)), "manual/status lost row " & r
         Next c
     Next r
     For Each name In Array("WeeklyPptTemplate", "_일별진행현황템플릿", "_일별진척률이력", "config_일일현황")
@@ -175,9 +189,10 @@ Public Function RunTaskLayoutRegression() As String
     Check reversedPeriodError <> 0, "reversed output period accepted"
     reportWs.Range(OUTPUT_REPORT_START_CELL).Value = configuredStart
     reportWs.Range(OUTPUT_REPORT_END_CELL).Value = configuredEnd
+    CheckWebLayoutMigration
     ApplyTaskInputValidation ws
-    Check InStr(ws.Range("H5").Validation.Formula1, "LEN(H5)") > 0, "request length validation"
-    Check InStr(ws.Range("I5").Validation.Formula1, "LEN(I5)") > 0, "modification length validation"
+    Check InStr(ws.Range("R5").Validation.Formula1, "LEN(R5)") > 0, "request length validation"
+    Check InStr(ws.Range("S5").Validation.Formula1, "LEN(S5)") > 0, "modification length validation"
     ws.Activate
     UnprotectTaskSheet ws
     If ws.FilterMode Then ws.ShowAllData
@@ -193,17 +208,17 @@ Public Function RunTaskLayoutRegression() As String
     displayConfig.Range("J2").Value = DateSerial(2026, 10, 10)
     displayConfig.Range("J3").Value = DateSerial(2026, 10, 20)
     ' Old workbook values must no longer filter rows.
-    displayConfig.Range("J4").Value2 = "Y"
+    displayConfig.Range("T4").Value2 = "Y"
     displayConfig.Range("J5").Value2 = "주간보고"
     RefreshGanttSheet False
-    Check CDate(ws.Range("X4").Value) = DateSerial(2026, 10, 10), "display start lost"
-    Check CDate(ws.Range("AH4").Value) = DateSerial(2026, 10, 20), "display end lost"
+    Check CDate(ws.Range("AI4").Value) = DateSerial(2026, 10, 10), "display start lost"
+    Check CDate(ws.Range("AS4").Value) = DateSerial(2026, 10, 20), "display end lost"
     For r = DATA_START_ROW To GetLastDataRow(ws)
         If HasTaskContent(ws, r) Then Check Not ws.Rows(r).Hidden, "retired only filter hid row " & r & "; before=" & hiddenBeforeRefresh(r)
     Next r
     displayConfig.Range("J2:J5").Value2 = oldDisplaySettings
     UpgradeTaskReportButtons ws
-    ' A legacy create-only button must retain its position and remain executable.
+    ' Legacy create-only buttons migrate into the shared action row.
     UnprotectTaskSheet ws
     On Error Resume Next
     ws.Shapes("btnGanttRefresh").Delete
@@ -212,25 +227,36 @@ Public Function RunTaskLayoutRegression() As String
     buttonLeft = ws.Shapes("btnGanttCreate").Left
     buttonTop = ws.Shapes("btnGanttCreate").Top
     ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    ' Compare the migration itself after Excel has normalized protected shape anchors.
+    buttonLeft = ws.Shapes("btnGanttCreate").Left
+    buttonTop = ws.Shapes("btnGanttCreate").Top
     UpgradeGanttRefreshButtons ws
     Check ws.ProtectContents, "button migration lost protection"
-    Check ws.Shapes("btnGanttRefresh").Left = buttonLeft, "legacy button moved horizontally"
-    Check ws.Shapes("btnGanttRefresh").Top = buttonTop, "legacy button moved vertically"
-    Check ws.Shapes("btnGanttRefresh").OnAction = "칸트차트_새로고침", "legacy button action"
-    Check ws.Shapes("btnGanttRefresh").TextFrame2.TextRange.Text = "새로고침", "legacy button caption"
+    ' Excel may quantize shape coordinates by a fraction of one point after protection.
+    Check Abs(ws.Shapes("btnGanttRefresh").Top - ws.Shapes("btnGanttRefreshOnly").Top) < 0.5, "refresh buttons are not aligned"
+    Check ws.Shapes("btnGanttRefreshOnly").Left > ws.Shapes("btnGanttRefresh").Left, "Gantt-only refresh missing after full refresh"
+    Check ws.Shapes("btnGanttRefresh").OnAction = "칸트차트_모두새로고침", "legacy button action"
+    Check ws.Shapes("btnGanttRefresh").TextFrame2.TextRange.Text = "모두 새로고침", "legacy button caption"
+    Check ws.Shapes("btnGanttRefreshOnly").OnAction = "칸트차트_간트새로고침", "Gantt-only refresh action"
+    Check Right$(ws.Shapes("btnWebPreview").OnAction, Len("!PreviewWebTasks")) = "!PreviewWebTasks", "web preview button missing"
+    Check Right$(ws.Shapes("btnWebUpload").OnAction, Len("!UploadWebTasks")) = "!UploadWebTasks", "web upload button missing"
+    Check Right$(ws.Shapes("btnWebConfig").OnAction, Len("!OpenWebConfig")) = "!OpenWebConfig", "web config button missing"
     ' When both exist, keep the existing refresh button; also update custom actions.
     UnprotectTaskSheet ws
     CreateVersionButton ws, "btnGanttCreate", "생성", "칸트차트_생성", 5, 72
     Set legacyButton = ws.Shapes.AddShape(msoShapeRectangle, 1, 1, 72, 22)
     legacyButton.Name = "customLegacyRefresh"
-    legacyButton.OnAction = "'old.xlsm'!modGanttMain.칸트차트_생성"
+    legacyButton.OnAction = "'old.xlsm'!modGanttMain.칸트차트_새로고침"
     ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    buttonLeft = ws.Shapes("btnGanttRefresh").Left
+    buttonTop = ws.Shapes("btnGanttRefresh").Top
     UpgradeGanttRefreshButtons ws
     ThisWorkbook.Saved = True
     UpgradeGanttRefreshButtons ws
     Check ThisWorkbook.Saved, "repeated migration dirtied workbook"
-    Check ws.Shapes("btnGanttRefresh").Left = buttonLeft, "existing refresh button replaced"
-    Check ws.Shapes("customLegacyRefresh").OnAction = "칸트차트_새로고침", "qualified legacy action"
+    ' Excel may quantize shape coordinates by a fraction of one point after protection.
+    Check Abs(ws.Shapes("btnGanttRefresh").Left - buttonLeft) < 0.5, "existing refresh button replaced " & ws.Shapes("btnGanttRefresh").Left & " vs " & buttonLeft
+    Check ws.Shapes("customLegacyRefresh").OnAction = "칸트차트_모두새로고침", "qualified legacy action"
     Set legacyButton = Nothing
     On Error Resume Next
     Set legacyButton = ws.Shapes("btnGanttCreate")
@@ -241,9 +267,10 @@ Public Function RunTaskLayoutRegression() As String
     ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     버튼_생성_선택
     Set setupWs = ActiveSheet
-    Check setupWs.CheckBoxes.Count = 6, "button options were not consolidated"
-    Check setupWs.DropDowns.Count = 6, "button order options were not consolidated"
-    Check setupWs.CheckBoxes("chkButtonOption2").Caption = "간트차트 새로고침", "refresh option caption"
+    Check setupWs.CheckBoxes.Count >= 7, "split refresh button options missing"
+    Check setupWs.DropDowns.Count >= 7, "button order options missing"
+    Check setupWs.CheckBoxes("chkButtonOption2").Caption = "모두 새로고침", "full refresh option caption"
+    Check setupWs.CheckBoxes("chkButtonOption7").Caption = "간트 새로고침", "Gantt refresh option caption"
     선택한_버튼_생성 False
     Check ActiveSheet.Name = ws.Name, "button creation did not return to task sheet"
     buttonCount = 0
@@ -254,20 +281,58 @@ Public Function RunTaskLayoutRegression() As String
     Check ws.Shapes("btnGanttReset").OnAction = "칸트차트_초기화", "reset option shifted"
     Check ws.Shapes("btnGanttObjectInsert").OnAction = "칸트차트_개체삽입", "object option shifted"
     Check ws.Shapes(COMPLETED_TASK_BUTTON_NAME).OnAction = "칸트차트_완료숨김", "completed button action"
-    Check Abs(ws.Shapes(COMPLETED_TASK_BUTTON_NAME).Width - ws.Shapes("btnGanttRefresh").Width) < 0.1, "completed button template width " & ws.Shapes(COMPLETED_TASK_BUTTON_NAME).Width & " vs " & ws.Shapes("btnGanttRefresh").Width
+    Check Abs(ws.Shapes(COMPLETED_TASK_BUTTON_NAME).Width - ws.Shapes("btnGanttRefresh").Width) < 0.5, "completed button template width " & ws.Shapes(COMPLETED_TASK_BUTTON_NAME).Width & " vs " & ws.Shapes("btnGanttRefresh").Width
     Check ws.Shapes(COMPLETED_TASK_BUTTON_NAME).TextFrame2.TextRange.Font.Size = ws.Shapes("btnGanttRefresh").TextFrame2.TextRange.Font.Size, "completed button template font"
     Check ws.Shapes("btnPeriodTextReport").Left > ws.Shapes("btnGanttObjectInsert").Left, "button order shifted"
     버튼_생성_선택
     버튼_생성_취소
     Check ws.Shapes("btnPeriodTextReport").OnAction = "기간보고TXT_생성", "TXT button action"
     Check ws.Shapes("btnPeriodTextReport").TextFrame2.TextRange.Text = "TXT 출력", "TXT button caption"
-    Check ws.Range("I5").Locked = False, "modification input locked"
+    Check ws.Range("S5").Locked = False, "modification input locked"
     Check ws.ProtectContents, "task sheet protection disabled"
-    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, Gantt refresh, display period preserved without only filters, legacy button migration, six button options, TXT button, protection"
+    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, split refresh, display period preserved without only filters, legacy button migration, seven button options, TXT button, protection"
     Exit Function
 Failed:
     RunTaskLayoutRegression = "FAIL: " & Err.Description
 End Function
+Private Sub CheckWebLayoutMigration()
+    Dim fixture As Worksheet, shape As Shape, beforeValue As String, headers As Variant
+    Dim c As Long, beforeWidth As Long
+    Set fixture = ThisWorkbook.Worksheets.Add
+    headers = Array("No.", "Level", "타입", "대분류", "중분류", "소분류", "요청 내용", _
+                    "수정 내용", "담당", "비고", "계획 시작일", "계획 종료일", "실제 시작일", _
+                    "실제 종료일", "진행률", "정상 진행률", "진행률 수동", "상태 수동", _
+                    "보고 상태", "계획일수", "실소요일수", "상태")
+    For c = 0 To UBound(headers)
+        fixture.Cells(4, c + 2).Value2 = headers(c)
+    Next c
+    fixture.Range("C5").Value2 = 1
+    fixture.Range("H5").Value2 = "migration original"
+    fixture.Range("I5").Formula = "=H5&""-formula"""
+    fixture.Range("J5").Value2 = "owner"
+    fixture.Range("K5").Value2 = "note"
+    fixture.Range("N5").Value = DateSerial(2026, 10, 1)
+    fixture.Range("O5").Value = DateSerial(2026, 10, 2)
+    fixture.Range("P5").Value2 = 0.5
+    fixture.Hyperlinks.Add Anchor:=fixture.Range("K5"), Address:="https://example.invalid/migration"
+    Set shape = fixture.Shapes.AddShape(msoShapeRectangle, fixture.Range("K6").Left, fixture.Range("K6").Top, 12, 12)
+    shape.Placement = xlMoveAndSize
+    beforeValue = CStr(fixture.Range("I5").Value2)
+    SetupDataHeaders fixture
+    SetupDataHeaders fixture
+    Check CStr(fixture.Range("R5").Value2) = "migration original", "fixture request moved incorrectly"
+    Check CStr(fixture.Range("S5").Value2) = beforeValue, "formula result lost"
+    Check CStr(fixture.Range("S5").Formula) = "=R5&""-formula""", "formula reference not shifted"
+    Check CStr(fixture.Range("T5").Value2) = "owner", "fixture owner lost"
+    Check fixture.Range("U5").Hyperlinks.Count = 1, "hyperlink anchor lost"
+    Check shape.TopLeftCell.Column = fixture.Range("U6").Column, "anchored shape did not move"
+    Check CDbl(fixture.Range("AA5").Value2) = 0.5, "progress moved incorrectly"
+    Check Len(CStr(fixture.Range("Z5").Value2)) = 0, "new minutes inherited data"
+    ApplyCalculatedColumnsProtection fixture, 5
+    Check fixture.Range("Q5").Locked And fixture.Columns("Q").Hidden, "private ID not protected"
+    Check Not fixture.Range("Z5").Locked, "minutes not editable"
+    fixture.Delete
+End Sub
 '@)
     $taskPhase = 'save and reload imported VBA'
     $taskBook.Save()

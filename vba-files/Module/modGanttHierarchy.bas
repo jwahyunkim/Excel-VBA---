@@ -1,5 +1,9 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 행별 들여쓰기·굵기·배경·최소 높이를 모아 적용하고 빈 행 및 루트 경계 유지
+' 2026-10-22 김좌현 수정 : 구조가 같은 행 그룹 재생성을 생략하고 초기화된 테두리를 렌더러에 전달
+' 2026-10-22 김좌현 수정 : 3단계 웹모드 동기화와 중복 날짜 배경/계층 재생성 제거
+' 2026-10-22 김좌현 수정 : 웹 설정/작업시간 3단 열 접기와 기존 접기 설정 이전 및 고정 창 보존
 ' 2026-10-20 김좌현 수정 : 숨긴 행의 틀 고정 좌표 보정과 화면 변경 중 재진입 방지
 ' 2026-10-20 김좌현 수정 : 계층 펼치기 후에도 완료 숨김 상태 유지
 ' 2026-10-20 김좌현 수정 : config 열 접기 영역의 제목/입력 서식 통일
@@ -16,7 +20,7 @@ Private Const TASK_FOLD_SELECTION_NAME As String = "_GanttFoldSelection"
 Private Function TaskViewColumnSelection(ByVal ws As Worksheet, ByVal lastCol As Long, _
                                          ByRef normalized As String) As Object
     Dim configWs As Worksheet, selected As Object, parts As Variant, part As Variant
-    Dim value As String, number As Long, c As Long
+    Dim value As String, number As Long, c As Long, hasVisibleSelection As Boolean
     Set configWs = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     If IsError(configWs.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2) Then Exit Function
     value = CStr(configWs.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2)
@@ -29,6 +33,15 @@ Private Function TaskViewColumnSelection(ByVal ws As Worksheet, ByVal lastCol As
         selected(CStr(number)) = True
     Next part
     If selected.Count < 2 Or selected.Count >= lastCol Then Exit Function
+    For c = 1 To lastCol
+        If selected.Exists(CStr(c)) And Not IsTaskWebDetailColumn(ws, c) And _
+           Not IsTaskPrivateColumn(ws, c) Then hasVisibleSelection = True
+    Next c
+    If Not hasVisibleSelection Then
+        number = ws.Range(COL_REQUEST & "1").Column
+        If number > lastCol Then number = Application.Min(lastCol, ws.Range(COL_MINOR_CATEGORY & "1").Column)
+        selected(CStr(number)) = True
+    End If
     normalized = ""
     For c = 1 To lastCol
         If selected.Exists(CStr(c)) Then
@@ -53,13 +66,16 @@ End Function
 
 Private Function TaskSelectionCollapsed(ByVal ws As Worksheet, ByVal selected As Object, _
                                          ByVal lastCol As Long) As Boolean
-    Dim c As Long
+    Dim c As Long, hasFoldColumn As Boolean
     TaskSelectionCollapsed = True
     For c = 1 To lastCol
-        If Not selected.Exists(CStr(c)) Then
+        If Not selected.Exists(CStr(c)) And Not IsTaskWebDetailColumn(ws, c) And _
+           Not IsTaskPrivateColumn(ws, c) Then
+            hasFoldColumn = True
             If Not ws.Columns(c).Hidden Then TaskSelectionCollapsed = False: Exit Function
         End If
     Next c
+    If Not hasFoldColumn Then TaskSelectionCollapsed = False
 End Function
 
 Private Function TaskFoldColumnNumber(ByVal value As Variant, ByVal columnCount As Long) As Long
@@ -105,7 +121,8 @@ Private Function GetTaskViewStartColumn(ByVal ws As Worksheet, ByVal firstCol As
             Set selected = TaskViewColumnSelection(ws, lastCol, normalized)
             If Not selected Is Nothing Then
                 For c = 1 To lastCol
-                    If selected.Exists(CStr(c)) Then GetTaskViewStartColumn = c: Exit For
+                    If selected.Exists(CStr(c)) And Not IsTaskWebDetailColumn(ws, c) And _
+                        Not IsTaskPrivateColumn(ws, c) Then GetTaskViewStartColumn = c: Exit For
                 Next c
             End If
             Exit Function
@@ -136,18 +153,18 @@ Public Sub EnsureTaskDetailFoldConfig(ByVal ws As Worksheet)
         ws.Range("I15:J16").UnMerge
         ws.Range("I15:J16").Clear
     End If
-    ws.Range(TASK_FOLD_TITLE_CELL).Value2 = "열 접기"
+    ws.Range(TASK_FOLD_TITLE_CELL).Value2 = "열 접기 (1 간단 / 2 전체 / 3 웹설정)"
     ws.Range("I13").Value2 = "접기 시작 열"
     ws.Range("I14").Value2 = "접기 끝 열"
     ws.Range("I15").Value2 = "접힌 화면 고정 열"
     If Len(Trim$(CStr(ws.Range(TASK_FOLD_START_VALUE_CELL).Value2))) = 0 Then
-        ws.Range(TASK_FOLD_START_VALUE_CELL).Value2 = "I"
+        ws.Range(TASK_FOLD_START_VALUE_CELL).Value2 = COL_MODIFICATION
     End If
     If Len(Trim$(CStr(ws.Range(TASK_FOLD_END_VALUE_CELL).Value2))) = 0 Then
-        ws.Range(TASK_FOLD_END_VALUE_CELL).Value2 = "W"
+        ws.Range(TASK_FOLD_END_VALUE_CELL).Value2 = COL_STATUS
     End If
     If Len(Trim$(CStr(ws.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2))) = 0 Then
-        ws.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = "H"
+        ws.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = COL_REQUEST
     End If
     With ws.Range("I12:J12")
         .Font.Bold = True
@@ -311,7 +328,7 @@ End Sub
 Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
     Dim taskWindow As Window, requestCol As Long, previousRow As Long, c As Long
     Dim firstCol As Long, lastCol As Long, freezeColumns As Long, nextVisibleCol As Long
-    Dim wasSaved As Boolean, collapsed As Boolean, resetView As Boolean
+    Dim wasSaved As Boolean, collapsed As Boolean, resetView As Boolean, hasFoldColumn As Boolean
     Dim detailColumns As Range, wasScreenUpdating As Boolean
     Dim viewError As Long, viewErrorText As String
     Dim selected As Object, normalized As String, selectedColumn As Variant, lastSelected As Long
@@ -322,6 +339,7 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
     If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) <> "No." Or _
        CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) <> "Level" Then Exit Sub
 
+    If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
     Set taskWindow = ActiveWindow
     If Not GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then Exit Sub
     If TaskViewUsesSelection() Then
@@ -341,14 +359,19 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
     If selected Is Nothing Then
         collapsed = True
         For c = firstCol To lastCol
-            If Not ws.Columns(c).Hidden Then
+            If Not IsTaskWebDetailColumn(ws, c) And Not IsTaskPrivateColumn(ws, c) Then hasFoldColumn = True
+            If Not IsTaskWebDetailColumn(ws, c) And Not IsTaskPrivateColumn(ws, c) And _
+               Not ws.Columns(c).Hidden Then
                 collapsed = False
                 Exit For
             End If
         Next c
+        If Not hasFoldColumn Then collapsed = False
     Else
         For Each selectedColumn In selected.Keys
-            lastSelected = Application.Max(lastSelected, CLng(selectedColumn))
+            If Not IsTaskWebDetailColumn(ws, CLng(selectedColumn)) And _
+               Not IsTaskPrivateColumn(ws, CLng(selectedColumn)) Then _
+                lastSelected = Application.Max(lastSelected, CLng(selectedColumn))
         Next selectedColumn
         freezeColumns = lastSelected - requestCol + 1
         collapsed = TaskSelectionCollapsed(ws, selected, lastCol)
@@ -408,7 +431,8 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
                 If selected Is Nothing Then
                     ws.Columns(c).Hidden = True
                 Else
-                    ws.Columns(c).Hidden = Not selected.Exists(CStr(c))
+                    ws.Columns(c).Hidden = (Not selected.Exists(CStr(c)) Or _
+                        IsTaskWebDetailColumn(ws, c) Or IsTaskPrivateColumn(ws, c))
                 End If
             Next c
             If selected Is Nothing Then
@@ -441,7 +465,8 @@ Failed:
             If selected Is Nothing Then
                 ws.Columns(c).Hidden = True
             Else
-                ws.Columns(c).Hidden = Not selected.Exists(CStr(c))
+                ws.Columns(c).Hidden = (Not selected.Exists(CStr(c)) Or _
+                        IsTaskWebDetailColumn(ws, c) Or IsTaskPrivateColumn(ws, c))
             End If
         Next c
     End If
@@ -498,6 +523,7 @@ Public Sub TaskOutlineViewTick()
     If Not ws Is Nothing Then
         EnsureTaskRequestFreeze ws
         MaintainCompletedTaskView ws
+        RefreshWebModeView ws
     End If
 End Sub
 
@@ -507,6 +533,8 @@ Public Function CaptureTaskDetailColumnHidden(ByVal ws As Worksheet) As Variant
     If Not GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then Exit Function
     ' 2026-10-19 김좌현 수정 : 너비 재설정으로 풀리는 선택 열 사이의 숨김 상태도 함께 보존
     If TaskViewUsesSelection() Then firstCol = 1
+    firstCol = 1
+    lastCol = Application.Max(lastCol, ws.Range(COL_STATUS & "1").Column)
     ReDim hidden(firstCol To lastCol)
     For c = firstCol To lastCol
         hidden(c) = ws.Columns(c).Hidden
@@ -522,6 +550,7 @@ Public Sub RestoreTaskDetailColumnHidden(ByVal ws As Worksheet, ByVal hidden As 
             ws.Columns(c).Hidden = CBool(hidden(c))
         End If
     Next c
+    If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
     EnsureTaskRequestFreeze ws
 End Sub
 
@@ -543,261 +572,313 @@ Private Sub UngroupTaskOutline(ByVal target As Range)
     Next pass
 End Sub
 
+' 2026-10-22 김좌현 수정 : 기존 상세 열은 2단계, 웹 설정과 작업시간은 3단계로 독립 표시
+Public Function IsTaskWebDetailColumn(ByVal ws As Worksheet, ByVal columnNumber As Long) As Boolean
+    IsTaskWebDetailColumn = _
+        (columnNumber >= ws.Range(COL_WEB_ENABLED & "1").Column And _
+         columnNumber <= ws.Range(COL_WEB_RESULT & "1").Column) Or _
+        columnNumber = ws.Range(COL_WORK_MINUTES & "1").Column
+End Function
+
+Private Function IsTaskPrivateColumn(ByVal ws As Worksheet, ByVal columnNumber As Long) As Boolean
+    IsTaskPrivateColumn = (columnNumber = ws.Range(COL_WEB_TASK_ID & "1").Column)
+End Function
+
 Public Sub EnsureTaskDetailColumnOutline(ByVal ws As Worksheet)
-    Dim firstCol As Long, lastCol As Long, c As Long
-    Dim needsGroup As Boolean, hidden As Variant, detailColumns As Range, oldColumns As Range
-    Dim boundsChanged As Boolean, wasCollapsed As Boolean, rangeName As Name
-    Dim selected As Object, normalized As String, signature As String
+    Dim firstCol As Long, lastCol As Long, c As Long, limit As Long, pass As Long, runStart As Long
+    Dim needsGroup As Boolean, wasCollapsed As Boolean, settingsChanged As Boolean
+    Dim selected As Object, normalized As String, signature As String, previousSignature As String
+    Dim rangeName As Name, oldColumns As Range, detailColumns As Range
+    Dim expected() As Long, hidden() As Boolean, oldFirst As Long, oldLast As Long
+    If IsWebUtilitySheet(ws) Then Exit Sub
     If Not GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then Exit Sub
     If GetTaskViewStartColumn(ws, firstCol, lastCol) = 0 Then Exit Sub
-    signature = TaskSelectionSignature(ws)
+    previousSignature = TaskSelectionSignature(ws)
     If TaskViewUsesSelection() Then
         Set selected = TaskViewColumnSelection(ws, lastCol, normalized)
-        EnsureTaskSelectedColumnOutline ws, firstCol, lastCol, selected, normalized, signature
-        Exit Sub
-    ElseIf Len(signature) > 0 Then
-        ClearTaskSelectedColumnOutline ws, signature, wasCollapsed
-        For c = firstCol To lastCol
-            ws.Columns(c).Hidden = wasCollapsed
-        Next c
+        If selected Is Nothing Then Exit Sub
+        signature = "=" & Chr$(34) & firstCol & "|" & lastCol & "|" & normalized & Chr$(34)
     End If
-    Set detailColumns = ws.Range(ws.Cells(1, firstCol), ws.Cells(1, lastCol)).EntireColumn
     On Error Resume Next
     Set rangeName = ws.Names(TASK_FOLD_RANGE_NAME)
     If Not rangeName Is Nothing Then Set oldColumns = rangeName.RefersToRange
     On Error GoTo 0
-    If oldColumns Is Nothing Then Set oldColumns = ws.Range("I:W")
-    boundsChanged = (oldColumns.Column <> firstCol Or oldColumns.Columns.Count <> lastCol - firstCol + 1)
-    needsGroup = boundsChanged
-    For c = firstCol To lastCol
-        If ws.Columns(c).OutlineLevel <> 2 Then needsGroup = True
-    Next c
-    If needsGroup Then
-        If boundsChanged Then
-            wasCollapsed = True
-            For c = oldColumns.Column To oldColumns.Column + oldColumns.Columns.Count - 1
+    If oldColumns Is Nothing Then Set oldColumns = ws.Range(COL_MODIFICATION & ":" & COL_STATUS)
+    oldFirst = oldColumns.Column
+    oldLast = oldFirst + oldColumns.Columns.Count - 1
+    limit = Application.Max(lastCol, oldLast, ws.Range(COL_STATUS & "1").Column)
+    settingsChanged = (oldFirst <> firstCol Or oldLast <> lastCol Or previousSignature <> signature)
+    wasCollapsed = True
+    If Len(previousSignature) > 0 Then
+        wasCollapsed = TaskPreviousSelectionCollapsed(ws, previousSignature)
+    Else
+        For c = oldFirst To oldLast
+            If Not IsTaskWebDetailColumn(ws, c) And Not IsTaskPrivateColumn(ws, c) Then
                 If Not ws.Columns(c).Hidden Then wasCollapsed = False
-            Next c
-            For c = oldColumns.Column To oldColumns.Column + oldColumns.Columns.Count - 1
-                If ws.Columns(c).Hidden Then ws.Columns(c).Hidden = False
-            Next c
-        Else
-            hidden = CaptureTaskDetailColumnHidden(ws)
-        End If
-        UngroupTaskOutline oldColumns
-        If boundsChanged Then UngroupTaskOutline detailColumns
-        detailColumns.Group
-        If boundsChanged Then
-            For c = firstCol To lastCol
-                If ws.Columns(c).Hidden <> wasCollapsed Then ws.Columns(c).Hidden = wasCollapsed
-            Next c
-        Else
-            RestoreTaskDetailColumnHidden ws, hidden
-        End If
+            End If
+        Next c
     End If
-    If rangeName Is Nothing Or boundsChanged Then
+    ReDim expected(1 To limit)
+    ReDim hidden(1 To limit)
+    For c = 1 To limit
+        expected(c) = 1
+        If selected Is Nothing Then
+            If c >= firstCol And c <= lastCol Then expected(c) = 2
+        ElseIf c <= lastCol Then
+            If Not selected.Exists(CStr(c)) Then expected(c) = 2
+        End If
+        If IsTaskWebDetailColumn(ws, c) Then expected(c) = 3
+        If IsTaskPrivateColumn(ws, c) Then expected(c) = 1
+        hidden(c) = ws.Columns(c).Hidden
+        If ws.Columns(c).OutlineLevel <> expected(c) Then needsGroup = True
+    Next c
+    If needsGroup Or settingsChanged Then
+        ' Full-column Ungroup preserves independent task-row groups.
+        UngroupTaskOutline ws.Range(ws.Cells(1, 1), ws.Cells(1, limit)).EntireColumn
+        ' Inner groups first. A second group also permits isolated level-3 fields.
+        For pass = 3 To 2 Step -1
+            runStart = 0
+            For c = 1 To limit + 1
+                If c <= limit Then
+                    If expected(c) >= pass Then
+                        If runStart = 0 Then runStart = c
+                    ElseIf runStart > 0 Then
+                        ws.Range(ws.Cells(1, runStart), ws.Cells(1, c - 1)).EntireColumn.Group
+                        runStart = 0
+                    End If
+                ElseIf runStart > 0 Then
+                    ws.Range(ws.Cells(1, runStart), ws.Cells(1, c - 1)).EntireColumn.Group
+                End If
+            Next c
+        Next pass
+        For c = 1 To limit
+            If settingsChanged And Not IsTaskWebDetailColumn(ws, c) Then
+                ws.Columns(c).Hidden = (expected(c) = 2 And wasCollapsed)
+            Else
+                ws.Columns(c).Hidden = hidden(c)
+            End If
+        Next c
+    End If
+    If rangeName Is Nothing Or settingsChanged Then
         If Not rangeName Is Nothing Then rangeName.Delete
+        Set detailColumns = ws.Range(ws.Cells(1, firstCol), ws.Cells(1, lastCol)).EntireColumn
         ws.Names.Add Name:="'" & Replace(ws.Name, "'", "''") & "'!" & TASK_FOLD_RANGE_NAME, _
                      RefersTo:="='" & Replace(ws.Name, "'", "''") & "'!" & detailColumns.Address, Visible:=False
     End If
-    If boundsChanged Then
+    If previousSignature <> signature Then
+        If Len(previousSignature) > 0 Then ws.Names(TASK_FOLD_SELECTION_NAME).Delete
+        If Len(signature) > 0 Then _
+            ws.Names.Add Name:="'" & Replace(ws.Name, "'", "''") & "'!" & TASK_FOLD_SELECTION_NAME, _
+                         RefersTo:=signature, Visible:=False
+    End If
+    If settingsChanged Then
         If mTaskViewResetSheets Is Nothing Then Set mTaskViewResetSheets = CreateObject("Scripting.Dictionary")
         mTaskViewResetSheets(ws.CodeName) = True
     End If
-    ws.Outline.SummaryColumn = xlRight
-    ws.EnableOutlining = True
-    If Not ActiveWindow Is Nothing Then ActiveWindow.DisplayOutline = True
+    If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
+    If ws.Outline.SummaryColumn <> xlRight Then ws.Outline.SummaryColumn = xlRight
+    If Not ws.EnableOutlining Then ws.EnableOutlining = True
+    If Not ActiveWindow Is Nothing Then
+        If Not ActiveWindow.DisplayOutline Then ActiveWindow.DisplayOutline = True
+    End If
 End Sub
 
-' 2026-10-19 김좌현 수정 : 선택 열을 그룹에서 제외하여 기본 1/2 단계 버튼으로 접기/펼치기
-Private Sub ClearTaskSelectedColumnOutline(ByVal ws As Worksheet, ByVal signature As String, _
-                                            ByRef wasCollapsed As Boolean)
-    Dim parts As Variant, columns As Variant, part As Variant, selected As Object
-    Dim oldLast As Long, c As Long
+Private Function TaskPreviousSelectionCollapsed(ByVal ws As Worksheet, ByVal signature As String) As Boolean
+    Dim parts As Variant, selected As Object, part As Variant, oldLast As Long
     parts = Split(Replace(Replace(signature, "=", ""), Chr$(34), ""), "|")
+    If UBound(parts) <> 2 Then Exit Function
     oldLast = CLng(parts(1))
-    columns = Split(parts(2), ",")
     Set selected = CreateObject("Scripting.Dictionary")
-    For Each part In columns
+    For Each part In Split(parts(2), ",")
         selected(CStr(TaskFoldColumnNumber(part, oldLast))) = True
     Next part
-    wasCollapsed = TaskSelectionCollapsed(ws, selected, oldLast)
-    UngroupTaskOutline ws.Range(ws.Cells(1, 1), ws.Cells(1, oldLast)).EntireColumn
-    For c = 1 To oldLast
-        ws.Columns(c).Hidden = False
-    Next c
-    ws.Names(TASK_FOLD_SELECTION_NAME).Delete
-    If mTaskViewResetSheets Is Nothing Then Set mTaskViewResetSheets = CreateObject("Scripting.Dictionary")
-    mTaskViewResetSheets(ws.CodeName) = True
-End Sub
+    TaskPreviousSelectionCollapsed = TaskSelectionCollapsed(ws, selected, oldLast)
+End Function
 
-Private Sub EnsureTaskSelectedColumnOutline(ByVal ws As Worksheet, ByVal firstCol As Long, _
-                                             ByVal lastCol As Long, ByVal selected As Object, _
-                                             ByVal normalized As String, ByVal previousSignature As String)
-    Dim signature As String, wasCollapsed As Boolean, c As Long, runStart As Long
-    Dim oldColumns As Range, rangeName As Name, needsGroup As Boolean
-    signature = "=" & Chr$(34) & CStr(firstCol) & "|" & CStr(lastCol) & "|" & normalized & Chr$(34)
-    needsGroup = (signature <> previousSignature)
-    For c = 1 To lastCol
-        If selected.Exists(CStr(c)) Then
-            If ws.Columns(c).OutlineLevel <> 1 Then needsGroup = True
-        Else
-            If ws.Columns(c).OutlineLevel <> 2 Then needsGroup = True
+' 2026-10-22 김좌현 수정 : 기존 설정의 열 문자도 삽입 열 수만큼 한 번 이전하며 G 고정은 유지
+Public Sub MigrateTaskWebFoldSettings(ByVal taskWs As Worksheet)
+    Dim configWs As Worksheet, marker As Name, cell As Range, signature As String
+    Dim parts As Variant, selectedColumns As String, column As Variant
+    On Error Resume Next
+    Set marker = ThisWorkbook.Names("_GanttWebFoldV6")
+    Set configWs = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If marker Is Nothing Then
+        If Not configWs Is Nothing Then
+            For Each cell In configWs.Range(TASK_FOLD_SETTING_VALUE_RANGE).Cells
+                If Not IsError(cell.Value2) Then cell.Value2 = MigrateTaskWebColumnLetters(CStr(cell.Value2), configWs)
+            Next cell
         End If
-    Next c
-    If needsGroup Then
-        If Len(previousSignature) > 0 Then
-            ClearTaskSelectedColumnOutline ws, previousSignature, wasCollapsed
-        Else
-            On Error Resume Next
-            Set rangeName = ws.Names(TASK_FOLD_RANGE_NAME)
-            If Not rangeName Is Nothing Then Set oldColumns = rangeName.RefersToRange
-            On Error GoTo 0
-            If oldColumns Is Nothing Then Set oldColumns = ws.Range("I:W")
-            wasCollapsed = True
-            For c = oldColumns.Column To oldColumns.Column + oldColumns.Columns.Count - 1
-                If Not ws.Columns(c).Hidden Then wasCollapsed = False
-            Next c
-            UngroupTaskOutline oldColumns
-            For c = oldColumns.Column To oldColumns.Column + oldColumns.Columns.Count - 1
-                If ws.Columns(c).Hidden Then ws.Columns(c).Hidden = False
-            Next c
-        End If
-        UngroupTaskOutline ws.Range(ws.Cells(1, 1), ws.Cells(1, lastCol)).EntireColumn
-        runStart = 0
-        For c = 1 To lastCol + 1
-            If c <= lastCol And Not selected.Exists(CStr(c)) Then
-                If runStart = 0 Then runStart = c
-            ElseIf runStart > 0 Then
-                ws.Range(ws.Cells(1, runStart), ws.Cells(1, c - 1)).EntireColumn.Group
-                runStart = 0
-            End If
-        Next c
-        For c = 1 To lastCol
-            ws.Columns(c).Hidden = (wasCollapsed And Not selected.Exists(CStr(c)))
-        Next c
-        ws.Names.Add Name:="'" & Replace(ws.Name, "'", "''") & "'!" & TASK_FOLD_SELECTION_NAME, _
-                     RefersTo:=signature, Visible:=False
-        On Error Resume Next
-        ws.Names(TASK_FOLD_RANGE_NAME).Delete
-        On Error GoTo 0
-        ws.Names.Add Name:="'" & Replace(ws.Name, "'", "''") & "'!" & TASK_FOLD_RANGE_NAME, _
-                     RefersTo:="='" & Replace(ws.Name, "'", "''") & "'!" & _
-                     ws.Range(ws.Cells(1, firstCol), ws.Cells(1, lastCol)).EntireColumn.Address, Visible:=False
-        If mTaskViewResetSheets Is Nothing Then Set mTaskViewResetSheets = CreateObject("Scripting.Dictionary")
-        mTaskViewResetSheets(ws.CodeName) = True
+        ThisWorkbook.Names.Add Name:="_GanttWebFoldV6", RefersTo:="=TRUE", Visible:=False
     End If
-    ws.Outline.SummaryColumn = xlRight
-    ws.EnableOutlining = True
-    If Not ActiveWindow Is Nothing Then ActiveWindow.DisplayOutline = True
+    signature = TaskSelectionSignature(taskWs)
+    If Len(signature) = 0 Then Exit Sub
+    parts = Split(Replace(Replace(signature, "=", ""), Chr$(34), ""), "|")
+    If UBound(parts) <> 2 Then Exit Sub
+    selectedColumns = MigrateTaskWebColumnLetters(CStr(parts(2)), taskWs)
+    signature = "=" & Chr$(34) & MigratedTaskWebColumnNumber(CLng(parts(0))) & "|" & _
+                MigratedTaskWebColumnNumber(CLng(parts(1))) & "|" & selectedColumns & Chr$(34)
+    taskWs.Names(TASK_FOLD_SELECTION_NAME).RefersTo = signature
 End Sub
 
+Private Function MigratedTaskWebColumnNumber(ByVal number As Long) As Long
+    If number >= 16 Then
+        number = number + 11
+    ElseIf number >= 8 Then
+        number = number + 10
+    End If
+    MigratedTaskWebColumnNumber = number
+End Function
+
+Private Function MigrateTaskWebColumnLetters(ByVal value As String, ByVal ws As Worksheet) As String
+    Dim parts As Variant, part As Variant, number As Long, token As String
+    parts = Split(value, ",")
+    For Each part In parts
+        token = UCase$(Trim$(CStr(part)))
+        number = TaskFoldColumnNumber(token, ws.Columns.Count)
+        If number > 0 Then _
+            token = Replace(ws.Cells(1, MigratedTaskWebColumnNumber(number)).Address(False, False), "1", "")
+        If Len(MigrateTaskWebColumnLetters) > 0 Then _
+            MigrateTaskWebColumnLetters = MigrateTaskWebColumnLetters & ","
+        MigrateTaskWebColumnLetters = MigrateTaskWebColumnLetters & token
+    Next part
+End Function
 ' Visual hierarchy and native outlines share the same subtree boundaries as
 ' the task summary calculation. Build them before applying display filters.
 Public Sub ApplyTaskHierarchyAppearance(ByVal ws As Worksheet, ByVal lastRow As Long, _
-                                        ByVal startCol As Long, ByVal endCol As Long)
-    Dim r As Long
-    Dim c As Long
-    Dim taskLevel As Long
-    Dim hasChildren As Boolean
-    Dim inRootGroup As Boolean
-    Dim isWarning As Boolean
-    Dim statusText As String
-    Dim rowFill As Long
-    Dim chartFill As Long
-    Dim rowRange As Range
-    Dim taskRange As Range
-    Dim chartCell As Range
+                                        ByVal startCol As Long, ByVal endCol As Long, _
+                                        Optional ByVal fitLayout As Boolean = True, Optional ByVal rebuildHierarchy As Boolean = True, _
+                                        Optional ByVal bordersAlreadyReset As Boolean = False)
+    Dim r As Long, i As Long, taskLevel As Long, fillIndex As Long, contentRunStart As Long
+    Dim firstDataCol As Long, hasChildren As Boolean, inRootGroup As Boolean, isWarning As Boolean
+    Dim statusText As String, rowRange As Range, taskRange As Range, rootRow As Variant
+    Dim indentRanges(1 To 3) As Range, fillRanges(1 To 5) As Range
+    Dim heightRanges(1 To 3) As Range, boldTasks As Range, darkRoots As Range
+    Dim rowHeightGroup() As Long, fillColors As Variant, rootRows As Collection
 
     EnsureTaskDetailColumnOutline ws
     If lastRow < DATA_START_ROW Or endCol < startCol Then Exit Sub
-
+    firstDataCol = ws.Range(COL_NO & "1").Column
+    ReDim rowHeightGroup(DATA_START_ROW To lastRow)
+    Set rootRows = New Collection
+    fillColors = Array(RGB(255, 255, 255), RGB(243, 247, 251), RGB(250, 252, 254), _
+                       RGB(226, 234, 242), RGB(222, 233, 243))
     With ws.Range(COL_NO & DATA_START_ROW & ":" & COL_STATUS & lastRow).Font
         .Bold = False
         .Color = RGB(40, 50, 62)
     End With
 
+    ' 2026-10-22 김좌현 수정 : 기존 행 판정은 유지하고 동일 속성의 영역만 모아 일괄 서식 적용
     For r = DATA_START_ROW To lastRow
-        If Not HasTaskContent(ws, r) Then GoTo NextTask
-
+        If Not HasTaskContent(ws, r) Then
+            If contentRunStart > 0 Then
+                ApplyHierarchyBottomRun ws, contentRunStart, r - 1, firstDataCol, endCol
+                contentRunStart = 0
+            End If
+            GoTo NextTask
+        End If
+        If contentRunStart = 0 Then contentRunStart = r
         taskLevel = GetTaskLevel(ws, r)
         hasChildren = HasChildTask(ws, r, lastRow)
         If taskLevel = 1 Then inRootGroup = hasChildren
         statusText = CStr(ws.Cells(r, COL_STATUS).Value)
         isWarning = (statusText = STATUS_HOLD Or statusText = STATUS_DELAY Or _
-                     statusText = STATUS_TODAY Or _
-                     statusText = STATUS_ERROR)
-
-        Set rowRange = ws.Range(ws.Cells(r, ws.Range(COL_NO & "1").Column), _
-                                ws.Cells(r, endCol))
+                     statusText = STATUS_TODAY Or statusText = STATUS_ERROR)
         Set taskRange = ws.Range(COL_REQUEST & r & ":" & COL_MODIFICATION & r)
-        taskRange.IndentLevel = taskLevel - 1
-        taskRange.Font.Bold = (taskLevel < 3 And (inRootGroup Or hasChildren))
+        AddHierarchyAppearanceRange indentRanges(taskLevel), taskRange
+        If taskLevel < 3 And (inRootGroup Or hasChildren) Then _
+            AddHierarchyAppearanceRange boldTasks, taskRange
 
-        rowFill = RGB(255, 255, 255)
-        chartFill = rowFill
+        fillIndex = 1
         If inRootGroup Then
-            rowFill = RGB(243, 247, 251)
-            chartFill = rowFill
-            If taskLevel = 3 Then
-                rowFill = RGB(250, 252, 254)
-                chartFill = rowFill
-            End If
+            fillIndex = 2
+            If taskLevel = 3 Then fillIndex = 3
         End If
         If taskLevel = 1 And hasChildren Then
-            rowFill = RGB(226, 234, 242)
-            chartFill = rowFill
+            fillIndex = 4
         ElseIf taskLevel = 2 And hasChildren Then
-            rowFill = RGB(222, 233, 243)
-            chartFill = RGB(236, 242, 248)
+            fillIndex = 5
         End If
-
         ' Warning rows and status cells retain their existing status colors.
         If Not isWarning Then
-            ws.Range(COL_NO & r & ":" & COL_ACTUAL_DAYS & r).Interior.Color = rowFill
-            If taskLevel = 1 And hasChildren Then
-                With ws.Range(COL_NO & r & ":" & COL_MODIFICATION & r)
-                    .Interior.Color = RGB(44, 72, 98)
-                    .Font.Color = RGB(255, 255, 255)
-                    .Font.Bold = True
-                End With
-            End If
+            AddHierarchyAppearanceRange fillRanges(fillIndex), _
+                ws.Range(COL_NO & r & ":" & COL_ACTUAL_DAYS & r)
+            If taskLevel = 1 And hasChildren Then _
+                AddHierarchyAppearanceRange darkRoots, ws.Range(COL_NO & r & ":" & COL_MODIFICATION & r)
         End If
-
-        ' Only unfilled cells receive a group band. Date bars, holidays and
-        ' today's empty-cell highlight have already been drawn by the caller.
-        For c = startCol To endCol
-            Set chartCell = ws.Cells(r, c)
-            If chartCell.Interior.Pattern = xlNone Then
-                chartCell.Interior.Color = chartFill
-            End If
-        Next c
-
-        With rowRange.Borders(xlEdgeBottom)
-            .LineStyle = xlContinuous
-            .Weight = xlThin
-            .Color = RGB(221, 229, 237)
-        End With
         If taskLevel = 1 And hasChildren Then
-            If ws.Rows(r).RowHeight < 30 Then ws.Rows(r).RowHeight = 30
-            SetHierarchyRule rowRange, xlEdgeTop, RGB(68, 96, 122), xlMedium
-            SetHierarchyRule rowRange, xlEdgeBottom, RGB(126, 150, 173), xlThin
+            rootRows.Add r
+            rowHeightGroup(r) = 1
         ElseIf taskLevel = 2 Then
-            If ws.Rows(r).RowHeight < 26 Then ws.Rows(r).RowHeight = 26
+            rowHeightGroup(r) = 2
         Else
-            If ws.Rows(r).RowHeight < 23 Then ws.Rows(r).RowHeight = 23
+            rowHeightGroup(r) = 3
         End If
-
 NextTask:
     Next r
+    If contentRunStart > 0 Then _
+        ApplyHierarchyBottomRun ws, contentRunStart, lastRow, firstDataCol, endCol
+
+    For i = 1 To 3
+        If Not indentRanges(i) Is Nothing Then indentRanges(i).IndentLevel = i - 1
+    Next i
+    If Not boldTasks Is Nothing Then boldTasks.Font.Bold = True
+    For i = 1 To 5
+        If Not fillRanges(i) Is Nothing Then fillRanges(i).Interior.Color = CLng(fillColors(i - 1))
+    Next i
+    If Not darkRoots Is Nothing Then
+        With darkRoots
+            .Interior.Color = RGB(44, 72, 98)
+            .Font.Color = RGB(255, 255, 255)
+            .Font.Bold = True
+        End With
+    End If
+    ' Root edges remain ordered per row so shared boundary precedence is unchanged.
+    For Each rootRow In rootRows
+        Set rowRange = ws.Range(ws.Cells(CLng(rootRow), firstDataCol), ws.Cells(CLng(rootRow), endCol))
+        SetHierarchyRule rowRange, xlEdgeTop, RGB(68, 96, 122), xlMedium
+        SetHierarchyRule rowRange, xlEdgeBottom, RGB(126, 150, 173), xlThin
+    Next rootRow
+    ' Read final row heights after font changes; preserve every height already above its minimum.
+    For r = DATA_START_ROW To lastRow
+        i = rowHeightGroup(r)
+        If i > 0 Then
+            Select Case i
+                Case 1
+                    If ws.Rows(r).RowHeight < 30 Then AddHierarchyAppearanceRange heightRanges(i), ws.Rows(r)
+                Case 2
+                    If ws.Rows(r).RowHeight < 26 Then AddHierarchyAppearanceRange heightRanges(i), ws.Rows(r)
+                Case Else
+                    If ws.Rows(r).RowHeight < 23 Then AddHierarchyAppearanceRange heightRanges(i), ws.Rows(r)
+            End Select
+        End If
+    Next r
+    If Not heightRanges(1) Is Nothing Then heightRanges(1).RowHeight = 30
+    If Not heightRanges(2) Is Nothing Then heightRanges(2).RowHeight = 26
+    If Not heightRanges(3) Is Nothing Then heightRanges(3).RowHeight = 23
 
     ' Fit the final bold text and native indentation, not the old text prefixes.
-    ws.Range(COL_REQUEST & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
-
-    RebuildTaskHierarchyOutline ws, lastRow
-    RenderHierarchyTaskBars ws, lastRow, startCol, endCol
+    If fitLayout Then ws.Range(COL_REQUEST & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
+    If rebuildHierarchy Then RebuildTaskHierarchyOutline ws, lastRow
+    RenderHierarchyTaskBars ws, lastRow, startCol, endCol, Nothing, Nothing, bordersAlreadyReset
 End Sub
 
+Private Sub AddHierarchyAppearanceRange(ByRef accumulated As Range, ByVal target As Range)
+    If accumulated Is Nothing Then
+        Set accumulated = target
+    Else
+        Set accumulated = Application.Union(accumulated, target)
+    End If
+End Sub
+
+Private Sub ApplyHierarchyBottomRun(ByVal ws As Worksheet, ByVal firstRow As Long, ByVal lastRow As Long, _
+                                    ByVal firstCol As Long, ByVal lastCol As Long)
+    Dim target As Range
+    Set target = ws.Range(ws.Cells(firstRow, firstCol), ws.Cells(lastRow, lastCol))
+    ' Adjacent content rows share internal borders; blank-row gaps are never included.
+    If lastRow > firstRow Then SetHierarchyRule target, xlInsideHorizontal, RGB(221, 229, 237), xlThin
+    SetHierarchyRule target, xlEdgeBottom, RGB(221, 229, 237), xlThin
+End Sub
 Private Sub SetHierarchyRule(ByVal target As Range, ByVal edge As XlBordersIndex, _
                              ByVal color As Long, ByVal weight As XlBorderWeight)
     With target.Borders(edge)
@@ -841,6 +922,8 @@ Public Sub RebuildTaskHierarchyOutline(ByVal ws As Worksheet, ByVal lastRow As L
             End If
         Next r
     Next taskLevel
-    ws.EnableOutlining = True
-    If Not ActiveWindow Is Nothing Then ActiveWindow.DisplayOutline = True
+    If Not ws.EnableOutlining Then ws.EnableOutlining = True
+    If Not ActiveWindow Is Nothing Then
+        If Not ActiveWindow.DisplayOutline Then ActiveWindow.DisplayOutline = True
+    End If
 End Sub
