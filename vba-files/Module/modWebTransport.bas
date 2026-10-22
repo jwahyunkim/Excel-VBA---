@@ -1,6 +1,7 @@
 Attribute VB_Name = "modWebTransport"
 Option Explicit
 ' 2026-10-22 김좌현 수정 : 웹 세션·폼 전송·저장 후 상세 조회 확인과 Windows 사용자별 비밀번호 암호화
+' 2026-10-22 김좌현 수정 : 요청번호 상세 조회·충돌 확인·요청/처리 분리 갱신과 부분 성공 판정
 
 Private Type WebDataBlob
     cbData As Long
@@ -601,6 +602,245 @@ Failed:
         message = Err.Description
         If Len(message) = 0 Then message = "등록 전 입력값 또는 웹 연결을 확인하세요."
         Set WebPostRegistration = WebOutcome("failed", message, candidateNo)
+    End If
+End Function
+
+Private Function WebManagedFields() As Variant
+    WebManagedFields = Array("GUBUN", "REQ_UID", "REQ_TIT", "REQ_RMK", "STS", "PGM_MD", "PGM_NM", "PGM_ID", _
+        "ACT_GUBUN", "ACT_UID", "ACT_DT_FR", "ACT_DT", "ACT_TIME")
+End Function
+
+Private Function WebCopyDictionary(ByVal source As Object) As Object
+    Dim result As Object, key As Variant
+    Set result = WebDictionary()
+    For Each key In source.Keys
+        result.Add CStr(key), source(key)
+    Next key
+    Set WebCopyDictionary = result
+End Function
+
+Private Function WebValuesFromExisting(ByVal form As Object) As Object
+    Dim result As Object, key As Variant
+    Set result = WebDictionary()
+    For Each key In WebManagedFields()
+        If Not form("DisplayValues").Exists(CStr(key)) Then _
+            Err.Raise WEB_ERROR, "modWebTransport", "기존 실적 상세 항목을 확인하지 못했습니다: " & CStr(key)
+        result.Add CStr(key), CStr(form("DisplayValues")(CStr(key)))
+    Next key
+    Set WebValuesFromExisting = result
+End Function
+
+' The list link in c0210_in.aspx is c0200.aspx; its detail is c0200_02.aspx.
+' REQ_UID is a span on that page: it is an identity check, never a writable field.
+Public Function WebLoadExisting(ByVal session As Object, ByVal requestNo As String) As Object
+    Dim response As Object, form As Object, values As Object, url As String
+    If Len(WebMatch(requestNo, "^(RQ[0-9]+)$")) = 0 Then _
+        Err.Raise WEB_ERROR, "modWebTransport", "웹 요청번호 형식이 올바르지 않습니다."
+    url = WebResolveUrl(CStr(session("BaseUrl")), "C0/c0200_02.aspx?REQ_NO=" & WebEncodeValue(requestNo))
+    Set response = WebHttpRequest(session, "GET", url)
+    If CLng(response("Status")) <> 200 Then _
+        Err.Raise WEB_ERROR, "modWebTransport", "기존 실적 상세 화면을 읽지 못했습니다."
+    Set form = WebParseRegistrationHtml(CStr(response("Html")), CStr(response("Url")))
+    If CStr(form("RequestNo")) <> requestNo Or StrComp(CStr(form("Action")), url, vbTextCompare) <> 0 Then _
+        Err.Raise WEB_ERROR, "modWebTransport", "요청번호 또는 기존 실적 수정 경로가 일치하지 않습니다."
+    If Not form("Fields").Exists("REQ_TIT") Or Not form("Fields").Exists("REQ_RMK") Or _
+       Not form("Fields").Exists("ACT_RMK") Then _
+        Err.Raise WEB_ERROR, "modWebTransport", "로그인 세션 또는 기존 실적 수정 화면을 확인하세요."
+    If WebMatch(CStr(form("Html")), "\bid\s*=\s*[""'](btnSaveReq)[""']") <> "btnSaveReq" Or _
+       WebMatch(CStr(form("Html")), "\bid\s*=\s*[""'](btnSave)[""']") <> "btnSave" Then _
+        Err.Raise WEB_ERROR, "modWebTransport", "기존 실적 저장 버튼을 확인하지 못했습니다."
+    Set values = WebValuesFromExisting(form)
+    If CStr(values("GUBUN")) <> "PJT" Then _
+        Err.Raise WEB_ERROR, "modWebTransport", "프로젝트 실적만 갱신할 수 있습니다."
+    If form("Fields").Exists("seqNum") Then
+        If CStr(form("Fields")("seqNum")) <> requestNo Then _
+            Err.Raise WEB_ERROR, "modWebTransport", "상세 화면의 요청번호가 일치하지 않습니다."
+    End If
+    form.Add "Values", values
+    form.Add "Kind", "Existing"
+    form.Add "LoadedAt", Now
+    form.Add "Consumed", False
+    Set WebLoadExisting = form
+End Function
+
+Public Function WebReadExistingValues(ByVal session As Object, ByVal requestNo As String) As Object
+    Dim form As Object
+    Set form = WebLoadExisting(session, requestNo)
+    Set WebReadExistingValues = WebCopyDictionary(form("Values"))
+End Function
+
+Private Function WebSameValues(ByVal actual As Object, ByVal expected As Object) As Boolean
+    Dim key As Variant
+    For Each key In expected.Keys
+        If Not actual.Exists(CStr(key)) Then Exit Function
+        ' Preserve literal HTML, entities and percent text; only newline spelling varies.
+        If WebNormalizeText(CStr(actual(key))) <> WebNormalizeText(CStr(expected(key))) Then Exit Function
+    Next key
+    WebSameValues = True
+End Function
+
+Private Function WebUpdateOutcome(ByVal outcome As String, ByVal message As String, ByVal requestNo As String, _
+                                  ByVal code As String, ByVal values As Object) As Object
+    Dim result As Object
+    Set result = WebOutcome(outcome, message, requestNo)
+    result.Add "Code", code
+    If values Is Nothing Then
+        result.Add "Values", WebDictionary()
+    Else
+        result.Add "Values", WebCopyDictionary(values)
+    End If
+    Set WebUpdateOutcome = result
+End Function
+
+Private Function WebComponentEncode(ByVal value As String) As String
+    ' Browser submitContents1/2 encodeURIComponent both SmartEditor textareas,
+    ' then normal form encoding encodes that value once more for the POST body.
+    value = Replace(WebEncodeValue(value), "+", "%20")
+    value = Replace(Replace(Replace(Replace(Replace(value, "%21", "!"), "%27", "'"), "%28", "("), "%29", ")"), "%2A", "*")
+    WebComponentEncode = value
+End Function
+
+Private Function WebRequestField(ByVal name As String) As Boolean
+    WebRequestField = (name = "REQ_TIT" Or name = "REQ_RMK")
+End Function
+
+Private Function WebPostExistingStep(ByVal session As Object, ByVal form As Object, ByVal expected As Object, _
+                                     ByVal requestTab As Boolean) As Object
+    Dim fields As Object, key As Variant, response As Object
+    Set fields = WebCopyDictionary(form("Fields"))
+    For Each key In expected.Keys
+        If CStr(key) <> "REQ_UID" And WebRequestField(CStr(key)) = requestTab Then
+            fields(CStr(key)) = CStr(expected(key))
+        End If
+    Next key
+    ' ACT_RMK, web-only acceptance/planning/remarks and upload keys remain as read.
+    fields("REQ_RMK") = WebComponentEncode(CStr(fields("REQ_RMK")))
+    fields("ACT_RMK") = WebComponentEncode(CStr(fields("ACT_RMK")))
+    ' ASP.NET omits __EVENTTARGET for this WinHTTP user agent although the
+    ' rendered anchors still call __doPostBack. Supply its two standard fields.
+    If requestTab Then
+        fields("__EVENTTARGET") = "btnSaveReq"
+    Else
+        fields("__EVENTTARGET") = "btnSave"
+    End If
+    fields("__EVENTARGUMENT") = ""
+    session("LastUrl") = form("Url")
+    Set response = WebHttpRequest(session, "POST", CStr(form("Action")), WebFormEncode(fields))
+    Set WebPostExistingStep = WebLoadExisting(session, CStr(form("RequestNo")))
+End Function
+
+Private Function WebClassifyUpdate(ByVal requestNo As String, ByVal baseline As Object, ByVal expected As Object, _
+                                   ByVal actual As Object) As Object
+    Dim key As Variant, someConfirmed As Boolean
+    If Not actual Is Nothing Then
+        If WebSameValues(actual, expected) Then
+            Set WebClassifyUpdate = WebUpdateOutcome("success", "웹 상세 화면에서 갱신 내용을 확인했습니다.", requestNo, "verified", actual)
+            Exit Function
+        End If
+        For Each key In expected.Keys
+            If actual.Exists(CStr(key)) And baseline.Exists(CStr(key)) Then
+                If WebNormalizeText(CStr(expected(key))) <> WebNormalizeText(CStr(baseline(key))) And _
+                   WebNormalizeText(CStr(actual(key))) = WebNormalizeText(CStr(expected(key))) Then someConfirmed = True
+            End If
+        Next key
+    End If
+    If someConfirmed Then
+        Set WebClassifyUpdate = WebUpdateOutcome("partial", "일부 변경만 확인되었습니다. 요청번호로 웹 내용을 확인한 뒤 다시 처리하세요.", requestNo, "partial", actual)
+    Else
+        Set WebClassifyUpdate = WebUpdateOutcome("unknown", "갱신 결과를 확인하지 못했습니다. 자동으로 재전송하지 않습니다.", requestNo, "unverified", actual)
+    End If
+End Function
+
+Public Function WebPostUpdate(ByVal session As Object, ByVal form As Object, ByVal values As Object) As Object
+    Dim fresh As Object, baseline As Object, expected As Object, actual As Object, phaseExpected As Object
+    Dim key As Variant, requestNo As String, allowed As Object, code As String, message As String
+    Dim requestChanged As Boolean, processingChanged As Boolean, posted As Boolean
+    On Error GoTo Failed
+    code = "validation"
+    If form Is Nothing Then Err.Raise WEB_ERROR, , "기존 실적 화면을 먼저 불러오세요."
+    If Not form.Exists("Kind") Then Err.Raise WEB_ERROR, , "기존 실적 화면을 먼저 불러오세요."
+    If CStr(form("Kind")) <> "Existing" Then Err.Raise WEB_ERROR, , "기존 실적 화면을 먼저 불러오세요."
+    requestNo = CStr(form("RequestNo"))
+    Set baseline = WebCopyDictionary(form("Values"))
+    If CBool(form("Consumed")) Then Err.Raise WEB_ERROR, , "이미 전송한 수정 화면입니다. 결과를 확인한 뒤 다시 불러오세요."
+    If DateDiff("n", CDate(form("LoadedAt")), Now) > 10 Then Err.Raise WEB_ERROR, , "수정 화면이 오래되었습니다. 다시 불러오세요."
+    Set allowed = WebDictionary()
+    For Each key In WebManagedFields()
+        allowed.Add CStr(key), True
+    Next key
+    Set expected = WebCopyDictionary(baseline)
+    For Each key In values.Keys
+        If Not allowed.Exists(CStr(key)) Then Err.Raise WEB_ERROR, , "갱신할 수 없는 입력 항목입니다: " & CStr(key)
+        If CStr(key) = "REQ_UID" And CStr(values(key)) <> CStr(baseline("REQ_UID")) Then
+            code = "requester_locked"
+            Err.Raise WEB_ERROR, , "등록된 실적의 요청자는 수정 화면에서 변경할 수 없습니다."
+        End If
+        expected(CStr(key)) = CStr(values(key))
+    Next key
+    If CStr(expected("GUBUN")) <> "PJT" Then Err.Raise WEB_ERROR, , "프로젝트 실적만 갱신할 수 있습니다."
+    If Len(Trim$(CStr(expected("REQ_TIT")))) = 0 Or Len(Trim$(CStr(expected("REQ_RMK")))) = 0 Then _
+        Err.Raise WEB_ERROR, , "제목과 내용을 입력하세요."
+    If CStr(expected("REQ_TIT")) <> CStr(baseline("REQ_TIT")) And Len(CStr(expected("REQ_TIT"))) > 299 Then _
+        Err.Raise WEB_ERROR, , "수정하는 제목은 299자 이내로 입력하세요."
+    If Len(CStr(expected("PGM_NM"))) > 100 Or Len(CStr(expected("PGM_ID"))) > 100 Then _
+        Err.Raise WEB_ERROR, , "프로그램명과 프로그램ID는 각각 100자 이내로 입력하세요."
+    Set fresh = WebLoadExisting(session, requestNo)
+    Set actual = fresh("Values")
+    If Not WebSameValues(actual, baseline) Then
+        Set WebPostUpdate = WebUpdateOutcome("failed", "미리보기 이후 웹 내용이 변경되었습니다. 다시 조회하여 변경 내용을 확인하세요.", requestNo, "conflict", actual)
+        Exit Function
+    End If
+    For Each key In values.Keys
+        If CStr(key) <> "REQ_UID" Then
+            If Not fresh("Fields").Exists(CStr(key)) Then Err.Raise WEB_ERROR, , "현재 수정 화면에 없는 입력 항목입니다: " & CStr(key)
+            If fresh("Options").Exists(CStr(key)) Then
+                If Not fresh("Options")(CStr(key)).Exists(CStr(values(key))) Then _
+                    Err.Raise WEB_ERROR, , "웹 선택 목록이 변경되었습니다. 목록을 새로고침하세요: " & CStr(key)
+            End If
+        End If
+        If WebNormalizeText(CStr(expected(key))) <> WebNormalizeText(CStr(actual(key))) Then
+            If WebRequestField(CStr(key)) Then
+                requestChanged = True
+            ElseIf CStr(key) <> "REQ_UID" Then
+                processingChanged = True
+            End If
+        End If
+    Next key
+    form("Consumed") = True
+    If requestChanged Then
+        Set phaseExpected = WebCopyDictionary(actual)
+        phaseExpected("REQ_TIT") = expected("REQ_TIT")
+        phaseExpected("REQ_RMK") = expected("REQ_RMK")
+        posted = True
+        Set fresh = WebPostExistingStep(session, fresh, expected, True)
+        Set actual = fresh("Values")
+        If Not WebSameValues(actual, phaseExpected) Then
+            Set WebPostUpdate = WebClassifyUpdate(requestNo, baseline, expected, actual)
+            Exit Function
+        End If
+    End If
+    If processingChanged Then
+        posted = True
+        Set fresh = WebPostExistingStep(session, fresh, expected, False)
+        Set actual = fresh("Values")
+    End If
+    Set WebPostUpdate = WebClassifyUpdate(requestNo, baseline, expected, actual)
+    Exit Function
+Failed:
+    message = Err.Description
+    If posted Then
+        ' One GET can establish what persisted even when the POST response was lost.
+        ' Never repeat a POST, and never assume a two-tab save was atomic.
+        On Error Resume Next
+        Err.Clear
+        Set fresh = WebLoadExisting(session, requestNo)
+        If Err.Number = 0 Then Set actual = fresh("Values")
+        Err.Clear
+        On Error GoTo 0
+        Set WebPostUpdate = WebClassifyUpdate(requestNo, baseline, expected, actual)
+    Else
+        If Len(message) = 0 Then message = "갱신 전 입력값 또는 웹 연결을 확인하세요."
+        Set WebPostUpdate = WebUpdateOutcome("failed", message, requestNo, code, actual)
     End If
 End Function
 

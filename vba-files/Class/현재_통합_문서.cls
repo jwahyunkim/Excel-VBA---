@@ -8,6 +8,7 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-10-22 김좌현 수정 : 간트 셀 직접 수정 시 간트 전용 새로고침 캐시 무효화
 ' 2026-10-22 김좌현 수정 : 웹등록 초기화, 보호 비밀번호와 그룹별 등록 기준 이벤트 연결
 
 Private Sub Workbook_Open()
@@ -105,6 +106,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
         GoTo SafeExit
     End If
 
+    If Not Intersect(Target, Sh.Range(COL_GANTT_START & ":XFD")) Is Nothing Then InvalidateGanttRenderCache Sh
     Application.enableEvents = False
     HandleWebTaskChange Sh, Target
     invalidTypeCell = GetInvalidTaskType(Sh, Target)

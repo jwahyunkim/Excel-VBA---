@@ -1,313 +1,438 @@
-' Append to modWebUpload only in a disposable workbook copy. No network calls.
-' 2026-10-22 김좌현 수정 : 웹 등록 설정·식별값·선택목록 갱신·미리보기·이력 통합 검증
+' Append to modWebUpload only in a disposable workbook. No real network calls.
+' 2026-10-22 김좌현 수정 : 등록단위 동기화·신규/갱신·서버충돌·요청번호 연결 및 미확인 복구 검증
+' 2026-10-22 김좌현 수정 : 기존 갱신 기본값과 신규 등록 명시 선택, 연결 소실 및 모드 변조 차단 검증
 Public Function RunWebUploadRegression() As String
-    Dim ws As Worksheet, config As Worksheet, sortWs As Worksheet, preview As Worksheet
-    Dim log As Worksheet, form As Object, item As Object, items As Collection, choices As Collection
-    Dim checked As Long, stage As String, firstId As String, secondId As String, newId As String
-    Dim snapshot As String, idSnapshot As String, no As String, outcome As String, secret As String
-    Dim encrypted As String, r As Long, field As Variant, originalLabel As String, caught As String
+    Dim ws As Worksheet, config As Worksheet, preview As Worksheet, log As Worksheet
+    Dim form As Object, item As Object, state As Object, server As Object, session As Object, items As Collection
+    Dim checked As Long, stage As String, r As Long, firstId As String, idSnapshot As String, snapshot As String
+    Dim no As String, secondNo As String, caught As String, originalBody As String, baseline As String, secret As String
+    Dim connection As Worksheet, connectionRow As Long, expectedRequestNoExisting As String
     On Error GoTo Failed
     Application.EnableEvents = False
-    stage = "configure local option fixture"
+    stage = "local fixture and stable identities"
     EnsureWebConfigSheet
     Set config = ThisWorkbook.Worksheets(WEB_CONFIG_SHEET_NAME)
-    Set form = WebUploadRegressionForm(False, False)
-    StoreWebOptionLists form
-    config.Range("B6").Value2 = 3
-    config.Range("B7").Value2 = "N"
-    config.Range("B8").Value2 = "요청자 [requester1]"
-    config.Range("B9").Value2 = "개발"
-    config.Range("B10").Value2 = "처리중"
-    config.Range("B11").Value2 = "생산"
-    config.Range("B12").Value2 = "처리자 [worker1]"
+    config.Range("B2").Value2 = "http://fixture.invalid/support/"
+    stage = "populate option fixture"
+    StoreWebOptionLists WebUploadRegressionForm(False, False)
+    config.Range("B6").Value2 = 3: config.Range("B7").Value2 = "N"
+    config.Range("B8").Value2 = "요청자 [requester1]": config.Range("B9").Value2 = "개발"
+    config.Range("B10").Value2 = "처리중": config.Range("B11").Value2 = "생산": config.Range("B12").Value2 = "처리자 [worker1]"
     Set ws = ThisWorkbook.Worksheets.Add
     ws.Name = "WebUploadFixture"
+    stage = "set up fixture headers"
     SetupDataHeaders ws
     For r = 5 To 9
         WebUploadRegressionSeedRow ws, r
     Next r
-    ws.Cells(5, COL_REQUEST).Value2 = "프로젝트 그룹"
-    ws.Cells(5, COL_LEVEL).Value2 = 1
-    ws.Cells(5, COL_WEB_LEVEL).Value2 = 3
-    ws.Cells(6, COL_REQUEST).Value2 = "세부 그룹"
-    ws.Cells(6, COL_LEVEL).Value2 = 2
-    ws.Cells(7, COL_REQUEST).Value2 = "등록할 레벨3"
-    ws.Cells(7, COL_LEVEL).Value2 = 3
-    ws.Cells(7, COL_WEB_REQUESTER).Value2 = "요청자 둘 [requester2]"
-    ws.Cells(7, COL_WEB_ENABLED).Value2 = "Y"
-    ws.Cells(8, COL_REQUEST).Value2 = "레벨3 없는 레벨2"
-    ws.Cells(8, COL_LEVEL).Value2 = 2
-    ws.Cells(8, COL_WEB_ENABLED).Value2 = "Y"
-    ws.Cells(9, COL_REQUEST).Value2 = "레벨1 단독 오류"
-    ws.Cells(9, COL_LEVEL).Value2 = 1
-    ws.Cells(9, COL_WEB_LEVEL).Value2 = 3
-    ws.Cells(9, COL_WEB_ENABLED).Value2 = "Y"
-
-    stage = "initialize twice preserves business data, choices and stable IDs"
+    ws.Cells(5, COL_REQUEST).Value2 = "프로젝트 그룹": ws.Cells(5, COL_LEVEL).Value2 = 1: ws.Cells(5, COL_WEB_LEVEL).Value2 = 3
+    ws.Cells(6, COL_REQUEST).Value2 = "세부 그룹": ws.Cells(6, COL_LEVEL).Value2 = 2
+    ws.Cells(7, COL_REQUEST).Value2 = "등록할 레벨3": ws.Cells(7, COL_LEVEL).Value2 = 3: ws.Cells(7, COL_WEB_ENABLED).Value2 = "Y"
+    ws.Cells(8, COL_REQUEST).Value2 = "레벨3 없는 레벨2": ws.Cells(8, COL_LEVEL).Value2 = 2: ws.Cells(8, COL_WEB_ENABLED).Value2 = "Y"
+    ws.Cells(9, COL_REQUEST).Value2 = "레벨1 단독 오류": ws.Cells(9, COL_LEVEL).Value2 = 1: ws.Cells(9, COL_WEB_LEVEL).Value2 = 3: ws.Cells(9, COL_WEB_ENABLED).Value2 = "Y"
     snapshot = WebUploadRegressionBusinessSnapshot(ws)
+    stage = "first web initialization"
     InitializeWebUpload
-    WebUploadRegressionEqual WebUploadRegressionBusinessSnapshot(ws), snapshot, "initialization preserves request/modification/dates/minutes/progress", checked
-    firstId = GetWebTaskId(ws, 7)
-    secondId = GetWebTaskId(ws, 8)
-    WebUploadRegressionAssert Len(firstId) = 36 And Len(secondId) = 36, "task IDs are GUIDs", checked
-    WebUploadRegressionAssert firstId <> secondId, "new rows receive different IDs", checked
-    WebUploadRegressionEqual CStr(ws.Cells(6, COL_WEB_ENABLED).Value2), "N", "blank registration selection gets default N", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_ENABLED).Value2), "Y", "explicit registration Y survives", checked
-    WebUploadRegressionEqual CStr(ws.Cells(6, COL_WEB_REQUESTER).Value2), "요청자 [requester1]", "blank requester gets default", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_REQUESTER).Value2), "요청자 둘 [requester2]", "explicit requester survives", checked
     idSnapshot = WebUploadRegressionIdSnapshot(ws)
+    stage = "second web initialization"
     InitializeWebUpload
-    WebUploadRegressionEqual WebUploadRegressionBusinessSnapshot(ws), snapshot, "second initialization preserves business data", checked
-    WebUploadRegressionEqual WebUploadRegressionIdSnapshot(ws), idSnapshot, "second initialization preserves every task ID", checked
-    WebUploadRegressionAssert ws.Columns(COL_WEB_TASK_ID).Hidden, "persistent task ID column stays hidden", checked
-    WebUploadRegressionAssert Not Application.EnableEvents, "initialization preserves disabled events", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_REQUESTER).Validation.Type), CStr(xlValidateList), "main requester is a dropdown", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WORK_MINUTES).Validation.Type), CStr(xlValidateWholeNumber), "minutes validation is whole numbers", checked
-    WebUploadRegressionAssert ws.Shapes("btnWebPreview").OnAction Like "*PreviewWebTasks", "main preview button is connected", checked
+    WebUploadRegressionEqual WebUploadRegressionIdSnapshot(ws), idSnapshot, "initialization preserves IDs", checked
+    WebUploadRegressionEqual WebUploadRegressionBusinessSnapshot(ws), snapshot, "initialization preserves business data", checked
+    firstId = GetWebTaskId(ws, 7)
+    WebUploadRegressionAssert Len(firstId) = 36, "persistent GUID", checked
+    WebUploadRegressionAssert ThisWorkbook.Worksheets(WEB_STATE_SHEET_NAME).Visible = xlSheetVeryHidden, "connection state is very hidden", checked
+    ws.Columns(COL_WEB_ENABLED & ":" & COL_WEB_RESULT).Hidden = True
+    ws.Columns(COL_WORK_MINUTES).Hidden = True
+    PrepareWebTaskSheet ws
+    WebUploadRegressionAssert ws.Columns(COL_WEB_ENABLED).Hidden And ws.Columns(COL_WEB_RESULT).Hidden And ws.Columns(COL_WORK_MINUTES).Hidden, "prepare preserves hidden web mode columns", checked
+    ws.Columns(COL_WEB_ENABLED & ":" & COL_WEB_RESULT).Hidden = False
+    ws.Columns(COL_WORK_MINUTES).Hidden = False
+    PrepareWebTaskSheet ws
+    WebUploadRegressionAssert Not ws.Columns(COL_WEB_ENABLED).Hidden And Not ws.Columns(COL_WORK_MINUTES).Hidden, "prepare preserves expanded web mode columns", checked
+    WebUploadRegressionResetJournal
 
-    stage = "child edit propagates criterion across only its own level 1 group"
+    stage = "registration unit propagation and merge conflicts"
     ws.Cells(7, COL_WEB_LEVEL).Value2 = 2
     HandleWebTaskChange ws, ws.Cells(7, COL_WEB_LEVEL)
     For r = 5 To 8
-        WebUploadRegressionEqual CStr(ws.Cells(r, COL_WEB_LEVEL).Value2), "2", "group criterion propagated row " & CStr(r), checked
+        WebUploadRegressionEqual CStr(ws.Cells(r, COL_WEB_LEVEL).Value2), "2", "basis propagated within L1", checked
     Next r
-    WebUploadRegressionEqual CStr(ws.Cells(9, COL_WEB_LEVEL).Value2), "3", "next group criterion is isolated", checked
-    Application.EnableEvents = True
-    ws.Cells(8, COL_WEB_LEVEL).Value2 = 1
-    WebUploadRegressionAssert Application.EnableEvents, "criterion event restores enabled events", checked
-    WebUploadRegressionEqual CStr(ws.Cells(5, COL_WEB_LEVEL).Value2), "1", "real workbook change event updates root criterion", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_LEVEL).Value2), "1", "real workbook change event updates sibling criterion", checked
-    Application.EnableEvents = False
+    ws.Cells(7, COL_WEB_REQUESTER).Value2 = "요청자 둘 [requester2]"
+    HandleWebTaskChange ws, ws.Cells(7, COL_WEB_REQUESTER)
+    WebUploadRegressionEqual CStr(ws.Cells(6, COL_WEB_REQUESTER).Value2), "요청자 둘 [requester2]", "child edit updates L2 root", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_REQUESTER).Value2), "요청자 [requester1]", "neighbor registration unit unchanged", checked
+    On Error Resume Next
+    Set form = WebBasisMergePlan(ws, 5, 1)
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionContains caught, "합쳐", "merging conflicting units rejected", checked
+    ws.Cells(6, COL_WEB_REQUESTER).Value2 = "요청자 [requester1]"
+    HandleWebTaskChange ws, ws.Cells(6, COL_WEB_REQUESTER)
+    ws.Cells(7, COL_WEB_LEVEL).Value2 = 1
+    HandleWebTaskChange ws, ws.Cells(7, COL_WEB_LEVEL)
+    WebUploadRegressionEqual CStr(ws.Cells(5, COL_WEB_ENABLED).Value2), "Y", "uniform merged unit adopts old representative selection", checked
+    ws.Cells(7, COL_WEB_PROGRAM_ID).Value2 = "PGM-ONE"
+    HandleWebTaskChange ws, ws.Cells(7, COL_WEB_PROGRAM_ID)
+    WebUploadRegressionEqual CStr(ws.Cells(5, COL_WEB_PROGRAM_ID).Value2), "PGM-ONE", "L1 unit includes root", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_PROGRAM_ID).Value2), "PGM-ONE", "L1 unit includes siblings", checked
+    ws.Cells(6, COL_WEB_LEVEL).Value2 = 3
+    HandleWebTaskChange ws, ws.Cells(6, COL_WEB_LEVEL)
+    WebUploadRegressionEqual CStr(WebRegistrationRootRow(ws, 6)), "0", "L2 with children is not target in basis3", checked
+    WebUploadRegressionEqual CStr(WebRegistrationRootRow(ws, 7)), "7", "L3 is its own target", checked
+    WebUploadRegressionEqual CStr(WebRegistrationRootRow(ws, 8)), "8", "childless L2 fallback remains target", checked
+    ApplyWebTaskProtection ws
+    WebUploadRegressionEqual CStr(ws.Cells(6, COL_WEB_ACTION).Font.Color), CStr(RGB(140, 140, 140)), "non-target web field grey", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_ACTION).Font.Color), "0", "active target web field black", checked
+    ws.Cells(6, COL_WEB_LEVEL).Value2 = 2
+    HandleWebTaskChange ws, ws.Cells(6, COL_WEB_LEVEL)
+    ApplyWebTaskProtection ws
+    WebUploadRegressionEqual CStr(ws.Cells(6, COL_WEB_ACTION).Font.Color), "0", "activated target restores black", checked
     ws.Cells(6, COL_WEB_LEVEL).Value2 = 3
     HandleWebTaskChange ws, ws.Cells(6, COL_WEB_LEVEL)
 
-    stage = "credential persistence is masked and Windows protected"
-    secret = "DisposableFixture-" & Replace(firstId, "-", "")
+    stage = "period freshness without report or minutes effects"
+    ws.Cells(7, COL_ACTUAL_START).Value = DateSerial(2026, 10, 10)
+    ws.Cells(7, COL_ACTUAL_END).Value = DateSerial(2026, 10, 12)
+    RefreshWebTaskPeriods ws
+    WebUploadRegressionEqual Format$(ws.Cells(6, COL_ACTUAL_START).Value, "yyyy-mm-dd"), "2026-10-10", "parent actual start refreshed", checked
+    WebUploadRegressionEqual Format$(ws.Cells(6, COL_ACTUAL_END).Value, "yyyy-mm-dd"), "2026-10-12", "parent actual end refreshed", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEEKLY_REPORT).Value2), "기존 보고 상태", "web period refresh leaves report state", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WORK_MINUTES).Value2), "30", "minutes not replicated or summed", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_PROGRESS).Value2), "0.5", "web refresh leaves progress", checked
+
+    stage = "protected credentials and fresh preview"
+    secret = "Disposable-" & Replace(firstId, "-", "")
     SetWebCredentials "fixture-login", secret
-    encrypted = CStr(config.Range("Z2").Value2)
-    WebUploadRegressionEqual CStr(config.Range("B3").Value2), "fixture-login", "credential username stored", checked
-    WebUploadRegressionEqual CStr(config.Range("B4").Value2), "********", "password input is masked", checked
-    WebUploadRegressionAssert Len(encrypted) > 0 And encrypted <> secret, "password is not stored as plaintext", checked
-    WebUploadRegressionEqual WebUnprotectSecret(encrypted), secret, "DPAPI secret roundtrip", checked
-    WebUploadRegressionAssert Not WebUploadRegressionContainsCellSecret(secret), "plaintext password is absent from every worksheet cell", checked
-    WebUploadRegressionAssert config.Columns("Z").Hidden, "encrypted secret storage is hidden", checked
-    WebUploadRegressionAssert Not Application.EnableEvents, "secret setter restores disabled events", checked
-    Application.EnableEvents = True
-    config.Range("B4").Value2 = secret & "-event"
-    WebUploadRegressionAssert Application.EnableEvents, "password change event restores enabled events", checked
-    Application.EnableEvents = False
-    WebUploadRegressionEqual CStr(config.Range("B4").Value2), "********", "typed password is masked by workbook change event", checked
-    WebUploadRegressionEqual WebUnprotectSecret(CStr(config.Range("Z2").Value2)), secret & "-event", "typed password is protected by workbook event", checked
-    WebUploadRegressionAssert Not WebUploadRegressionContainsCellSecret(secret), "typed plaintext password is absent from worksheet cells", checked
-    SetWebPasswordValue ""
-    WebUploadRegressionEqual CStr(config.Range("B4").Value2), "", "cleared password removes mask", checked
-    WebUploadRegressionEqual CStr(config.Range("Z2").Value2), "", "cleared password removes protected storage", checked
-    secret = vbNullString
-
-    stage = "option refresh keeps selected IDs when labels change"
-    Set form = WebUploadRegressionForm(True, False)
-    StoreWebOptionLists form
-    WebUploadRegressionEqual CStr(ws.Cells(6, COL_WEB_REQUESTER).Value2), "요청자 변경 [requester1]", "renamed requester follows existing ID", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_REQUESTER).Value2), "요청자 둘 변경 [requester2]", "second requester follows own ID", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_ACTION).Value2), "개발 변경", "renamed action follows existing ID", checked
-    WebUploadRegressionEqual ResolveWebOption("ACT_GUBUN", CStr(ws.Cells(7, COL_WEB_ACTION).Value2)), "DEV", "renamed action retains original code", checked
-    WebUploadRegressionEqual CStr(config.Range("B9").Value2), "개발 변경", "default follows same ID", checked
-    WebUploadRegressionAssert IsDate(config.Range("B5").Value), "list update timestamp recorded", checked
-    WebUploadRegressionAssert InStr(ThisWorkbook.Names("WebRequesters").RefersTo, "$E$10") > 0, "requester dropdown includes both IDs", checked
-
-    stage = "deleted ID stays invalid even if a new code reuses the same label"
-    Set form = WebUploadRegressionForm(True, True)
-    StoreWebOptionLists form
-    WebUploadRegressionEqual ResolveWebOption("ACT_GUBUN", CStr(ws.Cells(7, COL_WEB_ACTION).Value2)), "", "removed selected ID cannot map to replacement by label", checked
-    WebUploadRegressionEqual ResolveWebOption("ACT_GUBUN", CStr(config.Range("B9").Value2)), "", "removed default ID cannot map to replacement", checked
-    Set items = BuildWebUploadItems(ws)
-    WebUploadRegressionContains CStr(items(1)("Error")), "처리구분", "missing code is visible in preview validation", checked
-    For r = 5 To 9
-        ws.Cells(r, COL_WEB_ACTION).Value2 = "개발 변경"
-    Next r
-    config.Range("B9").Value2 = "개발 변경"
-
-    stage = "persistent IDs follow rows through sorting and insertion"
-    Set sortWs = ThisWorkbook.Worksheets.Add
-    sortWs.Name = "WebSortFixture"
-    SetupDataHeaders sortWs
-    For r = 5 To 7
-        WebUploadRegressionSeedRow sortWs, r
-        sortWs.Cells(r, COL_LEVEL).Value2 = 1
-        sortWs.Cells(r, COL_REQUEST).Value2 = "정렬 " & CStr(r)
-    Next r
-    PrepareWebTaskSheet sortWs
-    firstId = GetWebTaskId(sortWs, 5)
-    secondId = GetWebTaskId(sortWs, 7)
-    sortWs.Range(COL_NO & "5:" & COL_STATUS & "7").Sort _
-        Key1:=sortWs.Range(COL_REQUEST & "5"), Order1:=xlDescending, Header:=xlNo
-    WebUploadRegressionEqual GetWebTaskId(sortWs, 7), firstId, "sort carries first ID with its task", checked
-    WebUploadRegressionEqual GetWebTaskId(sortWs, 5), secondId, "sort carries last ID with its task", checked
-    WebUploadRegressionEqual CStr(sortWs.Cells(7, COL_REQUEST).Value2), "정렬 5", "sort task and ID stay paired", checked
-    sortWs.Rows(6).Insert Shift:=xlShiftDown
-    WebUploadRegressionEqual GetWebTaskId(sortWs, 8), firstId, "insertion shifts existing ID without reassignment", checked
-    WebUploadRegressionEqual CStr(FindWebTaskRow(sortWs, firstId)), "8", "history locates inserted/sorted task by persistent ID", checked
-    WebUploadRegressionSeedRow sortWs, 6
-    sortWs.Cells(6, COL_REQUEST).Value2 = "새로 삽입한 업무"
-    sortWs.Cells(6, COL_LEVEL).Value2 = 1
-    PrepareWebTaskSheet sortWs
-    newId = GetWebTaskId(sortWs, 6)
-    WebUploadRegressionAssert Len(newId) = 36 And newId <> firstId And newId <> secondId, "inserted new task receives new identity", checked
-    WebUploadRegressionEqual GetWebTaskId(sortWs, 8), firstId, "prepare preserves shifted original identity", checked
-
-    stage = "actual preview UI shows eligible rows and root-only group error"
+    WebUploadRegressionEqual CStr(config.Range("B4").Value2), "********", "password masked", checked
+    WebUploadRegressionEqual WebUnprotectSecret(CStr(config.Range("Z2").Value2)), secret, "DPAPI roundtrip", checked
+    WebUploadRegressionAssert Not WebUploadRegressionContainsCellSecret(secret), "no plaintext secret cell", checked
+    WebUploadMockReset "success", True
     ws.Activate
-    PreviewWebTasks
+    PreviewWebTasks False
     Set preview = ThisWorkbook.Worksheets(WEB_PREVIEW_SHEET_NAME)
-    WebUploadRegressionEqual ActiveSheet.Name, WEB_PREVIEW_SHEET_NAME, "preview sheet activated", checked
-    WebUploadRegressionEqual CStr(mPreviewItems.Count), "3", "two eligible tasks and one group diagnostic", checked
-    WebUploadRegressionEqual CStr(preview.Cells(5, 2).Value2), "7", "preview first source row", checked
-    WebUploadRegressionEqual CStr(preview.Cells(6, 2).Value2), "8", "preview childless L2 source row", checked
-    WebUploadRegressionEqual CStr(preview.Cells(7, 2).Value2), "9", "preview group error source row", checked
-    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "등록 가능", "valid task preview status", checked
-    WebUploadRegressionEqual CStr(preview.Cells(7, 1).Value2), "확인 필요", "root-only group error preview status", checked
-    WebUploadRegressionContains CStr(preview.Cells(7, 13).Value2), "해당하는 업무가 없습니다", "root-only reason is visible", checked
-    WebUploadRegressionEqual CStr(preview.Cells(5, 3).Value2), "[소분류] 등록할 레벨3", "actual preview title", checked
-    WebUploadRegressionContains CStr(preview.Cells(5, 4).Value2), "└ 수정 7", "actual preview body contains modification", checked
-    WebUploadRegressionAssert preview.Shapes("btnWebUploadPreview").OnAction Like "*UploadWebTasks", "preview upload button is connected", checked
-    snapshot = mPreviewSnapshot
-    ws.Cells(7, COL_MODIFICATION).Value2 = "미리보기 후 변경"
-    Set items = BuildWebUploadItems(ws)
-    WebUploadRegressionAssert PreviewItemsSnapshot(items) <> snapshot, "edited content invalidates prior preview snapshot", checked
-    ws.Cells(7, COL_MODIFICATION).Value2 = "수정 7"
+    WebUploadRegressionEqual CStr(mPreviewItems.Count), "3", "two targets plus group diagnostic", checked
+    WebUploadRegressionEqual CStr(preview.Range("D3").Value2), "기존 갱신", "main preview defaults to existing update", checked
+    WebUploadRegressionEqual mPreviewMode, "기존 갱신", "stored preview mode defaults to update", checked
+    WebUploadRegressionEqual CStr(preview.Range("D3").Validation.Type), CStr(xlValidateList), "execution mode is a dropdown", checked
+    WebUploadRegressionAssert Not preview.Range("D3").Locked, "execution mode remains selectable in protected preview", checked
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "연결 필요", "missing request number is connection-required in update mode", checked
+    WebUploadRegressionEqual CStr(preview.Cells(6, 1).Value2), "연결 필요", "every unlinked target is blocked in update mode", checked
+    WebUploadRegressionContains CStr(preview.Cells(5, 13).Value2), "요청번호", "missing connection has actionable explanation", checked
+    WebUploadRegressionEqual CStr(preview.Cells(7, 1).Value2), "확인 필요", "invalid group displayed", checked
+    UploadWebTasks False
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "default update mode cannot create unlinked requests", checked
+    WebUploadRegressionEqual CStr(WebUploadMockUpdateCount), "0", "unlinked update mode cannot update a request", checked
+    WebUploadRegressionEqual CStr(WebUploadMockLoadCount), "0", "default update mode never loads a new registration form", checked
 
-    stage = "journal updates source by stable ID and previews block completed/unknown rows"
-    Set item = mPreviewItems(1)
-    RecordWebOutcome item, "등록완료", "PJT-000123", "fixture only"
-    no = vbNullString
-    outcome = PreviousWebOutcome(CStr(item("SourceId")), no)
-    WebUploadRegressionEqual outcome, "등록완료", "latest success outcome found", checked
-    WebUploadRegressionEqual no, "PJT-000123", "registered number found", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_RESULT).Value2), "등록완료 PJT-000123", "source result updated by ID", checked
-    Set item = mPreviewItems(2)
-    RecordWebOutcome item, "결과 미확인", "PJT-000124", "fixture only"
-    PreviewWebTasks
-    WebUploadRegressionContains CStr(preview.Cells(5, 13).Value2), "이미 등록", "completed task blocked in preview", checked
-    WebUploadRegressionContains CStr(preview.Cells(6, 13).Value2), "웹에서 먼저 확인", "unknown result blocked in preview", checked
-    Set item = mPreviewItems(2)
-    RecordWebOutcome item, "미등록 확인", "", "checked in fixture"
-    PreviewWebTasks
-    WebUploadRegressionEqual CStr(preview.Cells(6, 1).Value2), "등록 가능", "explicit unregistered confirmation permits new preview", checked
-    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
-    WebUploadRegressionAssert log.Columns("C").Hidden, "journal identity column hidden", checked
-    WebUploadRegressionAssert log.Hyperlinks.Count >= 2, "successful/unknown request number links recorded", checked
-    WebUploadRegressionAssert Not mWebBusy, "offline tests never enter upload busy state", checked
-
-    stage = "upload orchestration journals before POST, saves results and skips invalid rows"
-    WebUploadRegressionResetJournal
-    config.Range("B2").Value2 = "http://fixture.invalid/support/"
-    SetWebCredentials "mock-login", "Disposable-Mock-Password"
+    stage = "execution mode and preview operation cannot silently authorize new registration"
+    mPreviewItems(1)("Operation") = "신규"
+    mPreviewItems(1)("Error") = vbNullString
+    On Error Resume Next
+    UploadWebTasks False
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "tampered operation cannot insert in update mode", checked
+    WebUploadRegressionEqual CStr(WebUploadMockLoadCount), "0", "tampered operation cannot load a new form in update mode", checked
+    PreviewWebTasks False
+    preview.Range("D3").Value2 = "임의 모드"
+    On Error Resume Next
+    UploadWebTasks False
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionAssert Len(caught) > 0, "invalid pasted execution mode is rejected", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "invalid mode cannot insert", checked
+    WebUploadRegressionEqual CStr(WebUploadMockLoadCount), "0", "invalid mode cannot load registration form", checked
+    WebUploadRegressionSelectMode "신규 등록"
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "신규", "explicit new mode enables unlinked target", checked
+    WebUploadRegressionEqual mPreviewMode, "신규 등록", "selected new mode is captured", checked
+    mPreviewItems(1)("Operation") = "갱신"
+    mPreviewItems(1)("Error") = vbNullString
+    On Error Resume Next
+    UploadWebTasks False
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionAssert Len(caught) > 0, "update operation tampering is rejected in new mode", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "tampered new-mode operation cannot insert", checked
+    WebUploadRegressionEqual CStr(WebUploadMockUpdateCount), "0", "tampered new-mode operation cannot update", checked
+    WebUploadRegressionSelectMode "신규 등록"
+    preview.Range("D3").Value2 = "기존 갱신"
+    On Error Resume Next
+    UploadWebTasks False
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionContains caught, "미리보기", "mode change invalidates prepared preview", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "changed mode never posts stale preview", checked
+    WebUploadRegressionEqual CStr(WebUploadMockLoadCount), "0", "changed mode rejected before new form retrieval", checked
+    WebUploadRegressionSelectMode "신규 등록"
     ws.Activate
     PreviewWebTasks False
-    WebUploadMockReset "success"
-    UploadWebTasks False
-    WebUploadRegressionEqual CStr(WebUploadMockOpenCount), "1", "one mock session opened for batch", checked
-    WebUploadRegressionEqual CStr(WebUploadMockLoadCount), "2", "fresh form loaded for each valid row", checked
-    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "2", "two valid rows posted; group error skipped", checked
-    WebUploadRegressionEqual CStr(WebUploadMockJournalChecks), "2", "each POST sees persisted matching pre-journal", checked
-    WebUploadRegressionEqual CStr(log.Cells(log.Rows.Count, "A").End(xlUp).Row), "5", "two pre-POST and two result journal records", checked
-    WebUploadRegressionEqual CStr(log.Range("E2").Value2), "등록 시작", "first journal is start marker", checked
-    WebUploadRegressionEqual CStr(log.Range("E3").Value2), "등록완료", "first result journal is success", checked
-    WebUploadRegressionEqual CStr(log.Range("E4").Value2), "등록 시작", "second start marker recorded", checked
-    WebUploadRegressionEqual CStr(log.Range("E5").Value2), "등록완료", "second result journal is success", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_RESULT).Value2), "등록완료 RQMOCK000001", "first real source result updated", checked
-    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_RESULT).Value2), "등록완료 RQMOCK000002", "second real source result updated", checked
-    WebUploadRegressionAssert Not mWebBusy And Not Application.EnableEvents, "upload clears busy flag and restores events", checked
-    UploadWebTasks False
-    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "2", "repeat upload never posts completed rows again", checked
-    WebUploadRegressionEqual CStr(WebUploadMockLoadCount), "2", "repeat upload does not load completed forms", checked
-
-    stage = "stale content and site configuration are rejected before transport"
-    WebUploadRegressionResetJournal
-    PreviewWebTasks False
-    ws.Cells(7, COL_MODIFICATION).Value2 = "stale preview content"
-    WebUploadMockReset "success"
+    WebUploadRegressionEqual CStr(preview.Range("D3").Value2), "기존 갱신", "opening from main resets prior new mode", checked
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "연결 필요", "main reset restores missing-connection block", checked
+    WebUploadRegressionSelectMode "신규 등록"
+    snapshot = mPreviewSnapshot
+    ws.Cells(7, COL_MODIFICATION).Value2 = "stale"
     On Error Resume Next
     UploadWebTasks False
-    caught = Err.Description
-    Err.Clear
+    caught = Err.Description: Err.Clear
     On Error GoTo Failed
-    WebUploadRegressionContains caught, "미리보기", "stale content raises actionable error", checked
-    WebUploadRegressionEqual CStr(WebUploadMockOpenCount), "0", "stale content rejected before login", checked
-    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "stale content never posts", checked
+    WebUploadRegressionContains caught, "미리보기", "stale preview blocked", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "stale preview never posts", checked
     ws.Cells(7, COL_MODIFICATION).Value2 = "수정 7"
     PreviewWebTasks False
-    config.Range("B2").Value2 = "http://changed.invalid/support/"
-    On Error Resume Next
-    UploadWebTasks False
-    caught = Err.Description
-    Err.Clear
-    On Error GoTo Failed
-    WebUploadRegressionContains caught, "미리보기", "changed site invalidates preview", checked
-    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "changed site never posts stale preview", checked
-    config.Range("B2").Value2 = "http://fixture.invalid/support/"
 
-    stage = "unknown result stops the batch and is never retried without confirmation"
-    WebUploadRegressionResetJournal
-    PreviewWebTasks False
-    WebUploadMockReset "unknown"
-    UploadWebTasks False
-    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "1", "unknown result stops before next valid row", checked
-    no = vbNullString
-    WebUploadRegressionEqual PreviousWebOutcome(GetWebTaskId(ws, 7), no), "결과 미확인", "unknown result persisted", checked
-    no = vbNullString
-    WebUploadRegressionEqual PreviousWebOutcome(GetWebTaskId(ws, 8), no), "", "later valid row not attempted", checked
-    ws.Cells(8, COL_WEB_ENABLED).Value2 = "N"
-    PreviewWebTasks False
-    UploadWebTasks False
-    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "1", "unknown task not posted again on repeat", checked
-    ws.Cells(8, COL_WEB_ENABLED).Value2 = "Y"
-
-    stage = "known failure allows the next row and only the failed row can be retried"
-    WebUploadRegressionResetJournal
-    PreviewWebTasks False
-    WebUploadMockReset "failed,success"
-    UploadWebTasks False
-    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "2", "known failure does not stop later valid row", checked
-    no = vbNullString
-    WebUploadRegressionEqual PreviousWebOutcome(GetWebTaskId(ws, 7), no), "등록실패", "known failure journaled", checked
-    no = vbNullString
-    WebUploadRegressionEqual PreviousWebOutcome(GetWebTaskId(ws, 8), no), "등록완료", "later row success journaled", checked
+    stage = "new registration and stable request binding"
     WebUploadMockReset "success"
     UploadWebTasks False
-    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "1", "retry posts only previously failed row", checked
-    WebUploadRegressionContains WebUploadMockPostedTitles, "등록할 레벨3", "failed target is retried", checked
-    WebUploadRegressionAssert InStr(WebUploadMockPostedTitles, "레벨3 없는 레벨2") = 0, "completed later target skipped on retry", checked
+    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "2", "two new requests", checked
+    WebUploadRegressionEqual CStr(WebUploadMockJournalChecks), "2", "journal saved before every POST", checked
+    Set state = WebTaskState(firstId)
+    no = CStr(state("RequestNo"))
+    Set state = WebTaskState(GetWebTaskId(ws, 8))
+    secondNo = CStr(state("RequestNo"))
+    WebUploadRegressionAssert Len(no) > 0 And no <> secondNo, "distinct request bindings", checked
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "기등록", "new mode excludes an already linked request", checked
+    UploadWebTasks False
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "2", "repeat never duplicates", checked
+    WebUploadRegressionSelectMode "기존 갱신"
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "변경 없음", "same payload skipped in update mode", checked
 
-    stage = "exception after POST starts becomes a persisted unknown outcome"
-    WebUploadRegressionResetJournal
+    stage = "lost existing request connection never falls back to insert"
+    ws.Cells(7, COL_MODIFICATION).Value2 = "연결 소실 재검증"
     PreviewWebTasks False
-    WebUploadMockReset "throw"
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "갱신", "existing request prepared for update", checked
+    expectedRequestNoExisting = CStr(mPreviewItems(1)("RequestNo"))
+    WebUploadRegressionEqual expectedRequestNoExisting, no, "preview retains exact existing request number", checked
+    Set connection = ThisWorkbook.Worksheets(WEB_STATE_SHEET_NAME)
+    connectionRow = 0
+    For r = 2 To connection.Cells(connection.Rows.Count, "A").End(xlUp).Row
+        If CStr(connection.Cells(r, "A").Value2) = firstId And CStr(connection.Cells(r, "B").Value2) = WebCurrentSite() Then connectionRow = r: Exit For
+    Next r
+    WebUploadRegressionAssert connectionRow > 0, "existing connection fixture located", checked
+    connection.Unprotect
+    connection.Cells(connectionRow, "D").ClearContents
+    connection.Protect UserInterfaceOnly:=True
+    WebUploadMockReset "success"
     On Error Resume Next
     UploadWebTasks False
-    caught = Err.Description
-    Err.Clear
+    caught = Err.Description: Err.Clear
     On Error GoTo Failed
-    WebUploadRegressionContains caught, "Mock POST", "transport exception rethrown in noninteractive mode", checked
-    WebUploadRegressionEqual CStr(WebUploadMockJournalChecks), "1", "exception occurs only after persisted start marker", checked
-    no = vbNullString
-    WebUploadRegressionEqual PreviousWebOutcome(GetWebTaskId(ws, 7), no), "결과 미확인", "exception creates unknown journal marker", checked
-    WebUploadRegressionAssert Not mWebBusy And Not Application.EnableEvents, "exception resets busy flag and event setting", checked
-    no = vbNullString
-    WebUploadRegressionEqual PreviousWebOutcome(GetWebTaskId(ws, 8), no), "", "exception leaves subsequent row unposted", checked
+    WebUploadRegressionAssert Len(caught) > 0, "lost update binding is rejected", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "lost update binding never inserts", checked
+    WebUploadRegressionEqual CStr(WebUploadMockUpdateCount), "0", "lost update binding never updates another request", checked
+    WebUploadRegressionEqual CStr(WebUploadMockLoadCount), "0", "lost update binding does not fetch new form", checked
+    mPreviewItems(1)("Operation") = "신규"
+    mPreviewItems(1)("Error") = vbNullString
+    On Error Resume Next
+    UploadWebTasks False
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "tampered lost-binding operation cannot insert", checked
+    WebUploadRegressionEqual CStr(WebUploadMockLoadCount), "0", "tampered lost-binding operation cannot load new form", checked
+    connection.Unprotect
+    connection.Cells(connectionRow, "D").Value2 = expectedRequestNoExisting
+    connection.Protect UserInterfaceOnly:=True
+    ws.Cells(7, COL_MODIFICATION).Value2 = "수정 7"
+    PreviewWebTasks False
+    Set state = WebTaskState(firstId)
+    WebUploadRegressionEqual CStr(state("RequestNo")), expectedRequestNoExisting, "existing request binding restored without replacement", checked
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "변경 없음", "restored binding is assessed as existing request", checked
+    ws.Unprotect
+    ApplyWebTaskProtection ws
+    WebUploadRegressionAssert ws.Cells(5, COL_WEB_LEVEL).Locked And ws.Cells(8, COL_WEB_LEVEL).Locked, "whole L1 basis locked after partial group registration", checked
+    WebUploadRegressionAssert ws.Cells(7, COL_WEB_REQUESTER).Locked, "requester locked after registration", checked
+    WebUploadRegressionAssert ws.Cells(7, COL_WEB_RESULT).Locked, "result protected", checked
+    ws.Cells(7, COL_WEB_ENABLED).Value2 = "N"
+    HandleWebTaskChange ws, ws.Cells(7, COL_WEB_ENABLED)
+    WebUploadRegressionAssert WebGroupIsLocked(ws, 5), "N selection cannot unlock binding", checked
+    ws.Cells(7, COL_WEB_ENABLED).Value2 = "Y"
+    HandleWebTaskChange ws, ws.Cells(7, COL_WEB_ENABLED)
+    ws.Cells(9, COL_LEVEL).Value2 = 3
+    WebUploadRegressionContains WebTaskStructureIssue(ws), "등록 단위", "registered L2 fallback cannot become non-target", checked
+    ws.Cells(9, COL_LEVEL).Value2 = 1
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "restored hierarchy valid", checked
+
+    stage = "update uses same request and preserves web-only processing text"
+    Set session = OpenConfiguredWebSession()
+    Set server = WebReadExistingValues(session, no)
+    server("ACT_RMK") = "web processing note"
+    WebUploadMockSetServer no, server
+    ws.Cells(7, COL_MODIFICATION).Value2 = "갱신할 수정 내용"
+    PreviewWebTasks False
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "갱신", "edited registered task is update", checked
+    WebUploadMockReset "success"
+    UploadWebTasks False
+    WebUploadRegressionEqual CStr(WebUploadMockUpdateCount), "1", "exactly one existing request updated", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "update does not create a request", checked
+    Set state = WebTaskState(firstId)
+    WebUploadRegressionEqual CStr(state("RequestNo")), no, "request number retained", checked
+    Set server = WebReadExistingValues(session, no)
+    WebUploadRegressionEqual CStr(server("ACT_RMK")), "web processing note", "unmanaged web note preserved", checked
+
+    stage = "failed update preserves successful connection and permits safe retry"
+    baseline = CStr(state("Baseline"))
+    ws.Cells(7, COL_MODIFICATION).Value2 = "갱신 실패 후 재시도"
+    PreviewWebTasks False
+    WebUploadMockReset "failed"
+    UploadWebTasks False
+    Set state = WebTaskState(firstId)
+    WebUploadRegressionEqual CStr(state("RequestNo")), no, "failed update retains confirmed request", checked
+    WebUploadRegressionEqual CStr(state("Baseline")), baseline, "failed update retains last successful fingerprint", checked
+    WebUploadRegressionEqual CStr(state("Outcome")), "갱신실패", "recent attempt separated from binding", checked
+    WebUploadRegressionEqual CStr(state("PendingNo")), "", "known update failure clears attempt reservation", checked
+    WebUploadMockReset "success"
+    UploadWebTasks False
+    WebUploadRegressionEqual CStr(WebUploadMockUpdateCount), "1", "retry updates existing request", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "0", "failed update never falls back to insert", checked
+
+    stage = "server drift requires explicit verified reconnection"
+    Set server = WebReadExistingValues(session, no)
+    server("REQ_TIT") = "웹에서 직접 고친 제목"
+    WebUploadMockSetServer no, server
+    PreviewWebTasks False
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "확인 필요", "server conflict blocks update", checked
+    WebUploadRegressionContains CStr(preview.Cells(5, 13).Value2), "웹 내용", "conflict message", checked
+    WebUploadMockReset "success"
+    UploadWebTasks False
+    WebUploadRegressionEqual CStr(WebUploadMockUpdateCount), "0", "conflict never overwrites", checked
+    ConnectWebRequest ws, 7, no, session, True
+    WebUploadRegressionEqual CStr(preview.Range("A1").Value2), "요청번호 연결 확인: " & no, "full connection review shown", checked
+    WebUploadRegressionEqual CStr(preview.Range("B7").Value2), "웹에서 직접 고친 제목", "review contains current web title", checked
+    WebUploadRegressionAssert preview.Shapes("btnWebLinkConfirm").Visible, "explicit reviewed connection action", checked
+    WebUploadRegressionAssert mPreviewItems Is Nothing, "connection review cannot run stale upload preview", checked
+    baseline = mLinkServerFingerprint
+    server("REQ_TIT") = "연결 검토 후 웹 변경"
+    WebUploadMockSetServer no, server
+    On Error Resume Next
+    ConnectWebRequest ws, 7, no, session, False, baseline
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionContains caught, "웹 내용이 바뀌", "stale connection review rejected", checked
+    ConnectWebRequest ws, 7, no, session, False
+    ' The real reviewed-connection action returns to the source sheet.
+    ws.Activate
+    PreviewWebTasks False
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "갱신", "explicit reconnection accepts reviewed server baseline", checked
+    On Error Resume Next
+    ConnectWebRequest ws, 8, no, session, False
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionContains caught, "다른 업무", "same request cannot bind two units", checked
+    config.Range("B2").Value2 = "http://other.invalid/support/"
+    PreviewWebTasks False
+    WebUploadRegressionContains CStr(preview.Cells(5, 13).Value2), "다른 사이트", "site change cannot reuse existing task binding", checked
+    config.Range("B2").Value2 = "http://fixture.invalid/support/"
+
+    stage = "missing requester option retains verified immutable server ID"
+    config.Range("E9:G10").ClearContents
+    Set items = BuildWebUploadItems(ws)
+    WebUploadRegressionEqual CStr(items(1)("Values")("REQ_UID")), "requester1", "removed requester uses confirmed code", checked
+    WebUploadRegressionAssert InStr(CStr(items(1)("Error")), "요청자") = 0, "verified requester does not block existing update", checked
+    StoreWebOptionLists WebUploadRegressionForm(False, False)
+
+    stage = "partial update is blocked and confirmed binding survives"
+    PreviewWebTasks False
+    WebUploadMockReset "partial"
+    UploadWebTasks False
+    Set state = WebTaskState(firstId)
+    WebUploadRegressionEqual CStr(state("RequestNo")), no, "partial update retains request", checked
+    WebUploadRegressionEqual CStr(state("Outcome")), "갱신 일부저장", "partial is unresolved", checked
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "확인 필요", "partial does not auto retry", checked
+
+    stage = "unknown new registration reserves candidate and user-confirmed recovery"
+    WebUploadRegressionResetJournal
+    WebUploadMockReset "unknown", True
+    ws.Activate
+    PreviewWebTasks False
+    WebUploadRegressionEqual CStr(preview.Cells(5, 1).Value2), "연결 필요", "unknown fixture starts with explicit update block", checked
+    WebUploadRegressionSelectMode "신규 등록"
+    UploadWebTasks False
+    Set state = WebTaskState(firstId)
+    WebUploadRegressionEqual CStr(state("Outcome")), "결과 미확인", "unknown recorded", checked
+    WebUploadRegressionAssert Len(CStr(state("PendingNo"))) > 0 And Len(CStr(state("RequestNo"))) = 0, "candidate is not confirmed request", checked
+    WebUploadRegressionAssert WebRequestAlreadyLinked(GetWebTaskId(ws, 8), CStr(state("PendingNo"))), "pending request also reserves ownership", checked
+    WebUploadRegressionEqual CStr(WebUploadMockPostCount), "1", "unknown stops batch", checked
+    On Error Resume Next
+    ConfirmWebAttemptUnregistered ws, 7, False
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionContains caught, "직접 확인", "no automatic unregistered classification", checked
+    ConfirmWebAttemptUnregistered ws, 7, True
+    Set state = WebTaskState(firstId)
+    WebUploadRegressionEqual CStr(state("Outcome")), "미등록 확인", "explicit recovery journal", checked
+    WebUploadRegressionEqual CStr(state("PendingNo")), "", "candidate reservation released only after confirmation", checked
+    WebUploadRegressionAssert Not WebGroupIsLocked(ws, 5), "unregistered confirmed group unlocks", checked
+    stage = "legacy migration preserves confirmed number after start and failure rows"
+    WebUploadRegressionResetJournal
+    log.Unprotect
+    For r = 2 To 4
+        log.Cells(r, "A").Value = Now
+        log.Cells(r, "B").Value2 = ws.Name
+        log.Cells(r, "C").Value2 = firstId
+        log.Cells(r, "D").Value2 = "RQLEGACY001"
+    Next r
+    log.Cells(2, "E").Value2 = "등록 시작"
+    log.Cells(3, "E").Value2 = "등록완료"
+    log.Cells(4, "E").Value2 = "갱신실패"
+    log.Protect UserInterfaceOnly:=True
+    MigrateLegacyWebJournal
+    Set state = WebTaskState(firstId)
+    WebUploadRegressionEqual CStr(state("RequestNo")), "RQLEGACY001", "legacy confirmed number outranks earlier start", checked
+    WebUploadRegressionEqual CStr(state("PendingNo")), "", "legacy confirmed request not demoted to candidate", checked
+    WebUploadRegressionEqual CStr(state("Outcome")), "기존이력 확인필요", "legacy still requires verified baseline", checked
+    WebUploadRegressionAssert WebGroupIsLocked(ws, 5), "legacy confirmed group locked", checked
+    WebUploadRegressionResetJournal
+    log.Unprotect
+    log.Cells(2, "A").Value = Now
+    log.Cells(2, "C").Value2 = firstId
+    log.Cells(2, "D").Value2 = "RQOTHERSITE"
+    log.Cells(2, "E").Value2 = "등록완료"
+    log.Cells(2, "L").Value2 = "http://different.invalid/support/"
+    log.Protect UserInterfaceOnly:=True
+    MigrateLegacyWebJournal
+    Set state = WebTaskState(firstId)
+    WebUploadRegressionEqual CStr(state("RequestNo")), "", "site-tagged journal never rebound as current-site legacy", checked
+    stage = "registered child ownership cannot change silently"
+    WebUploadRegressionResetJournal
+    ws.Cells(6, COL_WEB_LEVEL).Value2 = 2
+    HandleWebTaskChange ws, ws.Cells(6, COL_WEB_LEVEL)
+    Set item = BuildWebItemForRow(ws, 6)
+    Set mPreviewSource = ws
+    RecordWebOutcome item, "등록완료", "RQOWNERSHIP", "offline fixture"
+    ws.Cells(7, COL_MODIFICATION).Value2 = "같은 등록 단위 안의 본문 변경"
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "body edits retain registration representative", checked
+    ws.Cells(7, COL_LEVEL).Value2 = 2
+    WebUploadRegressionContains WebTaskStructureIssue(ws), "다른 등록 단위", "registered child cannot become independent registration unit", checked
+    ws.Cells(7, COL_LEVEL).Value2 = 3
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "restored child ownership accepted", checked
+    WebUploadRegressionAssert Not mWebBusy And Not Application.EnableEvents, "busy and events restored", checked
     RunWebUploadRegression = "PASS: " & CStr(checked) & " web upload integration assertions"
     Exit Function
 Failed:
-    RunWebUploadRegression = "FAIL during " & stage & ": " & Err.Description
+    RunWebUploadRegression = "FAIL during " & stage & ": " & Err.Source & " / " & Err.Description
 End Function
 
+Private Sub WebUploadRegressionSelectMode(ByVal executionMode As String)
+    Dim preview As Worksheet
+    Set preview = ThisWorkbook.Worksheets(WEB_PREVIEW_SHEET_NAME)
+    preview.Activate
+    preview.Range("D3").Value2 = executionMode
+    PreviewWebTasks False
+End Sub
+
 Private Sub WebUploadRegressionResetJournal()
-    Dim log As Worksheet, lastRow As Long
+    Dim log As Worksheet, state As Worksheet, ws As Worksheet
     EnsureWebLogSheet
     Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    log.Unprotect
     log.Hyperlinks.Delete
-    lastRow = Application.Max(2, log.Cells(log.Rows.Count, "A").End(xlUp).Row)
-    log.Range("A2:J" & lastRow).ClearContents
+    log.Range("A2:M" & Application.Max(2, log.Cells(log.Rows.Count, "A").End(xlUp).Row)).ClearContents
+    log.Protect UserInterfaceOnly:=True
+    EnsureWebStateSheet
+    Set state = ThisWorkbook.Worksheets(WEB_STATE_SHEET_NAME)
+    state.Unprotect
+    state.Range("A2:O" & Application.Max(2, state.Cells(state.Rows.Count, "A").End(xlUp).Row)).ClearContents
+    state.Protect UserInterfaceOnly:=True
 End Sub
 
 Private Function WebUploadRegressionForm(ByVal renamed As Boolean, ByVal replaced As Boolean) As Object

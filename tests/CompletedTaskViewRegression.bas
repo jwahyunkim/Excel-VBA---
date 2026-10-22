@@ -1,5 +1,6 @@
 Attribute VB_Name = "CompletedTaskViewRegression"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 웹 열 이전 후에도 실제 업무 열로 완료 숨김 회귀 데이터 구성
 Private mPhase As String
 ' 2026-10-20 김좌현 수정 : 완료 숨김 토글/계층/새로고침/상태 복구/저장 후 유지 검증
 ' 2026-10-20 김좌현 수정 : 열 접기 순서별 틀 고정 안정성, 숨김 원인 구분 및 새로고침 중간 실패 복구 검증
@@ -236,7 +237,7 @@ Public Function RunCompletedTaskVisibilityRegression() As String
     ToggleCompletedTaskFilter cleared
     Check cleared.Rows(5).Hidden, "last completed task was not hidden"
     UnprotectTaskSheet cleared
-    cleared.Range("C5:W5").ClearContents
+    cleared.Range(COL_LEVEL & "5:" & COL_STATUS & "5").ClearContents
     ApplyCalculatedColumnsProtection cleared, 5
     Check GetLastDataRow(cleared) < DATA_START_ROW, "cleared task still counted as data"
     MaintainCompletedTaskView cleared
@@ -252,7 +253,7 @@ Public Function RunCompletedTaskVisibilityRegression() As String
         ToggleCompletedTaskFilter shrink
         Check shrink.Rows(6).Hidden, "trailing completed task was not hidden"
         UnprotectTaskSheet shrink
-        shrink.Range("C6:W6").ClearContents
+        shrink.Range(COL_LEVEL & "6:" & COL_STATUS & "6").ClearContents
         ApplyCalculatedColumnsProtection shrink, 6
         Check GetLastDataRow(shrink) = 5, "cleared trailing task did not shrink the data boundary"
         If clearCase = 1 Then
@@ -452,13 +453,13 @@ Public Function RunCompletedTaskRegression() As String
     Next r
     ws.Range("C6:C7").Value2 = 2
     ws.Range("C9:C10").Value2 = 2
-    ws.Range("S11").Value2 = STATUS_HOLD
+    ws.Range(COL_MANUAL_STATUS & "11").Value2 = STATUS_HOLD
     ws.Activate
     mPhase = "RefreshGanttSheet False"
     RefreshGanttSheet False
     Check Not ws.Rows(6).Hidden And Not ws.Rows(9).Hidden, "initial refresh invented collapsed groups"
     UnprotectTaskSheet ws
-    CreateVersionButton ws, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", 1, 72
+    CreateVersionButton ws, "btnGanttRefresh", "모두 새로고침", "칸트차트_모두새로고침", 1, 72
     With ws.Shapes("btnGanttRefresh")
         .Width = 71.25
         .Height = 23.5
@@ -468,11 +469,11 @@ Public Function RunCompletedTaskRegression() As String
     CreateVersionButton ws, COMPLETED_TASK_BUTTON_NAME, CompletedTaskButtonCaption(ws), "칸트차트_완료숨김", 2, 72
     mPhase = "ws.Rows(13).Hidden = True"
     ws.Rows(13).Hidden = True
-    ws.Range("M12").Value = DateSerial(2026, 9, 1)
-    ws.Range("W9").Value2 = STATUS_NORMAL
-    ws.Range("W10").Value2 = STATUS_DONE
+    ws.Range(COL_PLAN_END & "12").Value = DateSerial(2026, 9, 1)
+    ws.Range(COL_STATUS & "9").Value2 = STATUS_NORMAL
+    ws.Range(COL_STATUS & "10").Value2 = STATUS_DONE
     ApplyCalculatedColumnsProtection ws, 13
-    inputs = ws.Range("C5:O13").Value2
+    inputs = ws.Range(COL_LEVEL & "5:" & COL_ACTUAL_END & "13").Value2
     mPhase = "ToggleCompletedTaskFilter ws"
     ToggleCompletedTaskFilter ws
     Check AreCompletedTasksHidden(ws), "filter not enabled"
@@ -484,7 +485,7 @@ Public Function RunCompletedTaskRegression() As String
     Check GetLastDataRow(ws) = 13, "hidden last row not found"
     Check ws.ProtectContents, "protection lost"
     Check Not Application.EnableEvents And Not Application.ScreenUpdating, "application state not restored"
-    after = ws.Range("C5:O13").Value2
+    after = ws.Range(COL_LEVEL & "5:" & COL_ACTUAL_END & "13").Value2
     For r = 1 To UBound(inputs, 1)
         For c = 1 To UBound(inputs, 2)
             Check CStr(inputs(r, c)) = CStr(after(r, c)), "task input changed"
@@ -493,7 +494,9 @@ Public Function RunCompletedTaskRegression() As String
     Set button = ws.Shapes(COMPLETED_TASK_BUTTON_NAME)
     Set reference = ws.Shapes("btnGanttRefresh")
     Check button.TextFrame2.TextRange.Text = "완료 표시", "enabled caption"
-    Check Abs(button.Width - reference.Width) < 0.1 And Abs(button.Height - reference.Height) < 0.1, "button size differs"
+    ' Excel rounds duplicated shape dimensions to display pixels.
+    Check Abs(button.Width - reference.Width) <= 0.75 And Abs(button.Height - reference.Height) <= 0.75, _
+          "button size differs: " & button.Width & "x" & button.Height & "/" & reference.Width & "x" & reference.Height
     Check button.AutoShapeType = reference.AutoShapeType, "button shape differs"
     Check button.Fill.ForeColor.RGB = reference.Fill.ForeColor.RGB, "button fill differs"
     Check button.Line.ForeColor.RGB = reference.Line.ForeColor.RGB, "button line differs"
@@ -507,7 +510,7 @@ Public Function RunCompletedTaskRegression() As String
     UnprotectTaskSheet ws
     mPhase = "ws.Rows(8).ShowDetail = False"
     ws.Rows(8).ShowDetail = False
-    ws.Range("M12").Value = DateSerial(2026, 10, 30)
+    ws.Range(COL_PLAN_END & "12").Value = DateSerial(2026, 10, 30)
     ApplyCalculatedColumnsProtection ws, 13
     mPhase = "ToggleCompletedTaskFilter ws"
     ToggleCompletedTaskFilter ws
@@ -554,9 +557,9 @@ Public Function RunCompletedTaskRegression() As String
     On Error GoTo Failed
     Check trappedError <> 0, "config sheet accepted as task sheet"
     Set undated = NewTaskSheet("CompletedViewUndated")
-    undated.Range("C5").Value2 = 1
-    undated.Range("H5").Value2 = "날짜 없는 완료 업무"
-    undated.Range("P5").Value2 = 1
+    undated.Range(COL_LEVEL & "5").Value2 = 1
+    undated.Range(COL_REQUEST & "5").Value2 = "날짜 없는 완료 업무"
+    undated.Range(COL_PROGRESS & "5").Value2 = 1
     mPhase = "ToggleCompletedTaskFilter undated"
     ToggleCompletedTaskFilter undated
     Check undated.Rows(5).Hidden, "undated completed task not hidden"

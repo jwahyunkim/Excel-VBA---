@@ -1,6 +1,7 @@
 Attribute VB_Name = "WebTransportRegression"
 Option Explicit
 ' 2026-10-22 김좌현 수정 : UTF-8·폼·암호화 및 로컬 웹 세션/등록 결과 확인 회귀 검증
+' 2026-10-22 김좌현 수정 : 요청번호 갱신·충돌·부분 성공·웹 전용 본문 보존 회귀 검증
 
 Private Sub Check(ByVal condition As Boolean, ByVal message As String)
     If Not condition Then Err.Raise vbObjectError + 1941, "WebTransportRegression", message
@@ -13,6 +14,92 @@ Private Sub Trace(ByVal path As String, ByVal message As String)
     Open path For Append As #handle
     Print #handle, message
     Close #handle
+End Sub
+
+Private Sub CheckExistingUpdates(ByVal session As Object, ByVal tracePath As String)
+    Dim form As Object, values As Object, result As Object, actual As Object, key As Variant
+    Dim invalidError As Long, title As String, body As String
+    Trace tracePath, "existing update / two distinct saves"
+    Set form = WebLoadExisting(session, "RQ9101")
+    Check form("RequestNo") = "RQ9101" And form("Values")("REQ_UID") = "u1", "exact existing identity"
+    Check Not form("Fields").Exists("REQ_UID"), "requester is read-only span"
+    Set values = CreateObject("Scripting.Dictionary")
+    For Each key In form("Values").Keys
+        values.Add CStr(key), form("Values")(key)
+    Next key
+    title = "[소분류] 갱신 ' + & %"
+    body = "<p>첫 줄 &amp; 50% + ! '()</p>" & vbCrLf & "둘째 줄"
+    values("REQ_TIT") = title
+    values("REQ_RMK") = body
+    values("STS") = "5"
+    values("ACT_TIME") = "90"
+    Set result = WebPostUpdate(session, form, values)
+    Check result("Success") And result("Code") = "verified", "both tabs read back: " & result("Message")
+    Check result("Values")("REQ_TIT") = title And result("Values")("REQ_RMK") = body, "HTML/entity/percent/body preserved"
+    Check result("Values")("STS") = "5" And result("Values")("ACT_TIME") = "90", "processing values updated"
+    Set actual = WebReadExistingValues(session, "RQ9101")
+    Check actual("REQ_UID") = "u1" And actual("ACT_TIME") = "90", "read API managed values"
+    Set result = WebPostUpdate(session, form, values)
+    Check result("Outcome") = "failed", "consumed update form not retried"
+
+    Trace tracePath, "unchanged / forbidden requester / forbidden field / stale choice"
+    Set form = WebLoadExisting(session, "RQ9101")
+    Set result = WebPostUpdate(session, form, actual)
+    Check result("Success"), "unchanged values need no POST"
+    Set form = WebLoadExisting(session, "RQ9101")
+    Set values = CreateObject("Scripting.Dictionary")
+    values.Add "REQ_UID", "u2"
+    Set result = WebPostUpdate(session, form, values)
+    Check result("Outcome") = "failed" And result("Code") = "requester_locked", "requester change rejected before POST"
+    values.RemoveAll
+    values.Add "ACT_RMK", "must not overwrite web-only processing body"
+    Set result = WebPostUpdate(session, form, values)
+    Check result("Outcome") = "failed" And result("Code") = "validation", "web-only field is not managed"
+    values.RemoveAll
+    values.Add "STS", "removed-status"
+    Set result = WebPostUpdate(session, form, values)
+    Check result("Outcome") = "failed", "stale processing choice rejected"
+
+    Trace tracePath, "remote edit conflict"
+    Set form = WebLoadExisting(session, "RQ9104")
+    values.RemoveAll
+    values.Add "REQ_TIT", "local-title"
+    Set result = WebPostUpdate(session, form, values)
+    Check result("Outcome") = "failed" And result("Code") = "conflict", "remote change prevents overwrite"
+    Check result("Values")("REQ_TIT") = "remote-title", "conflict includes current remote values"
+
+    Trace tracePath, "partial save / lost second response"
+    Set form = WebLoadExisting(session, "RQ9102")
+    values.RemoveAll
+    values.Add "REQ_TIT", "partial-title"
+    values.Add "REQ_RMK", "부분 저장 내용 % + &"
+    values.Add "ACT_TIME", "120"
+    Set result = WebPostUpdate(session, form, values)
+    Check result("Outcome") = "partial" And Not result("Success"), "request saved, processing not saved"
+    Check result("RequestNo") = "RQ9102" And result("Values")("REQ_TIT") = "partial-title", "partial preserves exact request and confirmed values"
+    Check result("Values")("ACT_TIME") = "30", "partial reports original processing value"
+
+    Trace tracePath, "processing persisted despite lost response"
+    Set form = WebLoadExisting(session, "RQ9103")
+    values.RemoveAll
+    values.Add "ACT_TIME", "60"
+    Set result = WebPostUpdate(session, form, values)
+    Check result("Success") And result("Values")("ACT_TIME") = "60", "GET confirms lost processing POST without retry"
+
+    Trace tracePath, "invalid identity / non-project refused"
+    On Error Resume Next
+    Set form = WebLoadExisting(session, "RQ9101&other=1")
+    invalidError = Err.Number
+    Err.Clear
+    On Error GoTo 0
+    Check invalidError <> 0, "invalid request number rejected"
+    invalidError = 0
+    On Error Resume Next
+    Set form = WebLoadExisting(session, "RQ9199")
+    invalidError = Err.Number
+    Err.Clear
+    On Error GoTo 0
+    Check invalidError <> 0, "non-project detail refused"
 End Sub
 
 Public Function RunWebTransportRegression(Optional ByVal fixtureBaseUrl As String = "", Optional ByVal tracePath As String = "") As String
@@ -104,9 +191,10 @@ Public Function RunWebTransportRegression(Optional ByVal fixtureBaseUrl As Strin
         Check result("RequestNo") = form("RequestNo"), "uncertain outcome retains journal candidate"
         Set result = WebPostRegistration(session, form, values)
         Check result("Outcome") = "failed", "consumed form cannot be posted again"
+        CheckExistingUpdates session, tracePath
     End If
     Trace tracePath, "passed"
-    RunWebTransportRegression = "PASS: encoding, HTML forms/options, DPAPI" & IIf(Len(fixtureBaseUrl) > 0, ", loopback login/cookies/fresh-state/readback/uncertain POST", "")
+    RunWebTransportRegression = "PASS: encoding, HTML forms/options, DPAPI" & IIf(Len(fixtureBaseUrl) > 0, ", loopback registration/update/conflict/partial/readback/no retry", "")
     Exit Function
 Failed:
     RunWebTransportRegression = "FAIL: " & CStr(Err.Number) & " / " & Err.Description

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 3단계 웹모드 동기화와 중복 날짜 배경/계층 재생성 제거
 ' 2026-10-22 김좌현 수정 : 웹 설정/작업시간 3단 열 접기와 기존 접기 설정 이전 및 고정 창 보존
 ' 2026-10-20 김좌현 수정 : 숨긴 행의 틀 고정 좌표 보정과 화면 변경 중 재진입 방지
 ' 2026-10-20 김좌현 수정 : 계층 펼치기 후에도 완료 숨김 상태 유지
@@ -520,6 +521,7 @@ Public Sub TaskOutlineViewTick()
     If Not ws Is Nothing Then
         EnsureTaskRequestFreeze ws
         MaintainCompletedTaskView ws
+        RefreshWebModeView ws
     End If
 End Sub
 
@@ -742,7 +744,8 @@ End Function
 ' Visual hierarchy and native outlines share the same subtree boundaries as
 ' the task summary calculation. Build them before applying display filters.
 Public Sub ApplyTaskHierarchyAppearance(ByVal ws As Worksheet, ByVal lastRow As Long, _
-                                        ByVal startCol As Long, ByVal endCol As Long)
+                                        ByVal startCol As Long, ByVal endCol As Long, _
+                                        Optional ByVal fitLayout As Boolean = True, Optional ByVal rebuildHierarchy As Boolean = True)
     Dim r As Long
     Dim c As Long
     Dim taskLevel As Long
@@ -811,15 +814,7 @@ Public Sub ApplyTaskHierarchyAppearance(ByVal ws As Worksheet, ByVal lastRow As 
             End If
         End If
 
-        ' Only unfilled cells receive a group band. Date bars, holidays and
-        ' today's empty-cell highlight have already been drawn by the caller.
-        For c = startCol To endCol
-            Set chartCell = ws.Cells(r, c)
-            If chartCell.Interior.Pattern = xlNone Then
-                chartCell.Interior.Color = chartFill
-            End If
-        Next c
-
+        ' Date backgrounds are owned by RenderHierarchyTaskBars below.
         With rowRange.Borders(xlEdgeBottom)
             .LineStyle = xlContinuous
             .Weight = xlThin
@@ -839,7 +834,7 @@ NextTask:
     Next r
 
     ' Fit the final bold text and native indentation, not the old text prefixes.
-    ws.Range(COL_REQUEST & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
+    If fitLayout Then ws.Range(COL_REQUEST & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
 
     RebuildTaskHierarchyOutline ws, lastRow
     RenderHierarchyTaskBars ws, lastRow, startCol, endCol

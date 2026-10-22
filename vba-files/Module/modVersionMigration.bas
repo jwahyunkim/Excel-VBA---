@@ -1,5 +1,7 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로 제거 후 기존 버튼을 모두 새로고침으로 이관
+' 2026-10-22 김좌현 수정 : 모두/간트 새로고침 버튼 분리와 웹 등록 모드 버튼 배치 연결
 ' 2026-10-22 김좌현 수정 : 웹 설정/미리보기/이력 시트를 업무 이전 및 버튼 처리에서 제외
 ' 2026-10-20 김좌현 수정 : 기존 디자인의 완료 숨김 버튼 선택/생성과 이관 후 상태 반영
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 행 필터 호출 제거
@@ -11,7 +13,7 @@ Private Const FILE_DIALOG_PICKER As Long = 3
 Private Const PPT_OLE_PREFIX As String = "oleGanttPpt_"
 Private Const TEMP_PPT_OLE_PREFIX As String = "tmpGanttPptOle_"
 Private Const BUTTON_SETUP_SHEET_NAME As String = "_버튼생성"
-Private Const BUTTON_OPTION_COUNT As Long = 6
+Private Const BUTTON_OPTION_COUNT As Long = 7
 
 Public Sub 데이터_가져오기()
     Dim targetBook As Workbook
@@ -225,11 +227,12 @@ Public Sub 버튼_생성_선택()
 
     optionCaptions = Array( _
         "데이터 가져오기", _
-        "간트차트 새로고침", _
+        "모두 새로고침", _
         "초기화", _
         "개체삽입", _
         "TXT 출력", _
-        "완료 숨김")
+        "완료 숨김", _
+        "간트 새로고침")
 
     setupSheet.Range("A2").Value = "버튼"
     setupSheet.Range("B2").Value = "순서"
@@ -379,6 +382,7 @@ Public Sub 선택한_버튼_생성(Optional ByVal showCompletionMessage As Boole
                             "칸트차트_완료숨김", completedOrder, 72
     End If
     If Not completedTemplate Is Nothing Then completedTemplate.Delete
+    EnsureMainActionButtons targetSheet
     ApplyCalculatedColumnsProtection targetSheet, GetLastDataRow(targetSheet)
     targetSheet.Activate
     setupSheet.Visible = xlSheetVeryHidden
@@ -415,7 +419,7 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 1
             CreateVersionButton ws, "btnDataImport", "데이터 가져오기", "데이터_가져오기", buttonOrder, 72
         Case 2
-            CreateVersionButton ws, "btnGanttRefresh", "새로고침", "칸트차트_새로고침", buttonOrder, 72
+            CreateVersionButton ws, "btnGanttRefresh", "모두 새로고침", "칸트차트_모두새로고침", buttonOrder, 72
         Case 3
             CreateVersionButton ws, "btnGanttReset", "초기화", "칸트차트_초기화", buttonOrder, 72
         Case 4
@@ -425,6 +429,8 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 6
             CreateVersionButton ws, COMPLETED_TASK_BUTTON_NAME, CompletedTaskButtonCaption(ws), _
                                 "칸트차트_완료숨김", buttonOrder, 72
+        Case 7
+            CreateVersionButton ws, "btnGanttRefreshOnly", "간트 새로고침", "칸트차트_간트새로고침", buttonOrder, 72
     End Select
 End Sub
 
@@ -457,7 +463,7 @@ Private Sub DeleteManagedButtons(ByVal ws As Worksheet)
     Dim buttonName As Variant
 
     buttonNames = Array( _
-        "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
+        "btnDataImport", "btnGanttCreate", "btnGanttRefresh", "btnGanttRefreshOnly", _
         "btnGanttReset", "btnGanttObjectInsert", COMPLETED_TASK_BUTTON_NAME, _
         "btnPersonalDevReport", "btnTeamDevReport", "btnModuleDevReport", _
         "btnPeriodTextReport", "btnWeeklyPptReport", "btnDailyProgressReport", _
@@ -592,7 +598,7 @@ Public Function GetNextVersionButtonOrder(ByVal ws As Worksheet) As Long
     Dim buttonCount As Long
 
     buttonNames = Array( _
-        "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
+        "btnDataImport", "btnGanttCreate", "btnGanttRefresh", "btnGanttRefreshOnly", _
         "btnGanttReset", "btnGanttObjectInsert", COMPLETED_TASK_BUTTON_NAME, _
         "btnPeriodTextReport")
 
@@ -632,12 +638,13 @@ Public Sub UpgradeGanttRefreshButtons(ByVal ws As Worksheet)
     Set refreshButton = ws.Shapes("btnGanttRefresh")
     On Error GoTo Failed
     needsUpdate = Not createButton Is Nothing
+    If Not VersionShapeExistsOnSheet(ws, "btnGanttRefreshOnly") Then needsUpdate = True
     For Each button In ws.Shapes
         macroName = GetGanttButtonMacroName(button)
-        If macroName = "칸트차트_생성" Then needsUpdate = True
+        If macroName = "칸트차트_생성" Or macroName = "칸트차트_새로고침" Then needsUpdate = True
         If button.Name = "btnGanttRefresh" Then
-            If macroName <> "칸트차트_새로고침" Or _
-               button.TextFrame2.TextRange.Text <> "새로고침" Then needsUpdate = True
+            If macroName <> "칸트차트_모두새로고침" Or _
+               button.TextFrame2.TextRange.Text <> "모두 새로고침" Then needsUpdate = True
         End If
     Next button
     ' Leave already migrated workbooks unchanged when opened.
@@ -653,11 +660,12 @@ Public Sub UpgradeGanttRefreshButtons(ByVal ws As Worksheet)
     End If
     For Each button In ws.Shapes
         macroName = GetGanttButtonMacroName(button)
-        If button.Name = "btnGanttRefresh" Or macroName = "칸트차트_생성" Then
-            button.OnAction = "칸트차트_새로고침"
-            button.TextFrame2.TextRange.Text = "새로고침"
+        If button.Name = "btnGanttRefresh" Or macroName = "칸트차트_생성" Or macroName = "칸트차트_새로고침" Then
+            button.OnAction = "칸트차트_모두새로고침"
+            button.TextFrame2.TextRange.Text = "모두 새로고침"
         End If
     Next button
+    EnsureMainActionButtons ws
     If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     Exit Sub
 Failed:

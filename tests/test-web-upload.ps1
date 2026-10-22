@@ -42,7 +42,7 @@ try {
         if ($webFile.BaseName -eq 'modWebTransport') {
             # Replace only the public transport boundary in this temporary project.
             # The production transport source remains present under Original names.
-            foreach ($webBoundary in @('WebOpenSession', 'WebLoadRegistration', 'WebPostRegistration')) {
+            foreach ($webBoundary in @('WebOpenSession', 'WebLoadRegistration', 'WebPostRegistration', 'WebLoadExisting', 'WebReadExistingValues', 'WebPostUpdate')) {
                 $webSource = $webSource -replace ('\b' + $webBoundary + '\b'), ($webBoundary + 'Original')
             }
         }

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-22 김좌현 수정 : 간트 서식 중복 제거, 실제 표시 영역만 초기화와 선택적 너비/계층 갱신
 ' 2026-10-22 김좌현 수정 : 웹 설정/업무 ID/작업시간 열 이전과 표시 및 보호 통합
 ' 2026-10-22 김좌현 수정 : 상태에는 괄호 안 지연 일수만 표시하고 지연 완료도 기존 완료 초록 유지
 ' 2026-10-22 김좌현 수정 : 오늘 날짜 헤더와 빈 배경을 민트색으로 구분
@@ -283,7 +284,7 @@ MigrationError:
     Err.Raise errorNumber, "EnsureTaskSheetLayout", errorDescription
 End Sub
 
-Public Sub ClearCalculatedArea(ws As Worksheet, ByVal lastRow As Long)
+Public Sub ClearCalculatedArea(ws As Worksheet, ByVal lastRow As Long, Optional ByVal clearFormats As Boolean = True)
     Dim normalProgressCol As Long
     Dim planDaysCol As Long
     Dim actualDaysCol As Long
@@ -298,39 +299,37 @@ Public Sub ClearCalculatedArea(ws As Worksheet, ByVal lastRow As Long)
     
     If normalProgressCol > 0 And planDaysCol > 0 And actualDaysCol > 0 And statusCol > 0 Then
         ws.Range(ws.Cells(DATA_START_ROW, normalProgressCol), ws.Cells(lastRow, normalProgressCol)).ClearContents
-        ws.Range(ws.Cells(DATA_START_ROW, normalProgressCol), ws.Cells(lastRow, normalProgressCol)).ClearFormats
+        If clearFormats Then ws.Range(ws.Cells(DATA_START_ROW, normalProgressCol), ws.Cells(lastRow, normalProgressCol)).ClearFormats
         
         ws.Range(ws.Cells(DATA_START_ROW, planDaysCol), ws.Cells(lastRow, actualDaysCol)).ClearContents
-        ws.Range(ws.Cells(DATA_START_ROW, planDaysCol), ws.Cells(lastRow, actualDaysCol)).ClearFormats
+        If clearFormats Then ws.Range(ws.Cells(DATA_START_ROW, planDaysCol), ws.Cells(lastRow, actualDaysCol)).ClearFormats
         
         ws.Range(ws.Cells(DATA_START_ROW, statusCol), ws.Cells(lastRow, statusCol)).ClearContents
-        ws.Range(ws.Cells(DATA_START_ROW, statusCol), ws.Cells(lastRow, statusCol)).ClearFormats
+        If clearFormats Then ws.Range(ws.Cells(DATA_START_ROW, statusCol), ws.Cells(lastRow, statusCol)).ClearFormats
     Else
         ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).ClearContents
-        ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).ClearFormats
+        If clearFormats Then ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).ClearFormats
         
         ws.Range(COL_PLAN_DAYS & DATA_START_ROW & ":" & COL_ACTUAL_DAYS & lastRow).ClearContents
-        ws.Range(COL_PLAN_DAYS & DATA_START_ROW & ":" & COL_ACTUAL_DAYS & lastRow).ClearFormats
+        If clearFormats Then ws.Range(COL_PLAN_DAYS & DATA_START_ROW & ":" & COL_ACTUAL_DAYS & lastRow).ClearFormats
         
         ws.Range(COL_STATUS & DATA_START_ROW & ":" & COL_STATUS & lastRow).ClearContents
-        ws.Range(COL_STATUS & DATA_START_ROW & ":" & COL_STATUS & lastRow).ClearFormats
+        If clearFormats Then ws.Range(COL_STATUS & DATA_START_ROW & ":" & COL_STATUS & lastRow).ClearFormats
     End If
 End Sub
 
 Public Sub ClearGanttArea(ws As Worksheet)
-    Dim startCol As Long
-    Dim lastCol As Long
-
+    Dim startCol As Long, lastCol As Long, lastRow As Long, chartArea As Range
+    InvalidateGanttRenderCache ws
     ClearTaskBarVisuals ws
     startCol = ws.Range(COL_GANTT_START & "1").Column
-    lastCol = ws.Columns.Count
-
-    On Error Resume Next
-    ws.Range(ws.Cells(1, startCol), ws.Cells(ws.Rows.Count, lastCol)).UnMerge
-    On Error GoTo 0
-
-    ws.Range(ws.Cells(1, startCol), ws.Cells(ws.Rows.Count, lastCol)).ClearFormats
-    ws.Range(ws.Cells(1, startCol), ws.Cells(ws.Rows.Count, lastCol)).ClearContents
+    lastCol = ws.Cells(GANTT_HEADER_ROW_DATE, ws.Columns.Count).End(xlToLeft).Column
+    lastRow = Application.Max(GetLastDataRow(ws), ws.UsedRange.Row + ws.UsedRange.Rows.Count - 1)
+    If lastCol < startCol Then Exit Sub
+    Set chartArea = ws.Range(ws.Cells(1, startCol), ws.Cells(lastRow, lastCol))
+    chartArea.UnMerge
+    chartArea.ClearFormats
+    chartArea.ClearContents
 End Sub
 
 Public Sub DrawDateHeader(ws As Worksheet, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object)
@@ -969,7 +968,8 @@ Private Function HasHoldIncludedStatusText(ByVal statusText As String) As Boolea
     HasHoldIncludedStatusText = (InStr(1, statusText, STATUS_DONE_WITH_HOLD_SUFFIX, vbTextCompare) > 0)
 End Function
 
-Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object)
+Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object, _
+                          Optional ByVal fitLayout As Boolean = True, Optional ByVal rebuildHierarchy As Boolean = True)
     Dim startCol As Long
     Dim endCol As Long
     Dim r As Long
@@ -1072,32 +1072,9 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
         End If
     Next r
 
+    ' The final renderer paints weekend/today backgrounds once.
     For c = startCol To endCol
         d = chartStartDate + (c - startCol)
-
-        If Not IsWorkingDay(d, holidayDict, workdayDict) Then
-            For r = DATA_START_ROW To lastRow
-                If HasTaskContent(ws, r) Then
-                    If ws.Cells(r, c).Value = "" Then
-                        ws.Cells(r, c).Interior.Color = RGB(245, 245, 245)
-                    End If
-                End If
-            Next r
-        End If
-
-        If CLng(d) = CLng(Date) Then
-            For r = DATA_START_ROW To lastRow
-                If HasTaskContent(ws, r) Then
-                    If ws.Cells(r, c).Value = "" Then
-                        If Not IsTaskPlannedOnDate(ws, r, d, holidayDict, workdayDict) And _
-                           Not IsTaskActualOnDate(ws, r, d, holidayDict, workdayDict) Then
-                            ws.Cells(r, c).Interior.Color = RGB(224, 252, 244)
-                        End If
-                    End If
-                End If
-            Next r
-        End If
-        
         If c > startCol Then
             prevDate = chartStartDate + (c - startCol - 1)
             
@@ -1111,6 +1088,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
         End If
     Next c
 
+    If fitLayout Then
     ws.Columns(COL_NO).ColumnWidth = 6
     ws.Columns(COL_LEVEL).ColumnWidth = 7
     ws.Range(COL_REQUEST & ":" & COL_MODIFICATION).WrapText = False
@@ -1149,6 +1127,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Range(COL_STATUS & HEADER_ROW & ":" & _
              COL_STATUS & lastRow).Columns.AutoFit
     ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).AutoFit
+    End If
 
     ws.Rows(GANTT_HEADER_ROW_MONTH).RowHeight = 20
     ws.Rows(GANTT_HEADER_ROW_WEEK).RowHeight = 20
@@ -1158,7 +1137,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ws.Range(COL_PLAN_START & DATA_START_ROW & ":" & COL_ACTUAL_END & lastRow).NumberFormat = "yyyy-mm-dd"
     ws.Range(COL_PROGRESS & DATA_START_ROW & ":" & COL_PROGRESS & lastRow).NumberFormat = "0%"
     ws.Range(COL_NORMAL_PROGRESS & DATA_START_ROW & ":" & COL_NORMAL_PROGRESS & lastRow).NumberFormat = "0%"
-    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol
+    ApplyTaskHierarchyAppearance ws, lastRow, startCol, endCol, fitLayout, rebuildHierarchy
     RestoreTaskDetailColumnHidden ws, detailColumnHidden
     ActiveWindow.DisplayGridlines = False
 End Sub
@@ -1767,6 +1746,7 @@ Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Lo
     ws.Rows(DATA_START_ROW & ":" & ws.Rows.Count).Locked = False
     ' 2026-10-22 김좌현 수정 : 정렬/삽입과 함께 이동하는 웹 업무 ID를 사용자 편집에서 보호
     ws.Columns(COL_WEB_TASK_ID).Locked = True
+    ApplyWebTaskProtection ws
     If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
 
     ws.Protect DrawingObjects:=False, Contents:=True, Scenarios:=True, _

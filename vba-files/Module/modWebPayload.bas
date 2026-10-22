@@ -1,6 +1,7 @@
 Attribute VB_Name = "modWebPayload"
 Option Explicit
 ' 2026-10-22 김좌현 수정 : 레벨1 그룹 기준 프로젝트 실적 등록 대상 및 TXT 형식 본문 생성
+' 2026-10-22 김좌현 수정 : 요청번호 연결용 단일 등록 단위 검증 공개
 
 ' Reading a preview never changes task dates, progress, hierarchy or report status.
 ' The configuration module prepares persistent task IDs before calling this module.
@@ -14,7 +15,7 @@ Public Function BuildWebUploadItems(ByVal ws As Worksheet) As Collection
     If ws Is Nothing Then Err.Raise vbObjectError + 7801, "BuildWebUploadItems", "업무 시트를 지정하세요."
     If ws.Name = CONFIG_SHEET_NAME Or ws.Name = OUTPUT_CONFIG_SHEET_NAME Or _
        ws.Name = WEB_CONFIG_SHEET_NAME Or ws.Name = WEB_PREVIEW_SHEET_NAME Or _
-       ws.Name = WEB_LOG_SHEET_NAME Then _
+       ws.Name = WEB_LOG_SHEET_NAME Or ws.Name = WEB_STATE_SHEET_NAME Then _
         Err.Raise vbObjectError + 7801, "BuildWebUploadItems", "업무 시트에서 실행하세요."
     Set identityCounts = CountWebTaskIds(ws)
     lastRow = GetLastDataRow(ws)
@@ -64,6 +65,15 @@ Public Function BuildWebUploadItems(ByVal ws As Worksheet) As Collection
         End If
     Loop
     Set BuildWebUploadItems = items
+End Function
+
+Public Function BuildWebItemForRow(ByVal ws As Worksheet, ByVal rowNum As Long) As Object
+    Dim groupRow As Long, root As Long, counts As Object
+    groupRow = WebGroupRootRow(ws, rowNum)
+    root = WebRegistrationRootRow(ws, rowNum)
+    If groupRow = 0 Or root = 0 Then Err.Raise vbObjectError + 7802, , "실제 등록 단위에 포함되는 업무 행을 선택하세요."
+    Set counts = CountWebTaskIds(ws)
+    Set BuildWebItemForRow = NewWebUploadItem(ws, root, groupRow, GetLastDataRow(ws), counts)
 End Function
 
 ' Level 3 includes level 2 leaves; level 1 never becomes a fallback target.
@@ -218,9 +228,13 @@ End Function
 Private Sub AddWebOptionValue(ByVal ws As Worksheet, ByVal rowNum As Long, _
                               ByVal columnName As String, ByVal fieldName As String, _
                               ByVal label As String, ByVal values As Object, ByVal item As Object)
-    Dim display As String, code As String
+    Dim display As String, code As String, state As Object
     display = Trim$(WebCellText(ws, rowNum, columnName))
     If Len(display) > 0 Then code = ResolveWebOption(fieldName, display)
+    If fieldName = "REQ_UID" And Len(code) = 0 Then
+        Set state = WebTaskState(GetWebTaskId(ws, rowNum))
+        If Len(CStr(state("RequestNo"))) > 0 Then code = CStr(state("RequesterCode"))
+    End If
     values.Add fieldName, code
     If Len(code) = 0 Then AppendWebItemError item, label & "를 최신 웹 선택목록에서 선택하세요."
 End Sub

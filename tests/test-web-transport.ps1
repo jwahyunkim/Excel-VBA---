@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param([switch]$NoNetwork)
 # 2026-10-22 김좌현 수정 : 실제 사이트 저장 없이 Excel VBA와 로컬 HTTP 서버로 웹 전송 회귀 검증
+# 2026-10-22 김좌현 수정 : 요청번호 수정 폼·웹 전용 내용 보존·충돌·부분 성공 fixture 확장
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -15,7 +16,9 @@ $fixtureJob = Start-Job -ArgumentList $fixturePort,$serverTrace -ScriptBlock {
     $listener.Start()
     $sequence = 0
     $savePosts = 0
+    $updatePosts = 0
     $saved = @{}
+    $existingViews = @{}
     function Field([string]$name, [string]$value) {
         return '<input name="' + $name + '" id="' + $name + '" value="' + [Net.WebUtility]::HtmlEncode($value) + '">'
     }
@@ -27,6 +30,38 @@ $fixtureJob = Start-Job -ArgumentList $fixturePort,$serverTrace -ScriptBlock {
             '<select name="STS" id="STS"><option value="1">In progress</option></select>' +
             (Field 'PGM_NM' '') + (Field 'PGM_ID' '') + (Field 'ACT_TIME' '30') + '<input type="image" name="btnSave"></form>'
     }
+    function Choice([string]$name, [string]$selected, [string[]]$options) {
+        $html = '<select name="' + $name + '" id="' + $name + '">'
+        foreach ($option in $options) {
+            $html += '<option value="' + [Net.WebUtility]::HtmlEncode($option) + '"' + $(if ($option -ceq $selected) { ' selected' } else { '' }) + '>' + [Net.WebUtility]::HtmlEncode($option) + '</option>'
+        }
+        return $html + '</select>'
+    }
+    function Existing([string]$number, [hashtable]$record, [string]$state) {
+        $html = '<form method="post" action="./c0200_02.aspx?REQ_NO=' + $number + '">' + (Field '__VIEWSTATE' $state) +
+            (Field 'seqNum' $number) +
+            '<span id="REQ_NO">' + $number + '</span><span id="REQ_UID">u1</span>'
+        # Real ASP.NET WinHTTP GET omits these hidden fields despite rendering the anchors.
+        if ($number -ne 'RQ9101') { $html += (Field '__EVENTTARGET' '') + (Field '__EVENTARGUMENT' '') }
+        foreach ($name in @('REQ_TIT','PGM_NM','PGM_ID','ACT_DT_FR','ACT_DT','ACT_TIME','ADM_REMARK','ACCPT_RMK','unique_key')) { $html += Field $name $record[$name] }
+        foreach ($name in @('REQ_RMK','ACT_RMK')) { $html += '<textarea name="' + $name + '" id="' + $name + '">' + "`r`n" + [Net.WebUtility]::HtmlEncode($record[$name]) + '</textarea>' }
+        $html += Choice 'GUBUN' $record['GUBUN'] @('PJT','MA')
+        $html += Choice 'STS' $record['STS'] @('1','5','9')
+        $html += Choice 'PGM_MD' $record['PGM_MD'] @('','M')
+        $html += Choice 'ACT_GUBUN' $record['ACT_GUBUN'] @('','300')
+        $html += Choice 'ACT_UID' $record['ACT_UID'] @('worker','other-worker')
+        return $html + '<a id="btnSaveReq" href="javascript:__doPostBack(&#39;btnSaveReq&#39;,&#39;&#39;)"></a>' +
+            '<a id="btnSave" href="javascript:__doPostBack(&#39;btnSave&#39;,&#39;&#39;)"></a></form>'
+    }
+    foreach ($number in @('RQ9101','RQ9102','RQ9103','RQ9104','RQ9199')) {
+        $saved[$number] = @{
+            REQ_TIT='old-title'; REQ_RMK="old request <p>&amp; 50% + 한글`r`n둘째"; GUBUN='PJT'; STS='1'; PGM_MD=''; ACT_GUBUN='';
+            PGM_NM='old-program'; PGM_ID='old-id'; ACT_DT_FR='2026-10-01'; ACT_DT='2026-10-22'; ACT_TIME='30'; ACT_UID='worker';
+            ACT_RMK="<p>웹 전용 &amp; 100% + 처리</p>`r`n둘째"; ADM_REMARK='web-report-title'; ACCPT_RMK='web-acceptance'; unique_key='original-upload-key'
+        }
+        $existingViews[$number] = 0
+    }
+    $saved['RQ9199']['GUBUN'] = 'MA'
     try {
         Write-Output 'READY'
         while ($true) {
@@ -100,13 +135,54 @@ $fixtureJob = Start-Job -ArgumentList $fixturePort,$serverTrace -ScriptBlock {
                 $status = '302 Found'
                 $extra = "Location: /support/C0/c0200_02.aspx?REQ_NO=RQ" + (9000 + $sequence) + "`r`n"
                 $html = ''
-            } elseif ($target -match '^/support/C0/c0200_02\.aspx\?REQ_NO=([^&]+)') {
+            } elseif ($target -match '^/support/C0/c0200_02\.aspx\?REQ_NO=([^&]+)' -and $method -eq 'POST') {
+                $number = [Net.WebUtility]::UrlDecode($Matches[1])
+                if (-not $existingViews.ContainsKey($number)) { throw 'update must target a seeded existing record' }
+                $updatePosts++
+                $record = $saved[$number]
+                if ($postedValues['__VIEWSTATE'] -ne ('existing-' + $number + '-' + $existingViews[$number]) -or $postedValues['seqNum'] -ne $number) { throw 'existing fresh state / request ID mismatch' }
+                if ($postedValues.ContainsKey('REQ_UID') -or $postedValues.ContainsKey('btnSave.x')) { throw 'existing save cannot write requester or use creation image button' }
+                foreach ($name in @('ADM_REMARK','ACCPT_RMK','unique_key')) {
+                    if ($postedValues[$name] -cne $record[$name]) { throw ('web-only value changed: ' + $name) }
+                }
+                if ([Net.WebUtility]::UrlDecode($postedValues['ACT_RMK']) -cne $record['ACT_RMK']) { throw 'web-only ACT_RMK was changed or incorrectly encoded' }
+                $eventTarget = $postedValues['__EVENTTARGET']
+                if ($number -eq 'RQ9102' -and $eventTarget -eq 'btnSave') {
+                    $client.Close()
+                    Add-Content -LiteralPath $serverTrace -Value 'intentional dropped processing save before persistence'
+                    continue
+                }
+                if ($eventTarget -eq 'btnSaveReq') {
+                    $record['REQ_TIT'] = $postedValues['REQ_TIT']
+                    $record['REQ_RMK'] = [Net.WebUtility]::UrlDecode($postedValues['REQ_RMK'])
+                } elseif ($eventTarget -eq 'btnSave') {
+                    if ([Net.WebUtility]::UrlDecode($postedValues['REQ_RMK']) -cne $record['REQ_RMK']) { throw 'processing save changed request body' }
+                    foreach ($name in @('GUBUN','STS','PGM_MD','ACT_GUBUN','PGM_NM','PGM_ID','ACT_DT_FR','ACT_DT','ACT_TIME','ACT_UID')) { $record[$name] = $postedValues[$name] }
+                } else { throw 'unexpected update event target' }
+                if ($number -eq 'RQ9103') {
+                    $client.Close()
+                    Write-Output ('UPDATE_POSTS=' + $updatePosts)
+                    continue
+                }
+                $html = '<html>saved</html>'
+            } elseif ($target -match '^/support/C0/c0200_02\.aspx\?REQ_NO=([^&]+)' -and $method -eq 'GET') {
                 $number = [Net.WebUtility]::UrlDecode($Matches[1])
                 if ($saved.ContainsKey($number)) {
                     $record = $saved[$number]
-                    $html = '<form><span id="REQ_NO">' + $number + '</span><span id="REQ_UID">u1</span><textarea name="REQ_RMK" id="REQ_RMK">' + "`r`n" + [Net.WebUtility]::HtmlEncode($record['REQ_RMK']) + '</textarea>'
-                    foreach ($name in @('REQ_TIT','GUBUN','STS','PGM_NM','PGM_ID','ACT_TIME')) { $html += Field $name $record[$name] }
-                    $html += '</form>'
+                    if ($existingViews.ContainsKey($number)) {
+                        $existingViews[$number]++
+                        $record['unique_key'] = 'upload-state-' + $existingViews[$number]
+                        if ($number -eq 'RQ9101' -and $existingViews[$number] -eq 2) {
+                            $record['ADM_REMARK'] = 'web-report-updated-after-preview'
+                            $record['ACT_RMK'] += "`r`n웹에서만 추가한 내용 % + &"
+                        }
+                        if ($number -eq 'RQ9104' -and $existingViews[$number] -eq 2) { $record['REQ_TIT'] = 'remote-title' }
+                        $html = Existing $number $record ('existing-' + $number + '-' + $existingViews[$number])
+                    } else {
+                        $html = '<form><span id="REQ_NO">' + $number + '</span><span id="REQ_UID">u1</span><textarea name="REQ_RMK" id="REQ_RMK">' + "`r`n" + [Net.WebUtility]::HtmlEncode($record['REQ_RMK']) + '</textarea>'
+                        foreach ($name in @('REQ_TIT','GUBUN','STS','PGM_NM','PGM_ID','ACT_TIME')) { $html += Field $name $record[$name] }
+                        $html += '</form>'
+                    }
                 } else { $html = '<form>not found</form>' }
             } else { throw ('unexpected fixture request ' + $method + ' ' + $target) }
             $payload = [Text.Encoding]::UTF8.GetBytes($html)
@@ -159,7 +235,8 @@ try {
     $fixtureOutput = @($fixtureJob.ChildJobs[0].Output | ForEach-Object { [string]$_ })
     if (-not $NoNetwork) {
         if ($fixtureOutput -notcontains 'SAVE_POSTS=2') { throw 'fixture did not observe exactly two POSTs (success + unknown), or a stale option was submitted' }
-        Write-Output 'PASS: exactly two loopback registration POSTs; no automatic POST retry; no live website save'
+        if ($fixtureOutput -notcontains 'UPDATE_POSTS=5') { throw 'fixture did not observe exactly five update POSTs (two-tab success + partial + confirmed lost response), or a rejected update was submitted' }
+        Write-Output 'PASS: exactly two registration / five update POSTs; web-only values preserved; no automatic POST retry; no live website save'
     }
 } catch {
     $testFailure = $_
