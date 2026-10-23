@@ -1,5 +1,11 @@
 Attribute VB_Name = "modWebUpload"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 업무가 한 행인 이관 시트의 단일 셀 초기화 비교와 재열기 오류 방지
+' 2026-10-23 김좌현 수정 : 데이터 이관용 웹 이력 시트 준비와 이전 미리보기·연결 확인 초기화
+' 2026-10-23 김좌현 수정 : 미리보기 실행 종료 시 결과와 관계없이 원본 WEB UPDATE 전체 N 초기화
+' 2026-10-23 김좌현 수정 : WEB UPDATE 선택 행의 신규·갱신 자동 판정과 완료 목록 정리 및 미리보기 재검증
+' 2026-10-23 김좌현 수정 : 업무 초기화와 재열기에서 하위 작업시간의 상위 합계 갱신
+' 2026-10-23 김좌현 수정 : 행 복사 시 웹 선택목록 이름 충돌과 원본 파일 외부 연결 방지
 ' 2026-10-22 김좌현 수정 : 프로젝트 실적 웹 설정, 선택목록, 미리보기와 등록 이력 추가
 ' 2026-10-22 김좌현 수정 : 등록 단위 동기화, 요청번호 연결과 충돌 확인을 포함한 신규/갱신 실행
 ' 2026-10-22 김좌현 수정 : 기존 갱신을 기본으로 하고 요청번호 없는 업무는 연결 필요로 차단
@@ -9,9 +15,7 @@ Option Explicit
 Private mPreviewItems As Collection
 Private mPreviewSource As Worksheet
 Private mPreviewSnapshot As String
-Private mPreviewMode As String
-Private Const WEB_MODE_UPDATE As String = "기존 갱신"
-Private Const WEB_MODE_NEW As String = "신규 등록"
+Private mPreviewDecisionSnapshot As String
 Private mWebBusy As Boolean
 Private mConfigTaskSheet As Worksheet
 Private mConfigTaskRow As Long
@@ -115,7 +119,7 @@ Public Sub EnsureWebConfigSheet()
     ws.Range("A4").Value2 = "비밀번호 입력"
     ws.Range("A5").Value2 = "선택목록 갱신 시각"
     ws.Range("A6").Value2 = "새 업무의 등록 기준"
-    ws.Range("A7").Value2 = "새 업무의 웹등록 선택"
+    ws.Range("A7").Value2 = "새 업무의 WEB UPDATE 선택"
     ws.Range("A8").Value2 = "기본 요청자"
     ws.Range("A9").Value2 = "기본 처리구분"
     ws.Range("A10").Value2 = "기본 진행상태"
@@ -126,7 +130,7 @@ Public Sub EnsureWebConfigSheet()
     If Len(CStr(ws.Range("B7").Value2)) = 0 Then ws.Range("B7").Value2 = "N"
     ws.Range("A14").Value2 = "비밀번호는 B4에 입력하면 이 Windows 사용자용으로 보호 저장됩니다."
     ws.Range("A15").Value2 = "기본값은 빈 행에만 적용합니다. 각 업무의 선택값은 메인 시트에서 바꿀 수 있습니다."
-    ws.Range("A16").Value2 = "등록 기준은 레벨1 그룹 전체에 적용합니다. 등록할 대상 행의 웹등록을 Y로 선택하세요."
+    ws.Range("A16").Value2 = "등록 기준은 레벨1 그룹 전체에 적용합니다. 대상 행의 WEB UPDATE를 Y로 선택하면 신규·갱신을 자동 판단합니다."
     ws.Range("A17").Value2 = "작업시간은 분 단위입니다. 실제 날짜와 작업시간을 비워 둔 행은 등록하지 않습니다."
     ws.Range("A18").Value2 = "기존 요청번호 연결은 메인 시트의 등록 단위 행을 선택한 뒤 연결 버튼을 누르세요. 미확인 건은 자동 재전송하지 않습니다."
     For hintRow = 14 To 18
@@ -173,7 +177,7 @@ Public Sub EnsureWebConfigSheet()
             RefersTo:="='" & ws.Name & "'!" & ws.Range(ws.Cells(WEB_OPTION_FIRST_ROW, c), ws.Cells(lastOptionRow, c)).Address
         With ws.Range(WebDefaultCell(CStr(field))).Validation
             .Delete
-            .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="=" & WebOptionName(CStr(field))
+            .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="=INDIRECT(""" & WebOptionName(CStr(field)) & """)"
             .IgnoreBlank = True
         End With
     Next field
@@ -439,6 +443,8 @@ Public Sub PrepareWebTaskSheet(ByVal ws As Worksheet)
             Next field
         End If
     Next r
+    stepName = "작업시간 합계"
+    UpdateTaskWorkMinutes ws, lastRow
     stepName = "등록 이력 동기화"
     RefreshWebHistoryState ws
     stepName = "등록 단위 동기화"
@@ -488,7 +494,7 @@ Public Sub RefreshWebHistoryState(ByVal ws As Worksheet)
     If changed Then
         Set mPreviewItems = Nothing
         mPreviewSnapshot = vbNullString
-        mPreviewMode = vbNullString
+        mPreviewDecisionSnapshot = vbNullString
         Set mLinkSource = Nothing
         mLinkSourceId = vbNullString
         mLinkRequestNo = vbNullString
@@ -523,7 +529,8 @@ Public Sub ApplyWebTaskValidation(ByVal ws As Worksheet)
         rng.NumberFormat = "@"
         With rng.Validation
             .Delete
-            .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="=" & WebOptionName(CStr(field))
+            ' Keep copied dropdowns tied to the receiving workbook's existing lists.
+            .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="=INDIRECT(""" & WebOptionName(CStr(field)) & """)"
             .IgnoreBlank = True
             .InCellDropdown = True
             .ErrorTitle = "웹 선택값 확인"
@@ -662,7 +669,7 @@ InvalidMerge:
 End Sub
 
 Public Sub SynchronizeWebUnits(ByVal ws As Worksheet)
-    Dim r As Long, root As Long, lastRow As Long, c As Variant
+    Dim r As Long, root As Long, lastRow As Long, c As Variant, child As Long
     lastRow = GetLastDataRow(ws)
     For r = DATA_START_ROW To lastRow
         If HasTaskContent(ws, r) Then
@@ -672,6 +679,16 @@ Public Sub SynchronizeWebUnits(ByVal ws As Worksheet)
                     ws.Cells(r, CStr(c)).Value2 = ws.Cells(root, CStr(c)).Value2
                 Next c
                 ws.Cells(r, COL_WEB_RESULT).Value2 = ws.Cells(root, COL_WEB_RESULT).Value2
+            ElseIf root = 0 And HasChildTask(ws, r, lastRow) Then
+                ' A former representative can keep a locked Y after changing the group basis.
+                For child = r + 1 To GetTaskSubtreeEndRow(ws, r, lastRow)
+                    If HasTaskContent(ws, child) Then
+                        If WebRegistrationRootRow(ws, child, lastRow) > 0 Then
+                            ws.Cells(r, COL_WEB_ENABLED).Value2 = "N"
+                            Exit For
+                        End If
+                    End If
+                Next child
             End If
         End If
     Next r
@@ -680,6 +697,11 @@ End Sub
 Private Function WebInitializationRangeSnapshot(ByVal cells As Range) As String
     Dim values As Variant, parts() As String, r As Long, c As Long, i As Long, value As String
     values = cells.Formula
+    If cells.Cells.CountLarge = 1 Then
+        If IsError(values) Then value = cells.Text Else value = CStr(values)
+        WebInitializationRangeSnapshot = cells.Address & "|" & CStr(VarType(values)) & ":" & CStr(Len(value)) & ":" & value
+        Exit Function
+    End If
     ReDim parts(1 To UBound(values, 1) * UBound(values, 2))
     For r = 1 To UBound(values, 1)
         For c = 1 To UBound(values, 2)
@@ -714,7 +736,8 @@ Private Function WebInitializationSnapshot() As String
         ElseIf IsWebTaskSheet(ws) Then
             lastRow = Application.Max(DATA_START_ROW, GetLastDataRow(ws))
             value = WebInitializationRangeSnapshot(ws.Range("B" & HEADER_ROW & ":AE" & HEADER_ROW)) & _
-                    WebInitializationRangeSnapshot(ws.Range(COL_WEB_ENABLED & DATA_START_ROW & ":" & COL_WEB_TASK_ID & lastRow))
+                    WebInitializationRangeSnapshot(ws.Range(COL_WEB_ENABLED & DATA_START_ROW & ":" & COL_WEB_TASK_ID & lastRow)) & _
+                    WebInitializationRangeSnapshot(ws.Range(COL_WORK_MINUTES & DATA_START_ROW & ":" & COL_WORK_MINUTES & lastRow))
         End If
         If Len(value) > 0 Then WebInitializationSnapshot = WebInitializationSnapshot & _
             CStr(Len(ws.Name)) & ":" & ws.Name & CStr(Len(value)) & ":" & value
@@ -792,8 +815,10 @@ Public Sub EnsureWebTaskButtons(ByVal ws As Worksheet)
     If Not IsWebTaskSheet(ws) Then Exit Sub
     If ws.Rows(3).RowHeight < 20 Then ws.Rows(3).RowHeight = 20
     AddWebButton ws, "btnWebPreview", "웹등록 미리보기", "PreviewWebTasks", ws.Range("B3").Left, ws.Range("B3").Top, 112
-    AddWebButton ws, "btnWebUpload", "웹 등록·갱신", "UploadWebTasks", ws.Range("B3").Left + 118, ws.Range("B3").Top, 96
-    AddWebButton ws, "btnWebConfig", "웹 설정", "OpenWebConfig", ws.Range("B3").Left + 220, ws.Range("B3").Top, 80
+    On Error Resume Next
+    ws.Shapes("btnWebUpload").Delete
+    On Error GoTo 0
+    AddWebButton ws, "btnWebConfig", "웹 설정", "OpenWebConfig", ws.Range("B3").Left + 118, ws.Range("B3").Top, 80
     RefreshWebModeView ws, True
 End Sub
 
@@ -804,6 +829,44 @@ Public Sub OpenWebConfig()
     End If
     EnsureWebConfigSheet
     ThisWorkbook.Worksheets(WEB_CONFIG_SHEET_NAME).Activate
+End Sub
+
+Public Sub EnsureWebHistorySheets()
+    EnsureWebLogSheet
+    EnsureWebStateSheet
+End Sub
+
+Public Sub ResetWebPreviewAfterMigration()
+    Dim preview As Worksheet, buttonName As Variant
+    Set mPreviewItems = Nothing
+    Set mPreviewSource = Nothing
+    mPreviewSnapshot = vbNullString
+    mPreviewDecisionSnapshot = vbNullString
+    Set mConfigTaskSheet = Nothing
+    mConfigTaskRow = 0
+    Set mLinkSource = Nothing
+    mLinkSourceId = vbNullString
+    mLinkRequestNo = vbNullString
+    mLinkServerFingerprint = vbNullString
+    mLinkPayloadFingerprint = vbNullString
+    mLinkSite = vbNullString
+    mLinkAccount = vbNullString
+    On Error Resume Next
+    Set preview = ThisWorkbook.Worksheets(WEB_PREVIEW_SHEET_NAME)
+    On Error GoTo 0
+    If preview Is Nothing Then Exit Sub
+    preview.Unprotect
+    If preview.AutoFilterMode Then preview.AutoFilterMode = False
+    preview.Cells.Clear
+    preview.Cells.Locked = True
+    preview.Range("A1").Value2 = "프로젝트 실적 미리보기"
+    preview.Range("A2").Value2 = "데이터를 가져왔습니다. 메인 시트에서 웹등록 미리보기를 다시 만드세요."
+    For Each buttonName In Array("btnWebUploadPreview", "btnWebPreviewRefresh", "btnWebLinkConfirm", "btnWebLinkCancel")
+        On Error Resume Next
+        preview.Shapes(CStr(buttonName)).Visible = msoFalse
+        On Error GoTo 0
+    Next buttonName
+    preview.Protect DrawingObjects:=True, Contents:=True, Scenarios:=True, UserInterfaceOnly:=True
 End Sub
 
 Private Sub EnsureWebLogSheet()
@@ -847,6 +910,50 @@ Private Function PreviousWebOutcome(ByVal sourceId As String, ByRef requestNo As
     Next r
 End Function
 
+Private Function NewWebTaskIssue(ByVal sourceId As String, ByVal state As Object) As String
+    Dim log As Worksheet, r As Long, outcome As String, latestOutcome As String, site As String
+    If WebTaskHasOtherSiteConnection(sourceId) Then
+        NewWebTaskIssue = "다른 사이트의 등록 이력이 있습니다. 사이트와 요청번호 연결을 확인하세요."
+        Exit Function
+    End If
+    If Len(CStr(state("RequestNo"))) > 0 Or Len(CStr(state("PendingNo"))) > 0 Or _
+       Len(CStr(state("Baseline"))) > 0 Or Len(CStr(state("ConfirmedAt"))) > 0 Or _
+       Len(CStr(state("RequesterCode"))) > 0 Then
+        NewWebTaskIssue = "기존 전송 또는 등록 이력이 있습니다. 요청번호 연결과 전송결과를 먼저 확인하세요."
+        Exit Function
+    End If
+    outcome = CStr(state("Outcome"))
+    If outcome <> vbNullString And outcome <> "등록실패" And outcome <> "미등록 확인" Then
+        NewWebTaskIssue = "기존 이력의 요청번호가 연결되지 않았습니다. 웹 설정에서 요청번호 연결을 확인하세요."
+        Exit Function
+    End If
+    On Error Resume Next
+    Set log = ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME)
+    On Error GoTo 0
+    If log Is Nothing Then Exit Function
+    For r = log.Cells(log.Rows.Count, "A").End(xlUp).Row To 2 Step -1
+        If CStr(log.Cells(r, "C").Value2) = sourceId Then
+            outcome = CStr(log.Cells(r, "E").Value2)
+            site = LCase$(Trim$(CStr(log.Cells(r, "L").Value2)))
+            If Len(site) > 0 And Right$(site, 1) <> "/" Then site = site & "/"
+            If Len(site) > 0 And site <> WebCurrentSite() Then
+                If outcome <> "등록실패" And outcome <> "미등록 확인" Then
+                    NewWebTaskIssue = "다른 사이트의 전송 이력이 있습니다. 사이트와 요청번호 연결을 확인하세요."
+                    Exit Function
+                End If
+            Else
+                If Len(latestOutcome) = 0 Then latestOutcome = outcome
+                If outcome = "등록완료" Or outcome = "갱신완료" Or outcome = "연결완료" Then
+                    NewWebTaskIssue = "등록 이력은 있으나 요청번호 연결이 없습니다. 기존 업무를 연결한 뒤 갱신하세요."
+                    Exit Function
+                End If
+            End If
+        End If
+    Next r
+    If latestOutcome <> vbNullString And latestOutcome <> "등록실패" And latestOutcome <> "미등록 확인" Then _
+        NewWebTaskIssue = "앞선 전송 이력이 있습니다. 요청번호 연결과 전송결과를 먼저 확인하세요."
+End Function
+
 Private Sub AssessWebItem(ByVal item As Object, ByRef session As Object)
     Dim state As Object, server As Object, requestNo As String, currentFingerprint As String
     item("Operation") = "확인 필요"
@@ -855,28 +962,18 @@ Private Sub AssessWebItem(ByVal item As Object, ByRef session As Object)
     If Len(CStr(item("Error"))) > 0 Then Exit Sub
     Set state = WebTaskState(CStr(item("SourceId")))
     requestNo = CStr(state("RequestNo"))
-    If WebTaskHasOtherSiteConnection(CStr(item("SourceId"))) And Len(requestNo) = 0 Then
-        item("Error") = "다른 사이트에 연결된 업무입니다. 사이트 설정과 기존 요청번호를 확인하세요."
-        Exit Sub
-    End If
-    If Len(requestNo) = 0 And Not WebStateUnresolved(state) Then
-        If mPreviewMode = WEB_MODE_NEW Then
+    If Len(requestNo) = 0 Then
+        item("Error") = NewWebTaskIssue(CStr(item("SourceId")), state)
+        If Len(CStr(item("Error"))) = 0 Then
             item("Operation") = "신규"
         Else
-            item("Operation") = "연결 필요"
-            item("Error") = "연결된 RQ 번호가 없습니다. 메인 시트에서 업무 행을 선택한 뒤 웹 설정의 '선택행 요청번호 연결'로 기존 업무를 연결하세요."
+            item("RequestNo") = CStr(state("PendingNo"))
         End If
         Exit Sub
     End If
-    If Len(requestNo) = 0 Then requestNo = CStr(state("PendingNo"))
     item("RequestNo") = requestNo
-    If WebStateUnresolved(state) Then
+    If WebStateUnresolved(state) Or Len(CStr(state("PendingNo"))) > 0 Then
         item("Error") = "앞선 전송 결과를 웹에서 먼저 확인하세요: " & requestNo & ". 실제 요청번호를 연결하여 확인값을 복구할 수 있습니다."
-        Exit Sub
-    End If
-    If mPreviewMode = WEB_MODE_NEW Then
-        item("Operation") = "기등록"
-        item("Error") = "이미 요청번호가 연결된 업무입니다. 기존 갱신 모드에서 확인하세요."
         Exit Sub
     End If
     If Len(CStr(state("Baseline"))) = 0 Then
@@ -907,7 +1004,8 @@ Private Function PreviewItemsSnapshot(ByVal items As Collection) As String
     output = CStr(ThisWorkbook.Worksheets(WEB_CONFIG_SHEET_NAME).Range("B2").Value2) & vbNullChar & _
              CStr(ThisWorkbook.Worksheets(WEB_CONFIG_SHEET_NAME).Range("B3").Value2) & vbNullChar
     For Each item In items
-        value = CStr(item("SourceId")) & "|" & CStr(item("Error"))
+        value = CStr(item("SourceId")) & "|" & CStr(item("Row")) & "|" & _
+                CStr(item("GroupRow")) & "|" & CStr(item("Error"))
         output = output & Len(value) & ":" & value
         For Each field In Array("GUBUN", "REQ_UID", "REQ_TIT", "REQ_RMK", "STS", "PGM_MD", "ACT_GUBUN", "ACT_UID", "PGM_NM", "PGM_ID", "ACT_DT_FR", "ACT_DT", "ACT_TIME")
             If item("Values").Exists(CStr(field)) Then value = CStr(item("Values")(CStr(field))) Else value = vbNullString
@@ -917,30 +1015,30 @@ Private Function PreviewItemsSnapshot(ByVal items As Collection) As String
     PreviewItemsSnapshot = output
 End Function
 
-Private Function ReadWebPreviewMode() As String
-    Dim mode As String
-    mode = CStr(ThisWorkbook.Worksheets(WEB_PREVIEW_SHEET_NAME).Range("D3").Value2)
-    Select Case mode
-        Case WEB_MODE_UPDATE, WEB_MODE_NEW
-            ReadWebPreviewMode = mode
-        Case Else
-            Err.Raise vbObjectError + 2607, , "D3 실행 모드에서 '기존 갱신' 또는 '신규 등록'을 선택한 뒤 미리보기를 갱신하세요."
-    End Select
+Private Function PreviewDecisionSnapshot(ByVal items As Collection) As String
+    Dim item As Object, field As Variant, value As String
+    PreviewDecisionSnapshot = PreviewItemsSnapshot(items)
+    For Each item In items
+        For Each field In Array("Operation", "RequestNo", "ServerSnapshot")
+            value = CStr(item(CStr(field)))
+            PreviewDecisionSnapshot = PreviewDecisionSnapshot & Len(value) & ":" & value
+        Next field
+    Next item
 End Function
 
 Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = True)
     Dim ws As Worksheet, preview As Worksheet, item As Object, r As Long, i As Long, headers As Variant
     Dim requestNo As String, outcome As String, issue As String, periodFields As Variant, errorNumber As Long, errorText As String
-    Dim session As Object, structureIssue As String, eventsEnabled As Boolean, wasProtected As Boolean, selectedMode As String
+    Dim session As Object, structureIssue As String, eventsEnabled As Boolean, wasProtected As Boolean
+    Dim selectedItems As Collection
+    eventsEnabled = Application.EnableEvents
     On Error GoTo Failed
     If mWebBusy Then Exit Sub
     If ActiveSheet.Name = WEB_PREVIEW_SHEET_NAME Then
         If mPreviewSource Is Nothing Then Err.Raise vbObjectError + 2606, , "메인 업무 시트에서 미리보기를 다시 만드세요."
         Set ws = mPreviewSource
-        selectedMode = ReadWebPreviewMode()
     Else
         Set ws = ActiveSheet
-        selectedMode = WEB_MODE_UPDATE
     End If
     If Not IsWebTaskSheet(ws) Then Err.Raise vbObjectError + 2606, , "메인 업무 시트에서 실행하세요."
     structureIssue = WebTaskStructureIssue(ws)
@@ -953,9 +1051,19 @@ Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = Tru
     If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     Application.EnableEvents = eventsEnabled
     Set mPreviewSource = ws
-    Set mPreviewItems = BuildWebUploadItems(ws)
-    mPreviewSnapshot = PreviewItemsSnapshot(mPreviewItems)
-    mPreviewMode = selectedMode
+    Set selectedItems = BuildWebUploadItems(ws)
+    Set mPreviewItems = New Collection
+    For Each item In selectedItems
+        If Len(structureIssue) > 0 Then item("Error") = structureIssue
+        AssessWebItem item, session
+        If CStr(item("Operation")) = "변경 없음" And Len(CStr(item("Error"))) = 0 Then
+            CompleteWebUpdateSelection ws, item
+        Else
+            mPreviewItems.Add item
+        End If
+    Next item
+    mPreviewSnapshot = PreviewItemsSnapshot(BuildWebUploadItems(ws))
+    mPreviewDecisionSnapshot = PreviewDecisionSnapshot(mPreviewItems)
     Set preview = WebSheet(WEB_PREVIEW_SHEET_NAME)
     preview.Unprotect
     On Error Resume Next
@@ -969,24 +1077,8 @@ Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = Tru
     preview.Cells.Font.Size = 10
     preview.Columns("E:I").NumberFormat = "@"
     preview.Rows(3).RowHeight = 21
-    preview.Range("A1").Value2 = "프로젝트 실적 미리보기 / " & mPreviewMode
-    preview.Range("A2").Value2 = "원본: " & ws.Name & " / D3에서 실행 모드를 선택한 뒤 '미리보기 갱신'을 누르세요. 기존 갱신은 연결된 RQ 번호만 처리하며, 신규 등록은 명시적으로 선택해야 합니다."
-    With preview.Range("D3")
-        .Value2 = mPreviewMode
-        .Locked = False
-        .Font.Bold = True
-        .Interior.Color = RGB(255, 246, 178)
-        .Validation.Delete
-        .Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-                        Formula1:=WEB_MODE_UPDATE & Application.International(xlListSeparator) & WEB_MODE_NEW
-        .Validation.InCellDropdown = True
-        .Validation.InputTitle = "실행 모드"
-        .Validation.InputMessage = "선택을 바꾼 뒤 미리보기 갱신을 누르세요."
-        .Validation.ErrorTitle = "실행 모드 확인"
-        .Validation.ErrorMessage = "기존 갱신 또는 신규 등록을 선택하세요."
-        .Validation.ShowInput = True
-        .Validation.ShowError = True
-    End With
+    preview.Range("A1").Value2 = "프로젝트 실적 미리보기"
+    preview.Range("A2").Value2 = "원본: " & ws.Name & " / WEB UPDATE=Y인 업무의 신규·갱신을 이력으로 자동 판단합니다. 실행 후 원본 시트의 WEB UPDATE는 모두 N으로 초기화됩니다."
     headers = Array("실행 구분", "원본 행", "제목", "요청/처리내용", "요청자", "처리구분", "진행상태", "모듈/업무", "처리자", "시작일", "종료일", "시간(분)", "확인 사항", "요청번호")
     periodFields = Array("ACT_DT_FR", "ACT_DT", "ACT_TIME")
     For i = 0 To UBound(headers)
@@ -994,8 +1086,6 @@ Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = Tru
     Next i
     r = 5
     For Each item In mPreviewItems
-        If Len(structureIssue) > 0 Then item("Error") = structureIssue
-        AssessWebItem item, session
         issue = CStr(item("Error"))
         preview.Cells(r, 1).Value2 = item("Operation")
         preview.Cells(r, 14).NumberFormat = "@"
@@ -1017,7 +1107,7 @@ Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = Tru
         If Len(issue) > 0 Then preview.Range(preview.Cells(r, 1), preview.Cells(r, 14)).Interior.Color = RGB(255, 239, 224)
         r = r + 1
     Next item
-    If mPreviewItems.Count = 0 Then preview.Range("A5").Value2 = "등록할 행이 없습니다. 메인 시트에서 등록 대상 행의 웹등록을 Y로 선택하세요."
+    If mPreviewItems.Count = 0 Then preview.Range("A5").Value2 = "처리할 업무가 없습니다. 메인 시트에서 대상 행의 WEB UPDATE를 Y로 선택하세요."
     preview.Rows(4).Font.Bold = True
     preview.Rows(4).Interior.Color = RGB(229, 239, 249)
     preview.Columns("A").ColumnWidth = 14
@@ -1032,7 +1122,7 @@ Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = Tru
     preview.Range("C5:M" & Application.Max(5, r - 1)).WrapText = True
     preview.Range("A5:M" & Application.Max(5, r - 1)).VerticalAlignment = xlTop
     preview.Rows("5:" & Application.Max(5, r - 1)).AutoFit
-    AddWebButton preview, "btnWebUploadPreview", mPreviewMode & " 실행", "UploadWebTasks", preview.Range("A3").Left, preview.Range("A3").Top, 105
+    AddWebButton preview, "btnWebUploadPreview", "등록·갱신 실행", "UploadWebTasks", preview.Range("A3").Left, preview.Range("A3").Top, 105
     AddWebButton preview, "btnWebPreviewRefresh", "미리보기 갱신", "PreviewWebTasks", preview.Range("C3").Left, preview.Range("C3").Top, 112
     preview.Protect DrawingObjects:=True, Contents:=True, Scenarios:=True, UserInterfaceOnly:=True
     preview.Activate
@@ -1041,10 +1131,10 @@ Failed:
     errorNumber = Err.Number: errorText = Err.Description
     Set mPreviewItems = Nothing
     mPreviewSnapshot = vbNullString
-    mPreviewMode = vbNullString
+    mPreviewDecisionSnapshot = vbNullString
     On Error Resume Next
     If Not ws Is Nothing And wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
-    If eventsEnabled Then Application.EnableEvents = True
+    Application.EnableEvents = eventsEnabled
     On Error GoTo 0
     If showCompletionMessage Then
         MsgBox errorText, vbExclamation, "웹등록 미리보기"
@@ -1077,6 +1167,57 @@ Private Function FindWebTaskRow(ByVal ws As Worksheet, ByVal sourceId As String)
         End If
     Next r
 End Function
+
+Private Sub CompleteWebUpdateSelection(ByVal ws As Worksheet, ByVal item As Object)
+    Dim rowNum As Long, r As Long, lastRow As Long, wasProtected As Boolean, eventsEnabled As Boolean
+    Dim errorNumber As Long, errorText As String
+    rowNum = FindWebTaskRow(ws, CStr(item("SourceId")))
+    If rowNum = 0 Or rowNum <> CLng(item("Row")) Then _
+        Err.Raise vbObjectError + 2607, , "업무 위치가 바뀌었습니다. 미리보기를 다시 만드세요."
+    lastRow = GetLastDataRow(ws)
+    wasProtected = ws.ProtectContents
+    eventsEnabled = Application.EnableEvents
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    If wasProtected Then UnprotectTaskSheet ws
+    For r = rowNum To GetTaskSubtreeEndRow(ws, rowNum, lastRow)
+        If HasTaskContent(ws, r) Then ws.Cells(r, COL_WEB_ENABLED).Value2 = "N"
+    Next r
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    Application.EnableEvents = eventsEnabled
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    Application.EnableEvents = eventsEnabled
+    On Error GoTo 0
+    Err.Raise errorNumber, "CompleteWebUpdateSelection", errorText
+End Sub
+
+Private Sub ResetWebUpdateSelections(ByVal ws As Worksheet)
+    Dim lastRow As Long, lastFlagRow As Long, wasProtected As Boolean, eventsEnabled As Boolean
+    Dim errorNumber As Long, errorText As String
+    lastRow = GetLastDataRow(ws)
+    lastFlagRow = Application.Max(lastRow, ws.Cells(ws.Rows.Count, COL_WEB_ENABLED).End(xlUp).Row)
+    wasProtected = ws.ProtectContents
+    eventsEnabled = Application.EnableEvents
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    If wasProtected Then UnprotectTaskSheet ws
+    If lastFlagRow >= DATA_START_ROW Then _
+        ws.Range(ws.Cells(DATA_START_ROW, COL_WEB_ENABLED), ws.Cells(lastFlagRow, COL_WEB_ENABLED)).Value2 = "N"
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    Application.EnableEvents = eventsEnabled
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    Application.EnableEvents = eventsEnabled
+    On Error GoTo 0
+    Err.Raise errorNumber, "ResetWebUpdateSelections", errorText
+End Sub
 
 Private Sub RecordWebOutcome(ByVal item As Object, ByVal outcome As String, ByVal requestNo As String, ByVal message As String, _
                              Optional ByVal operation As String = "등록", Optional ByVal confirmedValues As Object = Nothing)
@@ -1115,6 +1256,7 @@ Public Sub UploadWebTasks(Optional ByVal showCompletionMessage As Boolean = True
     Dim requestNo As String, previous As String, count As Long, skipped As Long, outcome As String
     Dim eventsEnabled As Boolean, currentStarted As Boolean, errorText As String, errorNumber As Long
     Dim operation As String, state As Object, confirmedValues As Object, structureIssue As String, sourceProtected As Boolean, eligible As Long
+    Dim newIssue As String, executionAccepted As Boolean, selectionsReset As Boolean
     If mWebBusy Then Exit Sub
     If ActiveSheet.Name <> WEB_PREVIEW_SHEET_NAME Then
         PreviewWebTasks showCompletionMessage
@@ -1123,7 +1265,8 @@ Public Sub UploadWebTasks(Optional ByVal showCompletionMessage As Boolean = True
     eventsEnabled = Application.EnableEvents
     On Error GoTo Failed
     If mPreviewItems Is Nothing Or mPreviewSource Is Nothing Then Err.Raise vbObjectError + 2607, , "메인 시트에서 미리보기를 다시 만드세요."
-    If ReadWebPreviewMode() <> mPreviewMode Then Err.Raise vbObjectError + 2607, , "실행 모드가 바뀌었습니다. 미리보기를 갱신하세요."
+    If PreviewDecisionSnapshot(mPreviewItems) <> mPreviewDecisionSnapshot Then _
+        Err.Raise vbObjectError + 2607, , "미리보기의 실행 정보가 바뀌었습니다. 미리보기를 갱신하세요."
     structureIssue = WebTaskStructureIssue(mPreviewSource)
     If Len(structureIssue) > 0 Then Err.Raise vbObjectError + 2607, , structureIssue
     Application.EnableEvents = False
@@ -1134,23 +1277,26 @@ Public Sub UploadWebTasks(Optional ByVal showCompletionMessage As Boolean = True
     Application.EnableEvents = eventsEnabled
     Set currentItems = BuildWebUploadItems(mPreviewSource)
     If PreviewItemsSnapshot(currentItems) <> mPreviewSnapshot Then Err.Raise vbObjectError + 2607, , "미리보기 후 업무 내용이 바뀌었습니다. 미리보기를 갱신하세요."
-    If mPreviewItems.Count = 0 Then Exit Sub
+    For Each item In currentItems
+        AssessWebItem item, session
+    Next item
+    If PreviewDecisionSnapshot(currentItems) <> mPreviewDecisionSnapshot Then _
+        Err.Raise vbObjectError + 2607, , "이력 또는 웹 내용이 미리보기 이후 바뀌었습니다. 미리보기를 갱신하세요."
+    Set mPreviewItems = currentItems
     For Each item In mPreviewItems
         operation = CStr(item("Operation"))
-        If operation = "신규" And mPreviewMode <> WEB_MODE_NEW Then _
-            Err.Raise vbObjectError + 2607, , "기존 갱신에서는 신규 등록을 실행할 수 없습니다. 미리보기를 갱신하세요."
-        If operation = "갱신" And mPreviewMode <> WEB_MODE_UPDATE Then _
-            Err.Raise vbObjectError + 2607, , "신규 등록에서는 기존 업무를 갱신할 수 없습니다. 미리보기를 갱신하세요."
         If Len(CStr(item("Error"))) = 0 And (operation = "신규" Or operation = "갱신") Then eligible = eligible + 1
     Next item
-    If eligible = 0 Then
-        If showCompletionMessage Then MsgBox "실행할 업무가 없습니다. 미리보기의 실행 구분과 확인 사항을 확인하세요.", vbInformation, "웹등록"
-        Exit Sub
-    End If
     If ThisWorkbook.ReadOnly Or Len(ThisWorkbook.Path) = 0 Then Err.Raise vbObjectError + 2607, , "등록 이력을 보관할 수 있도록 쓰기 가능한 파일로 먼저 저장하세요."
-    Set session = OpenConfiguredWebSession()
+    executionAccepted = True
     mWebBusy = True
     Application.EnableEvents = False
+    ' 확정한 실행 목록은 유지하고 선택값을 먼저 저장해 전송 중단 시 미처리 행도 초기화한다.
+    ResetWebUpdateSelections mPreviewSource
+    selectionsReset = True
+    SaveWebJournal
+    If eligible = 0 Then GoTo Completed
+    If session Is Nothing Then Set session = OpenConfiguredWebSession()
     For Each item In mPreviewItems
         operation = CStr(item("Operation"))
         If Len(CStr(item("Error"))) > 0 Or (operation <> "신규" And operation <> "갱신") Then
@@ -1158,10 +1304,11 @@ Public Sub UploadWebTasks(Optional ByVal showCompletionMessage As Boolean = True
         Else
             Set state = WebTaskState(CStr(item("SourceId")))
             requestNo = CStr(state("RequestNo"))
-            If WebStateUnresolved(state) Then Err.Raise vbObjectError + 2607, , "앞선 전송 결과를 먼저 확인하세요."
+            If WebStateUnresolved(state) Or Len(CStr(state("PendingNo"))) > 0 Then _
+                Err.Raise vbObjectError + 2607, , "앞선 전송 결과를 먼저 확인하세요."
             If operation = "신규" Then
-                If Len(requestNo) > 0 Or WebTaskHasOtherSiteConnection(CStr(item("SourceId"))) Then _
-                    Err.Raise vbObjectError + 2607, , "미리보기 이후 요청번호 연결이 바뀌었습니다. 미리보기를 갱신하세요."
+                newIssue = NewWebTaskIssue(CStr(item("SourceId")), state)
+                If Len(newIssue) > 0 Then Err.Raise vbObjectError + 2607, , newIssue
                 Set form = WebLoadRegistration(session)
                 requestNo = CStr(form("RequestNo"))
                 RecordWebOutcome item, "등록 시작", requestNo, "저장 결과 확인 중"
@@ -1197,11 +1344,19 @@ Public Sub UploadWebTasks(Optional ByVal showCompletionMessage As Boolean = True
                 If outcome = "결과 미확인" Or outcome = "갱신 결과 미확인" Or outcome = "갱신 일부저장" Then Exit For
         End If
     Next item
+Completed:
     mWebBusy = False
     Application.EnableEvents = eventsEnabled
     Application.StatusBar = False
     PreviewWebTasks showCompletionMessage
-    If showCompletionMessage Then MsgBox "등록/갱신 완료 " & count & "건 / 제외 " & skipped & "건" & vbCrLf & "자세한 결과는 웹등록_이력 시트에서 확인하세요.", vbInformation, "웹등록 결과"
+    executionAccepted = False
+    If showCompletionMessage Then
+        If eligible = 0 Then
+            MsgBox "실행 가능한 업무가 없어 전송하지 않았습니다. WEB UPDATE는 모두 N으로 초기화했습니다." & vbCrLf & "확인 사항을 해결한 뒤 대상 업무를 다시 Y로 선택하세요.", vbInformation, "웹등록"
+        Else
+            MsgBox "등록/갱신 완료 " & count & "건 / 제외 " & skipped & "건" & vbCrLf & "WEB UPDATE는 모두 N으로 초기화했습니다. 자세한 결과는 웹등록_이력 시트에서 확인하세요.", vbInformation, "웹등록 결과"
+        End If
+    End If
     Exit Sub
 Failed:
     errorNumber = Err.Number: errorText = Err.Description
@@ -1211,9 +1366,15 @@ Failed:
         RecordWebOutcome item, IIf(operation = "신규", "결과 미확인", "갱신 결과 미확인"), requestNo, "전송 후 결과를 확인하지 못했습니다. 웹에서 먼저 확인하세요.", IIf(operation = "신규", "등록", "갱신")
         SaveWebJournal
     End If
+    If executionAccepted Then
+        Set mPreviewItems = Nothing
+        mPreviewSnapshot = vbNullString
+        mPreviewDecisionSnapshot = vbNullString
+    End If
     mWebBusy = False
     Application.EnableEvents = eventsEnabled
     Application.StatusBar = False
+    If selectionsReset Then PreviewWebTasks False
     On Error GoTo 0
     If showCompletionMessage Then
         MsgBox errorText, vbExclamation, "웹등록"
@@ -1316,7 +1477,7 @@ Private Sub ShowWebConnectionReview(ByVal ws As Worksheet, ByVal item As Object,
     mLinkAccount = CStr(ThisWorkbook.Worksheets(WEB_CONFIG_SHEET_NAME).Range("B3").Value2)
     Set mPreviewItems = Nothing
     mPreviewSnapshot = vbNullString
-    mPreviewMode = vbNullString
+    mPreviewDecisionSnapshot = vbNullString
     Set review = WebSheet(WEB_PREVIEW_SHEET_NAME)
     review.Unprotect
     If review.AutoFilterMode Then review.AutoFilterMode = False

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modWebView"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 메인 시트의 중복 웹 등록·갱신 버튼 제거와 웹 버튼 배치 정리
 ' 2026-10-22 김좌현 수정 : 모두 새로고침 버튼의 전용 매크로 연결 통일
 ' 2026-10-22 김좌현 수정 : 3단계 웹등록 모드의 버튼/헤더와 공통 작업 버튼 배치
 
@@ -84,6 +85,8 @@ Public Sub EnsureMainActionButtons(ByVal ws As Worksheet)
     Dim count As Long, i As Long, j As Long
     Dim leftValue As Double, topValue As Double, caption As String, action As String
     If Not HasMainTaskHeaders(ws) Then Exit Sub
+    Set button = FindActionShape(ws, "btnWebUpload")
+    If Not button Is Nothing Then button.Delete
     Set refreshButton = FindActionShape(ws, "btnGanttRefresh")
     If refreshButton Is Nothing Then
         Set refreshButton = ws.Shapes.AddShape(msoShapeRoundedRectangle, ws.Range("B2").Left, ws.Range("B2").Top, 72, 22)
@@ -129,7 +132,7 @@ Public Sub EnsureMainActionButtons(ByVal ws As Worksheet)
         ApplyActionStyle button, leftValue, topValue, 72, caption, action, False
         leftValue = leftValue + 80
     Next i
-    managed = Array("btnWebPreview", "btnWebUpload", "btnWebConfig")
+    managed = Array("btnWebPreview", "btnWebConfig")
     For Each name In managed
         Set button = FindActionShape(ws, CStr(name))
         If Not button Is Nothing Then
@@ -184,7 +187,7 @@ Public Sub RefreshWebModeView(ByVal ws As Worksheet, Optional ByVal force As Boo
     phase = "버튼 배치"
     If force Then EnsureMainActionButtons ws
     phase = "버튼 표시"
-    For Each name In Array("btnWebPreview", "btnWebUpload", "btnWebConfig")
+    For Each name In Array("btnWebPreview", "btnWebConfig")
         Set button = FindActionShape(ws, CStr(name))
         If Not button Is Nothing Then
             If CBool(button.Visible) <> enabled Then button.Visible = IIf(enabled, msoTrue, msoFalse)

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 열 접기 전 단계의 헤더행 고정과 숨은 열 좌표 차이로 인한 반복 틀 고정 방지
 ' 2026-10-22 김좌현 수정 : 행별 들여쓰기·굵기·배경·최소 높이를 모아 적용하고 빈 행 및 루트 경계 유지
 ' 2026-10-22 김좌현 수정 : 구조가 같은 행 그룹 재생성을 생략하고 초기화된 테두리를 렌더러에 전달
 ' 2026-10-22 김좌현 수정 : 3단계 웹모드 동기화와 중복 날짜 배경/계층 재생성 제거
@@ -377,34 +378,28 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
         collapsed = TaskSelectionCollapsed(ws, selected, lastCol)
     End If
     With taskWindow
-        If collapsed Then
-            If Not resetView Then
-                If .FreezePanes And .SplitRow = HEADER_ROW Then
+        If Not resetView Then
+            If .FreezePanes And .SplitRow = HEADER_ROW And .Panes(1).ScrollRow = 1 Then
+                If collapsed Then
                     If .Panes(1).ScrollColumn = requestCol Then
-                        If selected Is Nothing Then
-                            If .SplitColumn = freezeColumns Then Exit Sub
-                        ElseIf .SplitColumn > 0 Then
-                            Exit Sub
-                        End If
+                        ' Hidden columns outside the fold change Excel's reported split coordinate.
+                        If .SplitColumn > 0 Then Exit Sub
                     End If
+                ElseIf .SplitColumn = 0 Then
+                    Exit Sub
                 End If
             End If
-        ElseIf Not .FreezePanes And .SplitColumn = 0 And .SplitRow = 0 Then
-            ' Restore A only on the transition; leave normal expanded scrolling free.
-            Exit Sub
         End If
         wasSaved = ws.Parent.Saved
         wasScreenUpdating = Application.ScreenUpdating
         previousRow = .Panes(.Panes.Count).ScrollRow
         On Error GoTo Failed
         Application.ScreenUpdating = False
-        If collapsed Then
-            lastTaskRow = Application.Max(HEADER_ROW, GetLastDataRow(ws))
-            Set freezeRows = ws.Rows("1:" & CStr(lastTaskRow))
-            Set hiddenRows = CaptureTaskFreezeHiddenRows(ws, lastTaskRow)
-            ' Hidden rows also change Excel's split coordinates; retain their exact visibility.
-            If Not hiddenRows Is Nothing Then freezeRows.Hidden = False
-        End If
+        lastTaskRow = Application.Max(HEADER_ROW, GetLastDataRow(ws))
+        Set freezeRows = ws.Rows("1:" & CStr(lastTaskRow))
+        Set hiddenRows = CaptureTaskFreezeHiddenRows(ws, lastTaskRow)
+        ' Hidden rows affect the header split in every outline mode.
+        If Not hiddenRows Is Nothing Then freezeRows.Hidden = False
         .FreezePanes = False
         .SplitColumn = 0
         .SplitRow = 0
@@ -422,11 +417,15 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
                 Next c
             End If
             .ScrollColumn = requestCol
-            .ScrollRow = 1
             .SplitColumn = freezeColumns
-            .SplitRow = HEADER_ROW
-            .FreezePanes = True
-            RestoreTaskFreezeHiddenRows hiddenRows
+        Else
+            .ScrollColumn = 1
+        End If
+        .ScrollRow = 1
+        .SplitRow = HEADER_ROW
+        .FreezePanes = True
+        RestoreTaskFreezeHiddenRows hiddenRows
+        If collapsed Then
             For c = detailColumns.Column To lastCol
                 If selected Is Nothing Then
                     ws.Columns(c).Hidden = True
@@ -445,11 +444,8 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
                 nextVisibleCol = nextVisibleCol + 1
             Loop
             .Panes(.Panes.Count).ScrollColumn = nextVisibleCol
-            .Panes(.Panes.Count).ScrollRow = Application.Max(DATA_START_ROW, previousRow)
-        Else
-            .ScrollColumn = 1
-            .ScrollRow = Application.Max(1, previousRow)
         End If
+        .Panes(.Panes.Count).ScrollRow = Application.Max(DATA_START_ROW, previousRow)
     End With
     If resetView Then mTaskViewResetSheets.Remove ws.CodeName
     If wasSaved Then ws.Parent.Saved = True

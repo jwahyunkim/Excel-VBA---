@@ -1,5 +1,6 @@
 Attribute VB_Name = "CompletedTaskViewRegression"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 1·2·3단계 헤더 고정과 단계 전환 시 선택·스크롤·숨김 상태 보존 검증
 ' 2026-10-22 김좌현 수정 : 웹 열 이전 후에도 실제 업무 열로 완료 숨김 회귀 데이터 구성
 Private mPhase As String
 ' 2026-10-20 김좌현 수정 : 완료 숨김 토글/계층/새로고침/상태 복구/저장 후 유지 검증
@@ -28,15 +29,22 @@ Private Function NewTaskSheet(ByVal sheetName As String) As Worksheet
     Set NewTaskSheet = ws
 End Function
 
-Private Sub CheckStableFold(ByVal ws As Worksheet, ByVal anchor As Long)
+Private Sub CheckStableFold(ByVal ws As Worksheet, ByVal anchor As Long, Optional ByVal compact As Boolean = True)
     Dim taskWindow As Window, bottomPane As Pane, pass As Long
     Dim scrollColumn As Long, scrollRow As Long, freezeResets As Long
     Dim beforeRows As String, beforeMetadata As String, header As Long
     Set taskWindow = ActiveWindow
     EnsureTaskRequestFreeze ws
-    Check taskWindow.FreezePanes, "collapsed columns have no frozen panes"
+    ' Commit the outline mode transition before measuring repeated idle maintenance.
+    TaskOutlineViewTick
+    Check taskWindow.FreezePanes, "outline stage has no frozen headers"
     Check taskWindow.SplitRow = HEADER_ROW, "hidden data rows changed the frozen header boundary"
-    Check taskWindow.Panes(1).ScrollColumn = anchor, "collapsed viewport starts at the wrong column"
+    Check taskWindow.Panes(1).ScrollRow = 1, "frozen pane does not start with the first header row"
+    If compact Then
+        Check taskWindow.Panes(1).ScrollColumn = anchor, "collapsed viewport starts at the wrong column"
+    Else
+        Check taskWindow.SplitColumn = 0, "expanded stage retained a frozen column"
+    End If
     Set bottomPane = taskWindow.Panes(taskWindow.Panes.Count)
     bottomPane.ScrollColumn = 32
     bottomPane.ScrollRow = 12
@@ -50,6 +58,7 @@ Private Sub CheckStableFold(ByVal ws As Worksheet, ByVal anchor As Long)
         TaskOutlineViewTick
         DoEvents
         Check taskWindow.FreezePanes And taskWindow.SplitRow = HEADER_ROW, "repeated monitor changed the frozen header boundary"
+        Check taskWindow.Panes(1).ScrollRow = 1, "monitor scrolled the frozen headers"
         Check taskWindow.Panes(taskWindow.Panes.Count).ScrollColumn = scrollColumn, "monitor reset horizontal scrolling"
         Check taskWindow.Panes(taskWindow.Panes.Count).ScrollRow = scrollRow, "monitor reset vertical scrolling"
         Check HiddenRowsSignature(ws, 20) = beforeRows, "monitor changed raw row visibility"
@@ -67,7 +76,8 @@ Public Function RunCompletedTaskViewOrderRegression() As String
     Dim cfg As Worksheet, ws As Worksheet, r As Long, selectionCase As Long, order As Long
     Dim originalStart As Variant, originalEnd As Variant, originalView As Variant
     Dim previousEvents As Boolean, previousScreenUpdating As Boolean, configCaptured As Boolean
-    Dim errorText As String, nativeUpdates As Long
+    Dim errorText As String, nativeUpdates As Long, cursorCase As Long, stage As Variant
+    Dim beforeSelection As String, beforeRows As String, beforeMetadata As String, beforeScrollRow As Long
     On Error GoTo Failed
     previousEvents = Application.EnableEvents
     previousScreenUpdating = Application.ScreenUpdating
@@ -79,11 +89,11 @@ Public Function RunCompletedTaskViewOrderRegression() As String
     originalEnd = cfg.Range(TASK_FOLD_END_VALUE_CELL).Value2
     originalView = cfg.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2
     configCaptured = True
-    cfg.Range(TASK_FOLD_START_VALUE_CELL).Value2 = "I"
-    cfg.Range(TASK_FOLD_END_VALUE_CELL).Value2 = "W"
     mNativeUpdates = 0
-    For selectionCase = 1 To 2
-        cfg.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = IIf(selectionCase = 1, "G", "A,B,G")
+    For selectionCase = 1 To 3
+        cfg.Range(TASK_FOLD_START_VALUE_CELL).Value2 = IIf(selectionCase = 3, "S", "I")
+        cfg.Range(TASK_FOLD_END_VALUE_CELL).Value2 = IIf(selectionCase = 3, "AH", "W")
+        cfg.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = IIf(selectionCase = 2, "A,B,G", "G")
         For order = 1 To 2
             mPhase = "fold order variant " & selectionCase & ", order " & order
             Set ws = NewTaskSheet("CompletedFold" & selectionCase & "Order" & order)
@@ -105,18 +115,40 @@ Public Function RunCompletedTaskViewOrderRegression() As String
             Application.EnableEvents = True
             Application.ScreenUpdating = True
             StartTaskOutlineViewMonitor
-            CheckStableFold ws, IIf(selectionCase = 1, 7, 1)
+            CheckStableFold ws, IIf(selectionCase = 2, 1, 7)
             StopTaskOutlineViewMonitor
             Application.EnableEvents = False
             Application.ScreenUpdating = False
-            ws.Outline.ShowLevels ColumnLevels:=2
-            EnsureTaskRequestFreeze ws
-            Check Not ActiveWindow.FreezePanes And ActiveWindow.SplitRow = 0 And ActiveWindow.SplitColumn = 0, "expansion retained collapsed panes"
-            Check ws.Rows(5).Hidden And ws.Rows(7).Hidden, "column expansion exposed completed rows"
+            For cursorCase = 1 To 2
+                ws.Cells(IIf(cursorCase = 1, HEADER_ROW, 12), "G").Select
+                beforeSelection = Selection.Address
+                beforeRows = HiddenRowsSignature(ws, 20)
+                beforeMetadata = TaskViewMetadataSignature(ws, False)
+                For Each stage In Array(2, 3, 1, 3, 2, 1)
+                    mPhase = "stage " & stage & ", selection " & cursorCase & ", config " & selectionCase & ", order " & order
+                    beforeScrollRow = ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollRow
+                    ws.Outline.ShowLevels ColumnLevels:=CLng(stage)
+                    EnsureTaskRequestFreeze ws
+                    Check Selection.Address = beforeSelection, "stage transition moved the selected cell"
+                    Check ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollRow = beforeScrollRow, "stage transition reset vertical scrolling"
+                    Check HiddenRowsSignature(ws, 20) = beforeRows, "stage transition changed row visibility"
+                    Check TaskViewMetadataSignature(ws, False) = beforeMetadata, "stage transition changed row-view metadata"
+                    Check ws.ProtectContents, "stage transition removed worksheet protection"
+                    Check Not Application.EnableEvents And Not Application.ScreenUpdating, "stage transition changed application state"
+                    Application.EnableEvents = True
+                    Application.ScreenUpdating = True
+                    StartTaskOutlineViewMonitor
+                    CheckStableFold ws, IIf(selectionCase = 2, 1, 7), (CLng(stage) = 1)
+                    Check Selection.Address = beforeSelection, "stable monitor moved the selected cell"
+                    StopTaskOutlineViewMonitor
+                    Application.EnableEvents = False
+                    Application.ScreenUpdating = False
+                Next stage
+            Next cursorCase
         Next order
     Next selectionCase
     nativeUpdates = mNativeUpdates
-    RunCompletedTaskViewOrderRegression = "PASS: G and A,B,G, both hide/fold orders, header boundary, five stable monitor passes, scroll preservation, native updates=" & nativeUpdates
+    RunCompletedTaskViewOrderRegression = "PASS: I:W/G, I:W/A,B,G, S:AH/G, both hide/fold orders, stages 1/2/3 both directions, header/data selections, fixed headers, stable monitor and preserved scroll/rows/metadata, native updates=" & nativeUpdates
     GoTo Finished
 Failed:
     errorText = "FAIL: " & mPhase & " / " & Err.Source & " / " & Err.Description
@@ -361,10 +393,12 @@ Private Function HiddenRowsSignature(ByVal ws As Worksheet, ByVal lastRow As Lon
     Next r
 End Function
 
-Private Function TaskViewMetadataSignature(ByVal ws As Worksheet) As String
+Private Function TaskViewMetadataSignature(ByVal ws As Worksheet, Optional ByVal includeWebMode As Boolean = True) As String
     Dim localName As Name
     For Each localName In ws.Names
-        TaskViewMetadataSignature = TaskViewMetadataSignature & localName.Name & "=" & localName.RefersTo & vbLf
+        ' The web-mode marker changes legitimately between outline stages 2 and 3.
+        If includeWebMode Or Right$(localName.Name, Len("_GanttWebMode")) <> "_GanttWebMode" Then _
+            TaskViewMetadataSignature = TaskViewMetadataSignature & localName.Name & "=" & localName.RefersTo & vbLf
     Next localName
 End Function
 
@@ -591,7 +625,7 @@ Failed:
 End Function
 
 Public Function RunSavedCompletedTaskRegression() As String
-    Dim ws As Worksheet, mixed As Worksheet
+    Dim ws As Worksheet, mixed As Worksheet, foldWs As Worksheet, stage As Long, header As Long
     On Error GoTo Failed
     Set ws = ThisWorkbook.Worksheets("CompletedViewAll")
     Check AreCompletedTasksHidden(ws), "saved filter not restored"
@@ -607,7 +641,24 @@ Public Function RunSavedCompletedTaskRegression() As String
     Check Not mixed.Rows(5).Hidden And mixed.Rows(6).Hidden And mixed.Rows(7).Hidden, "saved mixed visibility was not restored"
     ToggleCompletedTaskFilter mixed
     Check Not mixed.Rows(6).Hidden And mixed.Rows(7).Hidden, "saved baseline lost manual/completed ownership"
-    RunSavedCompletedTaskRegression = "PASS: save/reopen, per-sheet state, mixed manual/completed baseline after row edits, caption and restore"
+    mPhase = "saved fixed headers and worksheet reactivation"
+    Set foldWs = ThisWorkbook.Worksheets("CompletedFold2Order2")
+    foldWs.Activate
+    Check ActiveWindow.FreezePanes And ActiveWindow.SplitRow = HEADER_ROW, "reopened task sheet has no fixed headers"
+    For stage = 1 To 3
+        foldWs.Outline.ShowLevels ColumnLevels:=stage
+        EnsureTaskRequestFreeze foldWs
+        mixed.Activate
+        foldWs.Activate
+        Check ActiveWindow.FreezePanes And ActiveWindow.SplitRow = HEADER_ROW, "sheet reactivation lost headers at stage " & stage
+        Check ActiveWindow.Panes(1).ScrollRow = 1, "sheet reactivation scrolled the frozen headers at stage " & stage
+        If stage > 1 Then Check ActiveWindow.SplitColumn = 0, "sheet reactivation retained compact columns at stage " & stage
+        For header = 1 To HEADER_ROW
+            Check Not foldWs.Rows(header).Hidden, "reopened outline stage hid a header"
+        Next header
+        Check foldWs.Rows(5).Hidden And foldWs.Rows(7).Hidden, "reopened stage transition exposed completed rows"
+    Next stage
+    RunSavedCompletedTaskRegression = "PASS: save/reopen, stages 1/2/3 fixed headers and sheet reactivation, per-sheet state, mixed manual/completed baseline after row edits, caption and restore"
     Exit Function
 Failed:
     RunSavedCompletedTaskRegression = "FAIL: " & mPhase & " / " & Err.Source & " / " & Err.Description
