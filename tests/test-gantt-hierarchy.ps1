@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param([string]$WorkbookPath, [string]$SavePath, [switch]$ViewOnly, [switch]$SelectedColumnsOnly)
 
+# 2026-10-23 김좌현 수정 : 모든 열 접기 단계의 헤더 고정과 펼친 단계의 가로 고정 해제 검증
 # 2026-10-22 김좌현 수정 : 웹 설정/작업시간 이전의 값·수식·개체와 반복 실행 보존 검증
 # 2026-10-20 김좌현 수정 : 새로고침 통합과 기존 버튼 전환 회귀 검증
 # 2026-10-20 김좌현 수정 : 항목 숨김 제거 후 5개 버튼 구성 검증
@@ -58,9 +59,15 @@ Private Sub Check(ByVal ok As Boolean, ByVal label As String)
     If Not ok Then Err.Raise vbObjectError + 920, "GanttHierarchyRegression", label
 End Sub
 Private Sub CheckStage(ByVal ws As Worksheet, ByVal stage As Long)
-    Dim c As Long
+    Dim c As Long, header As Long
     ws.Outline.ShowLevels ColumnLevels:=stage
     EnsureTaskRequestFreeze ws
+    Check ActiveWindow.FreezePanes And ActiveWindow.SplitRow = HEADER_ROW, "fixed header missing at stage " & stage
+    Check ActiveWindow.Panes(1).ScrollRow = 1, "frozen headers start below row 1 at stage " & stage
+    If stage > 1 Then Check ActiveWindow.SplitColumn = 0, "expanded stage has frozen columns " & stage
+    For header = 1 To HEADER_ROW
+        Check Not ws.Rows(header).Hidden, "hidden header at stage " & stage
+    Next header
     For c = ws.Range(COL_WEB_ENABLED & "1").Column To ws.Range(COL_WEB_RESULT & "1").Column
         Check ws.Columns(c).OutlineLevel = 3, "web column depth " & c
         Check CBool(ws.Columns(c).Hidden) = (stage < 3), "web visibility " & stage & "/" & c
@@ -127,7 +134,7 @@ Public Function RunGanttHierarchyRegression() As String
             Check ActiveWindow.FreezePanes And ActiveWindow.SplitRow = HEADER_ROW, "compact freeze missing"
             Check ActiveWindow.Panes(1).ScrollColumn = 7, "G freeze not retained"
         Else
-            Check Not ActiveWindow.FreezePanes And ActiveWindow.SplitColumn = 0, "expanded freeze remains"
+            Check ActiveWindow.FreezePanes And ActiveWindow.SplitRow = HEADER_ROW And ActiveWindow.SplitColumn = 0, "expanded header-only freeze missing"
         End If
     Next stage
     CheckStage ws, 2
@@ -170,7 +177,7 @@ Public Function RunGanttHierarchyRegression() As String
     ApplyCalculatedColumnsProtection ws, 12
     CheckStage ws, 1
     CheckStage ws, 3
-    Check Not ActiveWindow.FreezePanes, "all ordinary fields selected still treated as collapsed"
+    Check ActiveWindow.FreezePanes And ActiveWindow.SplitRow = HEADER_ROW And ActiveWindow.SplitColumn = 0, "all ordinary fields selected lost header-only freeze"
     config.Range(TASK_FOLD_START_VALUE_CELL).Value2 = "L1"
     EnsureTaskDetailColumnOutline ws
     Check ws.Columns("Z").OutlineLevel = 3, "invalid config changed valid groups"
@@ -189,7 +196,7 @@ Public Function RunGanttHierarchyRegression() As String
             EnsureTaskSheetLayout original
     Next original
     ws.Activate
-    RunGanttHierarchyRegression = "PASS: one-time fold migration/G freeze, three native stages, selected fields, row boundaries, refresh state and preserved data"
+    RunGanttHierarchyRegression = "PASS: one-time fold migration/G freeze, fixed headers in all three native stages, selected fields, row boundaries, refresh state and preserved data"
     Exit Function
 Failed:
     RunGanttHierarchyRegression = "FAIL: " & Err.Description
@@ -203,7 +210,7 @@ Public Function ReopenGanttHierarchyRegression() As String
     CheckStage ws, 2
     Check ws.ProtectContents And ws.EnableOutlining, "reopen protection missing"
     Check ws.Cells(5, COL_WEB_TASK_ID).Locked, "reopen ID unlocked"
-    ReopenGanttHierarchyRegression = "PASS: saved stage 2 and private ID/row groups restored on reopen"
+    ReopenGanttHierarchyRegression = "PASS: saved stage 2 fixed headers and private ID/row groups restored on reopen"
     Exit Function
 Failed:
     ReopenGanttHierarchyRegression = "FAIL: " & Err.Description
