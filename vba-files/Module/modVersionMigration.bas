@@ -1,5 +1,6 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 현재 웹 업무 열 배치와 업무 ID·등록 이력·요청번호 연결을 함께 이관
 ' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로 제거 후 기존 버튼을 모두 새로고침으로 이관
 ' 2026-10-22 김좌현 수정 : 모두/간트 새로고침 버튼 분리와 웹 등록 모드 버튼 배치 연결
 ' 2026-10-22 김좌현 수정 : 웹 설정/미리보기/이력 시트를 업무 이전 및 버튼 처리에서 제외
@@ -28,6 +29,9 @@ Public Sub 데이터_가져오기()
     Dim refreshedSheetCount As Long
     Dim copiedObjectCount As Long
     Dim failedObjectCount As Long
+    Dim importedLogCount As Long
+    Dim importedStateCount As Long
+    Dim webMigrationPlan As Object
     Dim openedByMigration As Boolean
     Dim stateCaptured As Boolean
     Dim previousAutomationSecurity As Long
@@ -76,6 +80,7 @@ Public Sub 데이터_가져오기()
     answer = MsgBox( _
         "같은 이름의 업무 시트 " & matchingSheetCount & "개를 가져옵니다." & vbCrLf & vbCrLf & _
         "신버전 시트의 기존 입력 내용과 PPT 개체는 구버전 내용으로 교체됩니다." & vbCrLf & _
+        "가져오는 업무의 웹 등록 이력과 요청번호 연결도 함께 교체됩니다." & vbCrLf & _
         "신버전의 계산식, VBA 및 기본 서식은 유지됩니다." & vbCrLf & vbCrLf & _
         "계속하시겠습니까?", _
         vbQuestion Or vbYesNo Or vbDefaultButton2, _
@@ -92,10 +97,11 @@ Public Sub 데이터_가져오기()
     Application.EnableEvents = False
     Application.Calculation = xlCalculationManual
 
+    Set webMigrationPlan = BuildWebMigrationPlan(sourceBook, targetBook)
     ImportOutputReportConfig sourceBook, targetBook
 
     For Each sourceSheet In sourceBook.Worksheets
-        If IsTaskSheet(sourceSheet) Then
+        If IsMigrationTaskPair(sourceSheet, targetBook) Then
             Set targetSheet = GetWorksheet(targetBook, sourceSheet.Name)
             If Not targetSheet Is Nothing Then
                 ImportTaskSheet sourceSheet, targetSheet, copiedObjectCount, failedObjectCount
@@ -104,10 +110,15 @@ Public Sub 데이터_가져오기()
         End If
     Next sourceSheet
 
+    EnsureWebHistorySheets
+    ApplyWebMigrationPlan webMigrationPlan, targetBook, importedLogCount, importedStateCount
+    ResetWebPreviewAfterMigration
+
     For Each sourceSheet In sourceBook.Worksheets
-        If IsTaskSheet(sourceSheet) Then
+        If IsMigrationTaskPair(sourceSheet, targetBook) Then
             Set targetSheet = GetWorksheet(targetBook, sourceSheet.Name)
             If Not targetSheet Is Nothing Then
+                PrepareWebTaskSheet targetSheet
                 If RefreshMigratedSheet(targetSheet) Then
                     refreshedSheetCount = refreshedSheetCount + 1
                 End If
@@ -122,6 +133,7 @@ Public Sub 데이터_가져오기()
     MsgBox "구버전 데이터 가져오기가 완료되었습니다." & vbCrLf & vbCrLf & _
            "가져온 시트: " & importedSheetCount & "개" & vbCrLf & _
            "차트 재생성 시트: " & refreshedSheetCount & "개" & vbCrLf & _
+           "가져온 웹 이력: " & importedLogCount & "건 / 연결: " & importedStateCount & "건" & vbCrLf & _
            "복사한 PPT 개체: " & copiedObjectCount & "개" & vbCrLf & _
            "복사하지 못한 PPT 개체: " & failedObjectCount & "개", _
            IIf(failedObjectCount = 0, vbInformation, vbExclamation), _
@@ -746,6 +758,8 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
     Dim sourceHasProgramColumn As Boolean
     Dim sourceHasFourLevelClassification As Boolean
     Dim sourceHasSplitContent As Boolean
+    Dim sourceHasWebLayout As Boolean
+    Dim sourceHasWorkMinutes As Boolean
     Dim sourceRequestColumn As String
     Dim sourceDetailsStartColumn As String
     Dim sourceDetailsEndColumn As String
@@ -772,6 +786,8 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
     sourceHasSplitContent = _
         (Trim$(CStr(sourceSheet.Range("H" & HEADER_ROW).Value2)) = "요청 내용" And _
          Trim$(CStr(sourceSheet.Range("I" & HEADER_ROW).Value2)) = "수정 내용")
+    sourceHasWebLayout = HasMigrationWebLayout(sourceSheet)
+    sourceHasWorkMinutes = (Trim$(CStr(sourceSheet.Range(COL_WORK_MINUTES & HEADER_ROW).Value2)) = "작업시간(분)")
 
     targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
                       COL_PROGRESS & clearLastRow).ClearContents
@@ -779,54 +795,69 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
                       COL_WEEKLY_REPORT & clearLastRow).ClearContents
 
     If sourceLastRow >= DATA_START_ROW Then
-        If sourceHasFourLevelClassification Then
-            CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                     "C", "G", COL_LEVEL, COL_MINOR_CATEGORY, sourceLastRow
-            sourceRequestColumn = "H"
-            If sourceHasSplitContent Then
-                CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                         "I", "I", COL_MODIFICATION, COL_MODIFICATION, sourceLastRow
-                sourceDetailsStartColumn = "J"
-                sourceDetailsEndColumn = "P"
-                sourceManualStartColumn = "R"
-                sourceManualEndColumn = "T"
+        If sourceHasWebLayout Then
+            targetSheet.Range(COL_WEB_ENABLED & DATA_START_ROW & ":" & COL_WEB_TASK_ID & sourceLastRow).NumberFormat = "@"
+            If sourceHasWorkMinutes Then
+                CopyMigrationColumnBlock sourceSheet, targetSheet, "C", "AA", COL_LEVEL, COL_PROGRESS, sourceLastRow
+                CopyMigrationColumnBlock sourceSheet, targetSheet, "AC", "AE", COL_MANUAL_PROGRESS, COL_WEEKLY_REPORT, sourceLastRow
             Else
-                sourceDetailsStartColumn = "I"
-                sourceDetailsEndColumn = "O"
-                sourceManualStartColumn = "Q"
-                sourceManualEndColumn = "S"
+                CopyMigrationColumnBlock sourceSheet, targetSheet, "C", "Y", COL_LEVEL, COL_ACTUAL_END, sourceLastRow
+                CopyMigrationColumnBlock sourceSheet, targetSheet, "Z", "Z", COL_PROGRESS, COL_PROGRESS, sourceLastRow
+                CopyMigrationColumnBlock sourceSheet, targetSheet, "AB", "AD", COL_MANUAL_PROGRESS, COL_WEEKLY_REPORT, sourceLastRow
             End If
-        ElseIf sourceHasProgramColumn Then
-            CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                     "C", "C", COL_LEVEL, COL_LEVEL, sourceLastRow
-            CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                     "D", "D", COL_MAJOR_CATEGORY, COL_MAJOR_CATEGORY, sourceLastRow
-            CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                     "E", "E", COL_MINOR_CATEGORY, COL_MINOR_CATEGORY, sourceLastRow
-            sourceRequestColumn = "F"
-            sourceDetailsStartColumn = "G"
-            sourceDetailsEndColumn = "M"
-            sourceManualStartColumn = "O"
-            sourceManualEndColumn = "Q"
         Else
-            CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                     "C", "C", COL_LEVEL, COL_LEVEL, sourceLastRow
-            CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                     "D", "D", COL_MAJOR_CATEGORY, COL_MAJOR_CATEGORY, sourceLastRow
-            sourceRequestColumn = "E"
-            sourceDetailsStartColumn = "F"
-            sourceDetailsEndColumn = "L"
-            sourceManualStartColumn = "N"
-            sourceManualEndColumn = "P"
-        End If
+            If sourceHasFourLevelClassification Then
+                CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                         "C", "G", COL_LEVEL, COL_MINOR_CATEGORY, sourceLastRow
+                sourceRequestColumn = "H"
+                If sourceHasSplitContent Then
+                    CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                             "I", "I", COL_MODIFICATION, COL_MODIFICATION, sourceLastRow
+                    sourceDetailsStartColumn = "J"
+                    sourceDetailsEndColumn = "P"
+                    sourceManualStartColumn = "R"
+                    sourceManualEndColumn = "T"
+                Else
+                    sourceDetailsStartColumn = "I"
+                    sourceDetailsEndColumn = "O"
+                    sourceManualStartColumn = "Q"
+                    sourceManualEndColumn = "S"
+                End If
+            ElseIf sourceHasProgramColumn Then
+                CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                         "C", "C", COL_LEVEL, COL_LEVEL, sourceLastRow
+                CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                         "D", "D", COL_MAJOR_CATEGORY, COL_MAJOR_CATEGORY, sourceLastRow
+                CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                         "E", "E", COL_MINOR_CATEGORY, COL_MINOR_CATEGORY, sourceLastRow
+                sourceRequestColumn = "F"
+                sourceDetailsStartColumn = "G"
+                sourceDetailsEndColumn = "M"
+                sourceManualStartColumn = "O"
+                sourceManualEndColumn = "Q"
+            Else
+                CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                         "C", "C", COL_LEVEL, COL_LEVEL, sourceLastRow
+                CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                         "D", "D", COL_MAJOR_CATEGORY, COL_MAJOR_CATEGORY, sourceLastRow
+                sourceRequestColumn = "E"
+                sourceDetailsStartColumn = "F"
+                sourceDetailsEndColumn = "L"
+                sourceManualStartColumn = "N"
+                sourceManualEndColumn = "P"
+            End If
 
-        CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                 sourceRequestColumn, sourceRequestColumn, COL_REQUEST, COL_REQUEST, sourceLastRow
-        CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                 sourceDetailsStartColumn, sourceDetailsEndColumn, COL_OWNER, COL_PROGRESS, sourceLastRow
-        CopyMigrationColumnBlock sourceSheet, targetSheet, _
-                                 sourceManualStartColumn, sourceManualEndColumn, _
-                                 COL_MANUAL_PROGRESS, COL_WEEKLY_REPORT, sourceLastRow
+            CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                     sourceRequestColumn, sourceRequestColumn, COL_REQUEST, COL_REQUEST, sourceLastRow
+            CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                     sourceDetailsStartColumn, MigrationPreviousColumn(sourceSheet, sourceDetailsEndColumn), _
+                                     COL_OWNER, COL_ACTUAL_END, sourceLastRow
+            CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                     sourceDetailsEndColumn, sourceDetailsEndColumn, COL_PROGRESS, COL_PROGRESS, sourceLastRow
+            CopyMigrationColumnBlock sourceSheet, targetSheet, _
+                                     sourceManualStartColumn, sourceManualEndColumn, _
+                                     COL_MANUAL_PROGRESS, COL_WEEKLY_REPORT, sourceLastRow
+        End If
 
         For rowNum = DATA_START_ROW To sourceLastRow
             If CStr(targetSheet.Cells(rowNum, COL_NOTE).Value2) = ChrW(&H25A0) Then
@@ -1082,7 +1113,13 @@ Private Function GetMigrationLastRow(ByVal ws As Worksheet) As Long
 End Function
 
 Private Function GetMigrationInputLastColumn(ByVal ws As Worksheet) As String
-    If Trim$(CStr(ws.Range("I" & HEADER_ROW).Value2)) = "수정 내용" Then
+    If HasMigrationWebLayout(ws) Then
+        If Trim$(CStr(ws.Range(COL_WORK_MINUTES & HEADER_ROW).Value2)) = "작업시간(분)" Then
+            GetMigrationInputLastColumn = "AE"
+        Else
+            GetMigrationInputLastColumn = "AD"
+        End If
+    ElseIf Trim$(CStr(ws.Range("I" & HEADER_ROW).Value2)) = "수정 내용" Then
         GetMigrationInputLastColumn = "T"
     ElseIf Trim$(CStr(ws.Range("D" & HEADER_ROW).Value2)) = "타입" Then
         GetMigrationInputLastColumn = "S"
@@ -1113,12 +1150,40 @@ Private Function CountMatchingTaskSheets(ByVal sourceBook As Workbook, _
     Dim sourceSheet As Worksheet
 
     For Each sourceSheet In sourceBook.Worksheets
-        If IsTaskSheet(sourceSheet) Then
-            If Not GetWorksheet(targetBook, sourceSheet.Name) Is Nothing Then
-                CountMatchingTaskSheets = CountMatchingTaskSheets + 1
-            End If
+        If IsMigrationTaskPair(sourceSheet, targetBook) Then
+            CountMatchingTaskSheets = CountMatchingTaskSheets + 1
         End If
     Next sourceSheet
+End Function
+
+Private Function HasMigrationWebLayout(ByVal ws As Worksheet) As Boolean
+    HasMigrationWebLayout = _
+        (Trim$(CStr(ws.Cells(HEADER_ROW, COL_WEB_TASK_ID).Value2)) = "웹업무ID" And _
+         Trim$(CStr(ws.Cells(HEADER_ROW, COL_REQUEST).Value2)) = "요청 내용" And _
+         Trim$(CStr(ws.Cells(HEADER_ROW, COL_MODIFICATION).Value2)) = "수정 내용")
+End Function
+
+Private Function MigrationPreviousColumn(ByVal ws As Worksheet, ByVal columnName As String) As String
+    MigrationPreviousColumn = Split(ws.Cells(1, ws.Range(columnName & "1").Column - 1).Address(False, False), "1")(0)
+End Function
+
+Private Function IsMigrationTaskPair(ByVal sourceSheet As Worksheet, ByVal targetBook As Workbook) As Boolean
+    Dim targetSheet As Worksheet, webHeader As String, timeHeader As String
+    If Not IsTaskSheet(sourceSheet) Then Exit Function
+    If Trim$(CStr(sourceSheet.Cells(HEADER_ROW, COL_NO).Value2)) <> "No." Then Exit Function
+    Set targetSheet = GetWorksheet(targetBook, sourceSheet.Name)
+    If targetSheet Is Nothing Then Exit Function
+    If Not IsTaskSheet(targetSheet) Then Exit Function
+    If Trim$(CStr(targetSheet.Cells(HEADER_ROW, COL_NO).Value2)) <> "No." Then Exit Function
+    webHeader = Trim$(CStr(sourceSheet.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2))
+    If (webHeader = "WEB UPDATE" Or webHeader = "웹등록") And Not HasMigrationWebLayout(sourceSheet) Then _
+        Err.Raise vbObjectError + 2640, "IsMigrationTaskPair", sourceSheet.Name & " 시트의 웹 업무 열 배치를 확인하세요."
+    If HasMigrationWebLayout(sourceSheet) Then
+        timeHeader = Trim$(CStr(sourceSheet.Cells(HEADER_ROW, COL_WORK_MINUTES).Value2))
+        If timeHeader <> "작업시간(분)" And timeHeader <> "진행률" And timeHeader <> "진척률" Then _
+            Err.Raise vbObjectError + 2640, "IsMigrationTaskPair", sourceSheet.Name & " 시트의 작업시간·진행률 열 배치를 확인하세요."
+    End If
+    IsMigrationTaskPair = True
 End Function
 
 Private Sub ImportOutputReportConfig(ByVal sourceBook As Workbook, _
@@ -1191,4 +1256,312 @@ Private Sub RestoreApplicationState(ByVal screenUpdating As Boolean, _
     Application.Calculation = calculation
     Application.EnableEvents = enableEvents
     Application.ScreenUpdating = screenUpdating
+End Sub
+
+' 2026-10-23 김좌현 수정 : 업무 ID와 이관 시트의 웹 이력·연결을 사전 검증 후 값으로 함께 이전
+Private Function BuildWebMigrationPlan(ByVal sourceBook As Workbook, ByVal targetBook As Workbook) As Object
+    Dim plan As Object, pairs As Object, sourceIds As Object, targetIds As Object, retainedIds As Object
+    Dim sourceOwners As Object, sourceDuplicates As Object, stateKeys As Object, requestOwners As Object
+    Dim logRows As New Collection, stateRows As New Collection, sourceLogRows As New Collection
+    Dim sourceStateRows As New Collection, ws As Worksheet, log As Worksheet, state As Worksheet
+    Dim entry As Object, rowValues As Variant, key As Variant, sourceId As String, sheetName As String
+    Dim r As Long, c As Long, lastRow As Long, importedLogs As Long, importedStates As Long
+    Set plan = CreateObject("Scripting.Dictionary")
+    Set pairs = WebMigrationDictionary()
+    Set sourceIds = WebMigrationDictionary()
+    Set targetIds = WebMigrationDictionary()
+    Set retainedIds = WebMigrationDictionary()
+    Set sourceOwners = WebMigrationDictionary()
+    Set sourceDuplicates = WebMigrationDictionary()
+    Set stateKeys = WebMigrationDictionary()
+    Set requestOwners = WebMigrationDictionary()
+
+    For Each ws In sourceBook.Worksheets
+        If IsMigrationTaskPair(ws, targetBook) Then
+            pairs(ws.Name) = True
+            WebMigrationCollectIds ws, sourceIds
+            WebMigrationCollectIds GetWorksheet(targetBook, ws.Name), targetIds
+        End If
+        If WebMigrationHasTaskIds(ws) Then
+            For r = DATA_START_ROW To GetMigrationLastRow(ws)
+                sourceId = WebMigrationCellText(ws, r, COL_WEB_TASK_ID)
+                If Len(sourceId) > 0 And HasTaskContent(ws, r) Then
+                    If sourceOwners.Exists(sourceId) Then sourceDuplicates(sourceId) = True
+                    sourceOwners(sourceId) = ws.Name & " " & CStr(r) & "행"
+                End If
+            Next r
+        End If
+    Next ws
+    For Each ws In targetBook.Worksheets
+        If Not pairs.Exists(ws.Name) Then WebMigrationCollectIds ws, retainedIds
+    Next ws
+
+    Set log = GetWorksheet(sourceBook, WEB_LOG_SHEET_NAME)
+    WebMigrationCollectLogIds log, pairs, sourceIds
+    Set log = GetWorksheet(targetBook, WEB_LOG_SHEET_NAME)
+    WebMigrationCollectLogIds log, pairs, targetIds
+    For Each key In sourceIds.Keys
+        If sourceDuplicates.Exists(CStr(key)) Then _
+            Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", "원본 웹업무ID가 중복되어 이력을 가져올 수 없습니다: " & CStr(key)
+        If retainedIds.Exists(CStr(key)) Then _
+            Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", "가져올 웹업무ID가 가져오지 않는 대상 업무 시트와 중복됩니다: " & CStr(key)
+    Next key
+    For Each key In targetIds.Keys
+        If retainedIds.Exists(CStr(key)) Then _
+            Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", "교체할 웹 이력이 가져오지 않는 대상 업무에서도 사용됩니다: " & CStr(key)
+    Next key
+
+    Set log = GetWorksheet(sourceBook, WEB_LOG_SHEET_NAME)
+    If Not log Is Nothing Then
+        lastRow = WebMigrationLastRow(log, "M")
+        For r = 2 To lastRow
+            sourceId = WebMigrationCellText(log, r, "C")
+            sheetName = WebMigrationCellText(log, r, "B")
+            If sourceIds.Exists(sourceId) Or pairs.Exists(sheetName) Then
+                sourceLogRows.Add WebMigrationLogEntry(log, r, True)
+                importedLogs = importedLogs + 1
+            End If
+        Next r
+    End If
+    Set log = GetWorksheet(targetBook, WEB_LOG_SHEET_NAME)
+    If Not log Is Nothing Then
+        lastRow = WebMigrationLastRow(log, "M")
+        For r = 2 To lastRow
+            sourceId = WebMigrationCellText(log, r, "C")
+            sheetName = WebMigrationCellText(log, r, "B")
+            If Not sourceIds.Exists(sourceId) And Not targetIds.Exists(sourceId) And Not pairs.Exists(sheetName) Then _
+                logRows.Add WebMigrationLogEntry(log, r)
+        Next r
+    End If
+    For Each entry In sourceLogRows
+        logRows.Add entry
+    Next entry
+
+    Set state = GetWorksheet(targetBook, WEB_STATE_SHEET_NAME)
+    If Not state Is Nothing Then
+        lastRow = WebMigrationLastRow(state, "O")
+        For r = 2 To lastRow
+            sourceId = WebMigrationCellText(state, r, "A")
+            If Len(sourceId) > 0 And Not sourceIds.Exists(sourceId) And Not targetIds.Exists(sourceId) Then
+                rowValues = state.Range("A" & r & ":O" & r).Value2
+                WebMigrationValidateState rowValues, stateKeys, requestOwners
+                stateRows.Add rowValues
+            End If
+        Next r
+    End If
+    Set state = GetWorksheet(sourceBook, WEB_STATE_SHEET_NAME)
+    If Not state Is Nothing Then
+        lastRow = WebMigrationLastRow(state, "O")
+        For r = 2 To lastRow
+            sourceId = WebMigrationCellText(state, r, "A")
+            If sourceIds.Exists(sourceId) Then
+                rowValues = state.Range("A" & r & ":O" & r).Value2
+                For c = 1 To 15
+                    sheetName = WebMigrationRowText(rowValues, c)
+                Next c
+                WebMigrationValidateState rowValues, stateKeys, requestOwners
+                stateRows.Add rowValues
+                importedStates = importedStates + 1
+            End If
+        Next r
+    End If
+    plan.Add "Logs", logRows
+    plan.Add "States", stateRows
+    plan.Add "ImportedLogCount", importedLogs
+    plan.Add "ImportedStateCount", importedStates
+    Set BuildWebMigrationPlan = plan
+End Function
+
+Private Sub ApplyWebMigrationPlan(ByVal plan As Object, ByVal targetBook As Workbook, _
+                                  ByRef importedLogCount As Long, ByRef importedStateCount As Long)
+    Dim log As Worksheet, state As Worksheet, entry As Object, rowValues As Variant
+    Dim logRows As Collection, stateRows As Collection, r As Long, lastRow As Long
+    Dim logProtected As Boolean, stateProtected As Boolean, stateVisibility As XlSheetVisibility
+    Dim errorNumber As Long, errorText As String
+    Set log = GetWorksheet(targetBook, WEB_LOG_SHEET_NAME)
+    Set state = GetWorksheet(targetBook, WEB_STATE_SHEET_NAME)
+    If log Is Nothing Or state Is Nothing Then _
+        Err.Raise vbObjectError + 2641, "ApplyWebMigrationPlan", "웹 이력과 연결 시트를 먼저 준비하세요."
+    Set logRows = plan("Logs")
+    Set stateRows = plan("States")
+    logProtected = log.ProtectContents
+    stateProtected = state.ProtectContents
+    stateVisibility = state.Visible
+    On Error GoTo Failed
+    log.Unprotect
+    state.Unprotect
+    lastRow = WebMigrationLastRow(log, "M")
+    If lastRow >= 2 Then
+        log.Range("A2:M" & lastRow).Hyperlinks.Delete
+        log.Range("A2:M" & lastRow).ClearContents
+    End If
+    lastRow = WebMigrationLastRow(state, "O")
+    If lastRow >= 2 Then state.Range("A2:O" & lastRow).ClearContents
+    If logRows.Count > 0 Then
+        log.Range("B2:G" & CStr(logRows.Count + 1)).NumberFormat = "@"
+        log.Range("K2:M" & CStr(logRows.Count + 1)).NumberFormat = "@"
+    End If
+    r = 2
+    For Each entry In logRows
+        rowValues = entry("Values")
+        log.Range("A" & r & ":M" & r).Value2 = rowValues
+        If Len(CStr(entry("Link"))) > 0 Then
+            log.Hyperlinks.Add Anchor:=log.Cells(r, "D"), Address:=CStr(entry("Link")), _
+                TextToDisplay:=WebMigrationRowText(rowValues, 4)
+        End If
+        r = r + 1
+    Next entry
+    If stateRows.Count > 0 Then state.Range("A2:O" & CStr(stateRows.Count + 1)).NumberFormat = "@"
+    r = 2
+    For Each rowValues In stateRows
+        state.Range("A" & r & ":O" & r).Value2 = rowValues
+        r = r + 1
+    Next rowValues
+    state.Visible = stateVisibility
+    If logProtected Then log.Protect UserInterfaceOnly:=True, AllowFiltering:=True
+    If stateProtected Then state.Protect UserInterfaceOnly:=True
+    importedLogCount = CLng(plan("ImportedLogCount"))
+    importedStateCount = CLng(plan("ImportedStateCount"))
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    state.Visible = stateVisibility
+    If logProtected Then log.Protect UserInterfaceOnly:=True, AllowFiltering:=True
+    If stateProtected Then state.Protect UserInterfaceOnly:=True
+    On Error GoTo 0
+    Err.Raise errorNumber, "ApplyWebMigrationPlan", errorText
+End Sub
+
+Private Function WebMigrationDictionary() As Object
+    Set WebMigrationDictionary = CreateObject("Scripting.Dictionary")
+    WebMigrationDictionary.CompareMode = vbTextCompare
+End Function
+
+Private Function WebMigrationHasTaskIds(ByVal ws As Worksheet) As Boolean
+    If ws Is Nothing Then Exit Function
+    If Not IsTaskSheet(ws) Then Exit Function
+    WebMigrationHasTaskIds = (WebMigrationCellText(ws, HEADER_ROW, COL_WEB_TASK_ID) = "웹업무ID" And _
+                              WebMigrationCellText(ws, HEADER_ROW, COL_REQUEST) = "요청 내용")
+End Function
+
+Private Sub WebMigrationCollectIds(ByVal ws As Worksheet, ByVal ids As Object)
+    Dim r As Long, sourceId As String
+    If Not WebMigrationHasTaskIds(ws) Then Exit Sub
+    For r = DATA_START_ROW To GetMigrationLastRow(ws)
+        If HasTaskContent(ws, r) Then
+            sourceId = WebMigrationCellText(ws, r, COL_WEB_TASK_ID)
+            If Len(sourceId) > 0 Then ids(sourceId) = True
+        End If
+    Next r
+End Sub
+
+Private Sub WebMigrationCollectLogIds(ByVal log As Worksheet, ByVal pairs As Object, ByVal ids As Object)
+    Dim r As Long, sourceId As String
+    If log Is Nothing Then Exit Sub
+    For r = 2 To WebMigrationLastRow(log, "M")
+        If pairs.Exists(WebMigrationCellText(log, r, "B")) Then
+            sourceId = WebMigrationCellText(log, r, "C")
+            If Len(sourceId) > 0 Then ids(sourceId) = True
+        End If
+    Next r
+End Sub
+
+Private Function WebMigrationLastRow(ByVal ws As Worksheet, ByVal lastColumn As String) As Long
+    Dim found As Range
+    Set found = ws.Range("A:" & lastColumn).Find(What:="*", After:=ws.Range("A1"), LookIn:=xlFormulas, _
+                  LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
+    WebMigrationLastRow = 1
+    If Not found Is Nothing Then WebMigrationLastRow = found.Row
+End Function
+
+Private Function WebMigrationCellText(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal columnName As String) As String
+    Dim value As Variant
+    value = ws.Cells(rowNum, columnName).Value2
+    If IsError(value) Then Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", _
+        "웹 이관에 필요한 셀에 오류가 있습니다: " & ws.Name & "!" & columnName & CStr(rowNum)
+    WebMigrationCellText = Trim$(CStr(value))
+End Function
+
+Private Function WebMigrationRowText(ByRef values As Variant, ByVal columnNum As Long) As String
+    If IsError(values(1, columnNum)) Then _
+        Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", "웹 이력 또는 연결 값에 셀 오류가 있습니다."
+    WebMigrationRowText = CStr(values(1, columnNum))
+End Function
+
+Private Function WebMigrationLogEntry(ByVal ws As Worksheet, ByVal rowNum As Long, Optional ByVal importing As Boolean = False) As Object
+    Dim entry As Object, values As Variant, link As String, site As String, requestNo As String
+    Dim sourceConfig As Worksheet, formPosition As Long
+    Set entry = CreateObject("Scripting.Dictionary")
+    values = ws.Range("A" & rowNum & ":M" & rowNum).Value2
+    requestNo = WebMigrationRowText(values, 4)
+    If ws.Cells(rowNum, "D").Hyperlinks.Count > 0 Then link = ws.Cells(rowNum, "D").Hyperlinks(1).Address
+    If importing And Len(WebMigrationRowText(values, 12)) = 0 And Len(WebMigrationRowText(values, 3)) > 0 Then
+        formPosition = InStr(1, link, "/C0/", vbTextCompare)
+        If formPosition > 0 Then site = WebMigrationCanonicalSite(Left$(link, formPosition))
+        If Len(site) = 0 Then site = WebMigrationLegacyStateSite(ws.Parent, WebMigrationRowText(values, 3), requestNo)
+        Set sourceConfig = GetWorksheet(ws.Parent, WEB_CONFIG_SHEET_NAME)
+        If Len(site) = 0 And Not sourceConfig Is Nothing Then site = WebMigrationCanonicalSite(WebMigrationCellText(sourceConfig, 2, "B"))
+        If Len(site) = 0 Then Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", _
+            "이전 웹 이력의 사이트를 확인할 수 없습니다. 원본 파일의 config_web 사이트 주소를 확인하세요."
+        values(1, 12) = site
+        If Len(WebMigrationRowText(values, 13)) = 0 And Not sourceConfig Is Nothing Then _
+            values(1, 13) = WebMigrationCellText(sourceConfig, 3, "B")
+    End If
+    If Len(link) = 0 And Len(requestNo) > 0 Then
+        site = WebMigrationCanonicalSite(WebMigrationRowText(values, 12))
+        If Len(site) > 0 Then link = site & "C0/c0200_02.aspx?REQ_NO=" & requestNo
+    End If
+    entry.Add "Values", values
+    entry.Add "Link", link
+    Set WebMigrationLogEntry = entry
+End Function
+
+Private Function WebMigrationLegacyStateSite(ByVal sourceBook As Workbook, ByVal sourceId As String, ByVal requestNo As String) As String
+    Dim state As Worksheet, r As Long, site As String
+    If Len(requestNo) = 0 Then Exit Function
+    Set state = GetWorksheet(sourceBook, WEB_STATE_SHEET_NAME)
+    If state Is Nothing Then Exit Function
+    For r = 2 To WebMigrationLastRow(state, "O")
+        If WebMigrationCellText(state, r, "A") = sourceId Then
+            If WebMigrationCellText(state, r, "D") = requestNo Or WebMigrationCellText(state, r, "E") = requestNo Then
+                site = WebMigrationCanonicalSite(WebMigrationCellText(state, r, "B"))
+                If Len(site) > 0 Then
+                    If Len(WebMigrationLegacyStateSite) > 0 And site <> WebMigrationLegacyStateSite Then _
+                        Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", "이전 웹 이력의 요청번호가 여러 사이트에 있어 원본 연결을 확인해야 합니다."
+                    WebMigrationLegacyStateSite = site
+                End If
+            End If
+        End If
+    Next r
+End Function
+
+Private Function WebMigrationCanonicalSite(ByVal site As String) As String
+    site = LCase$(Trim$(site))
+    If Len(site) > 0 Then
+        If Right$(site, 1) <> "/" Then site = site & "/"
+    End If
+    WebMigrationCanonicalSite = site
+End Function
+
+Private Sub WebMigrationValidateState(ByRef values As Variant, ByVal stateKeys As Object, ByVal requestOwners As Object)
+    Dim sourceId As String, site As String, key As String, requestNo As String, columnNum As Variant
+    sourceId = WebMigrationRowText(values, 1)
+    site = WebMigrationCanonicalSite(WebMigrationRowText(values, 2))
+    key = site & vbNullChar & sourceId
+    If stateKeys.Exists(key) Then Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", _
+        "같은 웹업무ID와 사이트의 연결 이력이 중복됩니다: " & sourceId
+    stateKeys(key) = True
+    For Each columnNum In Array(4, 5)
+        requestNo = WebMigrationRowText(values, CLng(columnNum))
+        If Len(requestNo) > 0 Then
+            key = site & vbNullChar & requestNo
+            If requestOwners.Exists(key) Then
+                If StrComp(CStr(requestOwners(key)), sourceId, vbTextCompare) <> 0 Then _
+                    Err.Raise vbObjectError + 2640, "BuildWebMigrationPlan", "같은 사이트의 웹 요청번호가 서로 다른 업무에 연결됩니다: " & requestNo
+            Else
+                requestOwners(key) = sourceId
+            End If
+        End If
+    Next columnNum
 End Sub

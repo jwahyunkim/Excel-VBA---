@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 간트 전용 새로고침도 이전 웹등록 헤더를 안전하게 WEB UPDATE로 갱신
 ' 2026-10-22 김좌현 수정 : 새로고침 서명 계산의 열 번호를 한 번만 조회해 반복 Range 접근 제거
 ' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로를 제거하고 모두 새로고침으로 버튼 연결 통일
 ' 2026-10-22 김좌현 수정 : 모두/간트 새로고침 분리, 중복 렌더 제거와 변경된 레이아웃만 재구성
@@ -124,7 +125,7 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
         On Error Resume Next
         Set config = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
         On Error GoTo EH
-        If config Is Nothing Or CStr(ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2) <> "웹등록" Or _
+        If config Is Nothing Or Not HasTaskWebHeader(ws) Or _
            CStr(ws.Cells(HEADER_ROW, COL_REQUEST).Value2) <> "요청 내용" Then _
             Err.Raise vbObjectError + 2120, , "모두 새로고침을 먼저 실행해 주세요."
     End If
@@ -140,6 +141,8 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     UnprotectTaskSheet ws
+    If Not includeWebSetup And CStr(ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2) <> "WEB UPDATE" Then _
+        ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2 = "WEB UPDATE"
     ' 2026-10-22 김좌현 수정 : 삭제한 웹등록 이력의 연결과 잠금을 두 새로고침에 반영
     RefreshWebHistoryState ws
     If includeWebSetup Then

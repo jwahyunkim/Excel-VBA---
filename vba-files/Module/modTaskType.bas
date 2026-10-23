@@ -1,5 +1,6 @@
 Attribute VB_Name = "modTaskType"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 행 복사 시 타입 목록 이름과 원본 파일 연결이 따라오지 않도록 참조
 ' 2026-10-20 김좌현 수정 : config 타입 목록 이동 및 기존 값 보존 이전
 
 Public Const TASK_TYPE_TITLE_CELL As String = "E7"
@@ -82,8 +83,9 @@ End Sub
 Public Sub ApplyTaskTypeValidation(ByVal ws As Worksheet)
     With ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_TYPE & ws.Rows.Count).Validation
         .Delete
+        ' Resolve the existing list in the receiving workbook when rows are copied.
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Formula1:="=" & TASK_TYPE_LIST_NAME
+             Formula1:="=INDIRECT(""" & TASK_TYPE_LIST_NAME & """)"
         .IgnoreBlank = False
         .InCellDropdown = True
         .ShowError = True
