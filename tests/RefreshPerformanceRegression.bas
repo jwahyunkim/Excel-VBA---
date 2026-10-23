@@ -1,5 +1,6 @@
 Attribute VB_Name = "RefreshPerformanceRegression"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 중복 등록 버튼 제거에 맞춰 웹 버튼 보기 비교 범위 정리
 ' 2026-10-22 김좌현 수정 : 간트 성능 개선 전후의 계산/막대/레이아웃/보기 보존 회귀
 
 Private Const LAST_FIXTURE_ROW As Long = 14
@@ -78,7 +79,7 @@ Private Function Snapshot(ByVal ws As Worksheet) As Object
     For Each name In Array(COL_MINOR_CATEGORY, COL_WEB_ENABLED, COL_WEB_LEVEL, COL_WEB_RESULT, COL_REQUEST, COL_MODIFICATION, COL_ACTUAL_START, COL_ACTUAL_END, COL_WORK_MINUTES)
         result.Add "header:" & CStr(name), CellVisual(ws.Cells(HEADER_ROW, CStr(name)))
     Next name
-    For Each name In Array("btnWebPreview", "btnWebUpload", "btnWebConfig")
+    For Each name In Array("btnWebPreview", "btnWebConfig")
         result.Add "button:" & CStr(name), CStr(ws.Shapes(CStr(name)).Visible)
     Next name
     result.Add "protection", CStr(ws.ProtectContents) & ":" & CStr(ws.Cells(DATA_START_ROW, COL_WEB_TASK_ID).Locked) & ":" & _

@@ -1,7 +1,8 @@
 ' Append to modWebPayload only in a disposable workbook copy.
 ' 2026-10-22 김좌현 수정 : 등록 기준·본문·필수값·웹업무ID와 읽기 전용 미리보기 회귀 검증
+' 2026-10-23 김좌현 수정 : Y 선택 행 한정·미선택 오류 행 제외와 등록 단위 중복 방지 검증
 Public Function RunWebPayloadRegression() As String
-    Dim ws As Worksheet, configWs As Worksheet, copiedWs As Worksheet, items As Collection, item As Object
+    Dim ws As Worksheet, configWs As Worksheet, copiedWs As Worksheet, selectionWs As Worksheet, items As Collection, item As Object
     Dim values As Object, first As Object, checked As Long, stage As String
     Dim snapshot As String, body As String, r As Long, sourceId As String
     On Error GoTo Failed
@@ -62,6 +63,7 @@ Public Function RunWebPayloadRegression() As String
     For r = 1 To 4
         WebRegressionEqual CStr(items(r)("Error")), "", "valid selected payload " & CStr(r), checked
     Next r
+    WebRegressionOnlySelected ws, items, checked
     Set item = items(1)
     Set values = item("Values")
     WebRegressionEqual CStr(item("SourceId")), "fixture-7", "stable source ID", checked
@@ -89,6 +91,7 @@ Public Function RunWebPayloadRegression() As String
     stage = "levels 1 and 2 include their own requests and descendants"
     ws.Cells(5, COL_WEB_LEVEL).Value2 = 1
     Set items = BuildWebUploadItems(ws)
+    WebRegressionEqual CStr(items.Count), "3", "multiple selected descendants do not duplicate a level 1 registration unit", checked
     WebRegressionEqual CStr(items(1)("Row")), "5", "level 1 uses root", checked
     body = CStr(items(1)("Body"))
     WebRegressionContains body, "그룹 A", "root request is in body", checked
@@ -110,8 +113,14 @@ Public Function RunWebPayloadRegression() As String
     Set items = BuildWebUploadItems(ws)
     WebRegressionEqual CStr(items(1)("Row")), "10", "blank and N disabled; child level override ignored", checked
     ws.Cells(10, COL_WEB_ENABLED).Value2 = "N"
+    ws.Cells(5, COL_WEB_ENABLED).Value2 = "N"
     Set items = BuildWebUploadItems(ws)
-    WebRegressionContains CStr(items(1)("Error")), "해당하는 행의 업로드 대상", "selected non-target root gives actionable diagnostic", checked
+    WebRegressionEqual CStr(items(1)("Row")), "6", "group diagnostic belongs to selected task instead of disabled root", checked
+    WebRegressionContains CStr(items(1)("Error")), "해당하는 행의 WEB UPDATE", "selected non-target gives actionable diagnostic", checked
+    WebRegressionOnlySelected ws, items, checked
+    ws.Cells(5, COL_WEB_ENABLED).ClearContents
+    Set items = BuildWebUploadItems(ws)
+    WebRegressionEqual CStr(items(1)("Row")), "6", "blank root is not included as a group diagnostic", checked
     ws.Cells(7, COL_WEB_ENABLED).Value2 = "Y"
     ws.Cells(8, COL_WEB_ENABLED).Value2 = "Y"
     ws.Cells(10, COL_WEB_ENABLED).Value2 = "Y"
@@ -182,6 +191,53 @@ Public Function RunWebPayloadRegression() As String
     ws.Cells(5, COL_WEB_LEVEL).Value2 = 2.5
     Set items = BuildWebUploadItems(ws)
     WebRegressionContains CStr(items(1)("Error")), "1, 2, 3", "fractional group criterion rejected", checked
+    WebRegressionEqual CStr(items(1)("Row")), "6", "invalid criterion diagnostic does not include blank group root", checked
+    WebRegressionOnlySelected ws, items, checked
+
+    stage = "disabled orphan and invalid groups stay outside the selected queue"
+    Set selectionWs = ThisWorkbook.Worksheets.Add
+    selectionWs.Name = "WebSelectionFixture"
+    For r = 5 To 10
+        WebRegressionSeedRow selectionWs, r
+        selectionWs.Cells(r, COL_REQUEST).Value2 = "선택 필터 검증 " & CStr(r)
+        selectionWs.Cells(r, COL_WEB_TASK_ID).Value2 = "selection-" & CStr(r)
+        selectionWs.Cells(r, COL_WEB_ENABLED).Value2 = "N"
+    Next r
+    selectionWs.Cells(5, COL_LEVEL).Value2 = 2
+    selectionWs.Cells(6, COL_LEVEL).Value2 = 3
+    selectionWs.Cells(6, COL_WEB_ENABLED).ClearContents
+    selectionWs.Cells(7, COL_WEB_LEVEL).Value2 = 2.5
+    selectionWs.Cells(8, COL_LEVEL).Value2 = 2
+    selectionWs.Cells(9, COL_WEB_LEVEL).Value2 = 3
+    selectionWs.Cells(9, COL_WEB_ENABLED).ClearContents
+    selectionWs.Cells(10, COL_LEVEL).Value2 = 2
+    selectionWs.Cells(10, COL_WEB_ENABLED).ClearContents
+    Set items = BuildWebUploadItems(selectionWs)
+    WebRegressionEqual CStr(items.Count), "0", "N and blank orphan rows and invalid-basis groups are never queued", checked
+    For r = 5 To 10
+        If r <> 7 And r <> 9 Then selectionWs.Cells(r, COL_WEB_ENABLED).Value2 = "Y"
+    Next r
+    Set items = BuildWebUploadItems(selectionWs)
+    WebRegressionEqual CStr(items.Count), "4", "selected orphan rows and invalid criterion remain visible as errors", checked
+    WebRegressionEqual CStr(items(1)("Row")), "5", "first selected orphan is shown", checked
+    WebRegressionContains CStr(items(1)("Error")), "레벨1 그룹이 없습니다", "selected orphan is blocked", checked
+    WebRegressionEqual CStr(items(2)("Row")), "6", "second selected orphan is shown", checked
+    WebRegressionEqual CStr(items(3)("Row")), "8", "invalid group uses selected child rather than N root", checked
+    WebRegressionContains CStr(items(3)("Error")), "1, 2, 3", "selected invalid group is blocked", checked
+    WebRegressionEqual CStr(items(4)("Row")), "10", "valid Y leaf uses criterion from blank root", checked
+    WebRegressionEqual CStr(items(4)("Error")), "", "disabled group root does not disable selected registration unit", checked
+    WebRegressionOnlySelected selectionWs, items, checked
+    selectionWs.Cells(10, COL_WEB_ENABLED).Value2 = CVErr(xlErrNA)
+    Set items = BuildWebUploadItems(selectionWs)
+    WebRegressionEqual CStr(items.Count), "3", "cell error in WEB UPDATE is not Y", checked
+    WebRegressionOnlySelected selectionWs, items, checked
+
+    stage = "blank rows with leftover Y do not create queue entries"
+    selectionWs.Cells(5, COL_WEB_ENABLED).Value2 = "N"
+    selectionWs.Cells(6, COL_WEB_ENABLED).ClearContents
+    selectionWs.Cells(8, COL_REQUEST).ClearContents
+    Set items = BuildWebUploadItems(selectionWs)
+    WebRegressionEqual CStr(items.Count), "0", "leftover Y on a blank task does not create group error", checked
 
     stage = "blank modification and normalized request formatting"
     WebRegressionEqual CleanWebRequestText("  요청" & vbCrLf & vbTab & "내용  "), "요청 내용", "request whitespace matches TXT rule", checked
@@ -193,6 +249,14 @@ Public Function RunWebPayloadRegression() As String
 Failed:
     RunWebPayloadRegression = "FAIL during " & stage & ": " & Err.Description
 End Function
+
+Private Sub WebRegressionOnlySelected(ByVal ws As Worksheet, ByVal items As Collection, ByRef checked As Long)
+    Dim item As Object
+    For Each item In items
+        WebRegressionEqual UCase$(Trim$(WebCellText(ws, CLng(item("Row")), COL_WEB_ENABLED))), "Y", _
+            "every preview row is explicitly Y at task row " & CStr(item("Row")), checked
+    Next item
+End Sub
 
 Private Sub WebRegressionSeedOption(ByVal ws As Worksheet, ByVal baseColumn As Long, _
                                     ByVal display As String, ByVal name As String, ByVal code As String)

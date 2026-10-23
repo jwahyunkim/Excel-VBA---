@@ -1,5 +1,6 @@
 Attribute VB_Name = "WebViewRegression"
 Option Explicit
+' 2026-10-23 김좌현 수정 : WEB UPDATE 이전·재열기 보존과 중복 웹 버튼 제거 검증
 ' 2026-10-22 김좌현 수정 : 웹 모드 표시와 웹 초기화 없는 간트 새로고침 회귀 검증
 ' 2026-10-22 김좌현 수정 : 암호로 보호된 비업무 시트의 버튼 이관 제외와 재열기 보존 검증
 
@@ -85,10 +86,10 @@ Private Sub CheckProtectedUtilityFixtures()
 End Sub
 
 Private Sub CheckMode(ByVal ws As Worksheet, ByVal enabled As Boolean)
-    Dim name As Variant, c As Long, expected As Long
+    Dim name As Variant, c As Long, expected As Long, button As Shape
     RefreshWebModeView ws, True
     Check IsWebRegistrationMode(ws) = enabled, "mode mismatch: expected=" & enabled & ", actual=" & IsWebRegistrationMode(ws) & ", Hhidden=" & ws.Columns(COL_WEB_ENABLED).Hidden & ", Zhidden=" & ws.Columns(COL_WORK_MINUTES).Hidden
-    For Each name In Array("btnWebPreview", "btnWebUpload", "btnWebConfig")
+    For Each name In Array("btnWebPreview", "btnWebConfig")
         Check CBool(ws.Shapes(CStr(name)).Visible) = enabled, "button visibility " & CStr(name)
         ' Excel quantizes shape geometry at the current screen scale; allow less than one 96-DPI pixel.
         Check Abs(ws.Shapes(CStr(name)).Height - ws.Shapes("btnGanttRefresh").Height) < 0.75, "button height " & CStr(name)
@@ -96,6 +97,10 @@ Private Sub CheckMode(ByVal ws As Worksheet, ByVal enabled As Boolean)
         Check ws.Shapes(CStr(name)).TextFrame2.TextRange.Font.Name = "굴림", "button font " & CStr(name)
         Check ws.Shapes(CStr(name)).Fill.ForeColor.RGB = RGB(229, 239, 249), "button blue " & CStr(name)
     Next name
+    For Each button In ws.Shapes
+        Check button.Name <> "btnWebUpload", "duplicate main web upload button survived"
+    Next button
+    Check CStr(ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2) = "WEB UPDATE", "WEB UPDATE header missing"
     expected = RGB(242, 242, 242)
     If enabled Then expected = RGB(255, 235, 156)
     For Each name In Array("G4:P4", "R4:S4", "X4:Z4")
@@ -107,7 +112,7 @@ End Sub
 Public Function RunWebViewRegression() As String
     Dim ws As Worksheet, config As Worksheet, c As Long, r As Long
     Dim scrollColumn As Long, scrollRow As Long, started As Double, fullSeconds As Double, fastSeconds As Double
-    Dim stage As String
+    Dim stage As String, legacyWebButton As Shape
     On Error GoTo Failed
     Application.EnableEvents = False
     stage = "protected utility button upgrade"
@@ -156,6 +161,9 @@ Public Function RunWebViewRegression() As String
     scrollRow = ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollRow
     stage = "edit child dates"
     UnprotectTaskSheet ws
+    ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2 = "웹등록"
+    Set legacyWebButton = ws.Shapes.AddShape(msoShapeRoundedRectangle, 1, 1, 96, 22)
+    legacyWebButton.Name = "btnWebUpload"
     ws.Cells(6, COL_ACTUAL_END).Value2 = DateSerial(2026, 10, 23)
     ws.Cells(7, COL_ACTUAL_END).Value2 = DateSerial(2026, 10, 24)
     ApplyCalculatedColumnsProtection ws, 7

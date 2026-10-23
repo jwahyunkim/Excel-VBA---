@@ -1,5 +1,6 @@
 Attribute VB_Name = "modWebState"
 Option Explicit
+' 2026-10-23 김좌현 수정 : 웹 미리보기와 등록 전 하위 작업시간을 상위 합계에 반영
 ' 2026-10-22 김좌현 수정 : 요청번호 연결과 최근 시도를 분리하고 등록 단위 편집 및 구조 잠금 추가
 ' 2026-10-22 김좌현 수정 : 이력 삭제 후 새로고침 시 남은 웹 연결과 잠금 해제
 
@@ -570,6 +571,7 @@ Public Sub RefreshWebTaskPeriods(ByVal ws As Worksheet)
     Dim r As Long, child As Long, lastRow As Long, subtreeEnd As Long, minStart As Date, maxEnd As Date
     Dim hasStart As Boolean, hasEnd As Boolean, allEnded As Boolean, raw As Variant
     lastRow = GetLastDataRow(ws)
+    UpdateTaskWorkMinutes ws, lastRow
     For r = lastRow To DATA_START_ROW Step -1
         If HasTaskContent(ws, r) And HasChildTask(ws, r, lastRow) Then
             hasStart = False: hasEnd = False: allEnded = True

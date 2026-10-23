@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param([string]$WorkbookPath, [switch]$VisibilityOnly)
 
+# 2026-10-23 김좌현 수정 : 1·2·3단계 헤더 고정·선택 보존·저장 후 시트 전환 회귀 실행
 # 2026-10-20 김좌현 수정 : 완료 숨김 기능의 실제 Excel 회귀 검사
 # 2026-10-20 김좌현 수정 : 표시 창의 실제 틀 고정/모니터 회귀 및 임시 소스 오류 주입으로 새로고침 복구 검사
 $ErrorActionPreference = 'Stop'

@@ -2,6 +2,7 @@ Attribute VB_Name = "modWebPayload"
 Option Explicit
 ' 2026-10-22 김좌현 수정 : 레벨1 그룹 기준 프로젝트 실적 등록 대상 및 TXT 형식 본문 생성
 ' 2026-10-22 김좌현 수정 : 요청번호 연결용 단일 등록 단위 검증 공개
+' 2026-10-23 김좌현 수정 : WEB UPDATE가 Y인 업무만 미리보기와 그룹 오류 대상으로 선택
 
 ' Reading a preview never changes task dates, progress, hierarchy or report status.
 ' The configuration module prepares persistent task IDs before calling this module.
@@ -10,7 +11,7 @@ Public Function BuildWebUploadItems(ByVal ws As Worksheet) As Collection
     Dim item As Object
     Dim lastRow As Long, r As Long, groupRow As Long, groupEnd As Long
     Dim groupLevel As Long, candidateCount As Long, selectedCount As Long
-    Dim hasSelection As Boolean
+    Dim firstSelectedRow As Long
 
     If ws Is Nothing Then Err.Raise vbObjectError + 7801, "BuildWebUploadItems", "업무 시트를 지정하세요."
     If ws.Name = CONFIG_SHEET_NAME Or ws.Name = OUTPUT_CONFIG_SHEET_NAME Or _
@@ -34,11 +35,13 @@ Public Function BuildWebUploadItems(ByVal ws As Worksheet) As Collection
             groupRow = r
             groupEnd = GetTaskSubtreeEndRow(ws, groupRow, lastRow)
             groupLevel = WebGroupLevel(ws, groupRow)
-            hasSelection = False
+            firstSelectedRow = 0
             candidateCount = 0
             selectedCount = 0
             For r = groupRow To groupEnd
-                If WebRowEnabled(ws, r) Then hasSelection = True
+                If WebHasTaskContent(ws, r) And WebRowEnabled(ws, r) Then
+                    If firstSelectedRow = 0 Then firstSelectedRow = r
+                End If
                 If IsWebUploadRow(ws, r, groupLevel, groupEnd) Then
                     candidateCount = candidateCount + 1
                     If WebRowEnabled(ws, r) Then
@@ -50,14 +53,14 @@ Public Function BuildWebUploadItems(ByVal ws As Worksheet) As Collection
                     End If
                 End If
             Next r
-            If hasSelection And selectedCount = 0 Then
-                Set item = NewWebUploadItem(ws, groupRow, groupRow, lastRow, identityCounts)
+            If firstSelectedRow > 0 And selectedCount = 0 Then
+                Set item = NewWebUploadItem(ws, firstSelectedRow, groupRow, lastRow, identityCounts)
                 If groupLevel = 0 Then
                     AppendWebItemError item, "등록 기준 레벨은 1, 2, 3 중에서 선택하세요."
                 ElseIf candidateCount = 0 Then
                     AppendWebItemError item, "이 그룹에는 등록 기준 레벨 " & CStr(groupLevel) & "에 해당하는 업무가 없습니다."
                 Else
-                    AppendWebItemError item, "등록 기준에 해당하는 행의 업로드 대상을 Y로 선택하세요."
+                    AppendWebItemError item, "등록 기준에 해당하는 행의 WEB UPDATE를 Y로 선택하세요."
                 End If
                 items.Add item
             End If

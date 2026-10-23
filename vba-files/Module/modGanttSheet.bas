@@ -1,5 +1,7 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-23 김좌현 수정 : WEB UPDATE 헤더로 변경하고 기존 웹등록 열의 중복 이전 방지
+' 2026-10-23 김좌현 수정 : 하위 작업시간의 상위 합계와 입력 즉시 갱신 및 중복 집계 방지
 ' 2026-10-22 김좌현 수정 : 날짜 열 너비 일괄 적용과 덮어쓰는 열 맞춤 제거로 간트 새로고침 가속
 ' 2026-10-22 김좌현 수정 : 간트 서식 중복 제거, 실제 표시 영역만 초기화와 선택적 너비/계층 갱신
 ' 2026-10-22 김좌현 수정 : 웹 설정/업무 ID/작업시간 열 이전과 표시 및 보호 통합
@@ -78,6 +80,14 @@ Public Sub UpdateTaskNumbers(ws As Worksheet, ByVal lastRow As Long)
     Next r
 End Sub
 
+' 2026-10-23 김좌현 수정 : 이전 표시명도 현재 웹 열 구조로 인식해 데이터와 개체 위치 유지
+Public Function HasTaskWebHeader(ByVal ws As Worksheet) As Boolean
+    Dim headerText As String
+    If ws Is Nothing Then Exit Function
+    headerText = CStr(ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2)
+    HasTaskWebHeader = (headerText = "WEB UPDATE" Or headerText = "웹등록")
+End Function
+
 ' 2026-10-22 김좌현 수정 : 기존 레이아웃 이전 후 웹 설정 열과 분 단위 작업시간을 한 번만 삽입
 Public Sub EnsureTaskSheetLayout(ByVal ws As Worksheet)
     Dim previousEnableEvents As Boolean, wasProtected As Boolean
@@ -92,7 +102,7 @@ Public Sub EnsureTaskSheetLayout(ByVal ws As Worksheet)
     Application.EnableEvents = False
     If wasProtected Then ws.Unprotect
 
-    If CStr(ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2) <> "웹등록" Then
+    If Not HasTaskWebHeader(ws) Then
         legacyRequestColumn = FindHeaderColumnByName(ws, "요청 내용")
         If legacyRequestColumn = 0 Then legacyRequestColumn = FindHeaderColumnByName(ws, "내용")
         If legacyRequestColumn > 0 Then MigrateTaskWebFoldSettings ws
@@ -113,7 +123,7 @@ Public Sub EnsureTaskSheetLayout(ByVal ws As Worksheet)
         ws.Columns(COL_WORK_MINUTES).Insert Shift:=xlToRight
         ws.Columns(COL_WORK_MINUTES).Hidden = True
     End If
-    ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2 = "웹등록"
+    ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2 = "WEB UPDATE"
     ws.Cells(HEADER_ROW, COL_WEB_LEVEL).Value2 = "등록기준"
     ws.Cells(HEADER_ROW, COL_WEB_REQUESTER).Value2 = "웹요청자"
     ws.Cells(HEADER_ROW, COL_WEB_ACTION).Value2 = "웹처리구분"
@@ -575,6 +585,74 @@ Public Sub ApplyHierarchySummaryValues(ws As Worksheet, ByVal lastRow As Long, B
     Next r
 End Sub
 
+Public Sub UpdateTaskWorkMinutes(ByVal ws As Worksheet, ByVal lastRow As Long)
+    Dim r As Long, eventsEnabled As Boolean, wasProtected As Boolean
+    Dim errorNumber As Long, errorText As String
+    If ws Is Nothing Or lastRow < DATA_START_ROW Then Exit Sub
+    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
+       IsWebUtilitySheet(ws) Then Exit Sub
+    If CStr(ws.Cells(HEADER_ROW, COL_REQUEST).Value2) <> "요청 내용" Or _
+       CStr(ws.Cells(HEADER_ROW, COL_WORK_MINUTES).Value2) <> "작업시간(분)" Then Exit Sub
+    eventsEnabled = Application.EnableEvents
+    wasProtected = ws.ProtectContents
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    If wasProtected Then UnprotectTaskSheet ws
+    For r = lastRow To DATA_START_ROW Step -1
+        If HasTaskContent(ws, r) Then
+            If HasChildTask(ws, r, lastRow) Then SetParentWorkMinutes ws, r, lastRow
+        End If
+    Next r
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    Application.EnableEvents = eventsEnabled
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    Application.EnableEvents = eventsEnabled
+    On Error GoTo 0
+    Err.Raise errorNumber, "UpdateTaskWorkMinutes", errorText
+End Sub
+
+Private Sub SetParentWorkMinutes(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal lastRow As Long)
+    Dim child As Long, subtreeEnd As Long, raw As Variant, total As Double, minutes As Double
+    Dim hasMinutes As Boolean, invalidMinutes As Boolean
+    subtreeEnd = GetTaskSubtreeEndRow(ws, rowNum, lastRow)
+    child = rowNum + 1
+    Do While child <= subtreeEnd
+        If HasTaskContent(ws, child) Then
+            raw = ws.Cells(child, COL_WORK_MINUTES).Value2
+            If IsError(raw) Then
+                invalidMinutes = True
+            ElseIf Len(Trim$(CStr(raw))) > 0 Then
+                If VarType(raw) = vbBoolean Or Not IsNumeric(raw) Then
+                    invalidMinutes = True
+                Else
+                    minutes = CDbl(raw)
+                    If minutes < 0 Or minutes > 2147483647# Or minutes <> Fix(minutes) Then
+                        invalidMinutes = True
+                    Else
+                        total = total + minutes
+                        hasMinutes = True
+                    End If
+                End If
+            End If
+            ' Only direct children contribute; each nested subtotal is included once.
+            child = GetTaskSubtreeEndRow(ws, child, lastRow) + 1
+        Else
+            child = child + 1
+        End If
+    Loop
+    If invalidMinutes Then
+        ws.Cells(rowNum, COL_WORK_MINUTES).Value = CVErr(xlErrValue)
+    ElseIf hasMinutes Then
+        ws.Cells(rowNum, COL_WORK_MINUTES).Value2 = total
+    Else
+        ws.Cells(rowNum, COL_WORK_MINUTES).ClearContents
+    End If
+End Sub
+
 Private Sub NormalizeLeafProgressByActualEnd(ws As Worksheet, ByVal rowNum As Long)
     If IsDate(ws.Cells(rowNum, COL_ACTUAL_END).Value) Then
         ws.Cells(rowNum, COL_PROGRESS).Value = 1
@@ -607,6 +685,8 @@ Private Sub SetParentSummaryValues(ws As Worksheet, ByVal rowNum As Long, ByVal 
     Dim childWeight As Double
     Dim weightedProgressSum As Double
     Dim totalWeight As Double
+
+    SetParentWorkMinutes ws, rowNum, lastRow
     
     currentLevel = GetTaskLevel(ws, rowNum)
     allChildActualDone = True
@@ -1150,7 +1230,12 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
         ws.Range(COL_REQUEST & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count), _
         ws.Range(COL_OWNER & DATA_START_ROW & ":" & COL_OWNER & ws.Rows.Count))
     Set changedRange = Intersect(Target, watchedRange)
-    If changedRange Is Nothing Then Exit Sub
+    If changedRange Is Nothing Then
+        If Not Intersect(Target, ws.Range(COL_WORK_MINUTES & DATA_START_ROW & ":" & _
+                                         COL_WORK_MINUTES & ws.Rows.Count)) Is Nothing Then _
+            UpdateTaskWorkMinutes ws, GetLastDataRow(ws)
+        Exit Sub
+    End If
 
     lastRow = GetLastDataRow(ws)
     For Each changedArea In changedRange.Areas
@@ -1172,6 +1257,7 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
     Next r
 
     SynchronizeTaskHierarchyOwners ws, lastRow
+    UpdateTaskWorkMinutes ws, lastRow
 
     If Len(issueMessages) > 0 Then
         MsgBox "분류 계층 정합성을 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
