@@ -8,6 +8,7 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-10-26 김좌현 수정 : 타입 오류로 실행 취소한 행 변경의 웹 설정 비교 상태 복원
 ' 2026-10-22 김좌현 수정 : 간트 셀 직접 수정 시 간트 전용 새로고침 캐시 무효화
 ' 2026-10-22 김좌현 수정 : 웹등록 초기화, 보호 비밀번호와 그룹별 등록 기준 이벤트 연결
 
@@ -112,6 +113,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     invalidTypeCell = GetInvalidTaskType(Sh, Target)
     If Len(invalidTypeCell) > 0 Then
         Application.Undo
+        If CStr(Sh.Cells(HEADER_ROW, COL_REQUEST).Value2) = "요청 내용" Then RememberWebGroupBases Sh
         RefreshTaskTypeValidation
         MsgBox "config 시트에 등록한 타입만 입력할 수 있습니다: " & invalidTypeCell, _
                vbExclamation, "타입 입력 오류"
