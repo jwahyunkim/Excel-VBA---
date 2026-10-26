@@ -6,6 +6,7 @@
 ' 2026-10-23 김좌현 수정 : 하위 작업시간 합계의 상위 갱신과 대표행 웹 전송값 및 기존 업무값 보존 검증
 ' 2026-10-23 김좌현 수정 : WEB UPDATE 선택과 행별 자동 신규·갱신 및 완료 선택 해제·실행 재검증 회귀 검증
 ' 2026-10-23 김좌현 수정 : 실행 수락 후 결과와 관계없는 원본 전체 선택 초기화 및 검증 거절 시 선택 보존 검증
+' 2026-10-26 김좌현 수정 : 웹 연결을 보존하는 기본 행 삭제와 등록 구조·직접 편집 보호 회귀 검증
 Public Function RunWebUploadRegression() As String
     Dim ws As Worksheet, config As Worksheet, preview As Worksheet, log As Worksheet
     Dim form As Object, item As Object, state As Object, server As Object, session As Object, items As Collection
@@ -60,6 +61,9 @@ Public Function RunWebUploadRegression() As String
     PrepareWebTaskSheet ws
     WebUploadRegressionAssert Not ws.Columns(COL_WEB_ENABLED).Hidden And Not ws.Columns(COL_WORK_MINUTES).Hidden, "prepare preserves expanded web mode columns", checked
     WebUploadRegressionResetJournal
+
+    stage = "native row deletion preserves existing web connections"
+    WebUploadRegressionRowDeletion ws, checked
 
     stage = "registration unit propagation and merge conflicts"
     ws.Cells(7, COL_WEB_LEVEL).Value2 = 2
@@ -503,6 +507,178 @@ Public Function RunWebUploadRegression() As String
     Exit Function
 Failed:
     RunWebUploadRegression = "FAIL during " & stage & ": " & Err.Source & " / " & Err.Description
+End Function
+
+Private Sub WebUploadRegressionRowDeletion(ByVal original As Worksheet, ByRef checked As Long)
+    Dim ws As Worksheet, item As Object, state As Object, sourceId As String, groupId As String
+    Dim server As Object, session As Object
+    Dim r As Long, stateBefore As String, rowBefore As String, savedGroupRow As Variant
+    Dim savedPasteRow As Variant, field As Variant, fieldBefore As Variant
+    Dim previousAlerts As Boolean, errorNumber As Long, errorText As String
+    previousAlerts = Application.DisplayAlerts
+    On Error GoTo Failed
+    Set ws = ThisWorkbook.Worksheets.Add
+    ws.Name = "WebRowDeleteFixture"
+    SetupDataHeaders ws
+    For r = 5 To 15
+        If r <> 7 Then
+            WebUploadRegressionSeedRow ws, r
+            ws.Cells(r, COL_REQUEST).Value2 = "행 삭제 검증 " & CStr(r)
+            ws.Cells(r, COL_LEVEL).Value2 = 3
+        End If
+    Next r
+    ws.Cells(5, COL_LEVEL).Value2 = 1: ws.Cells(5, COL_WEB_LEVEL).Value2 = 2
+    ws.Cells(6, COL_LEVEL).Value2 = 2
+    ws.Cells(8, COL_LEVEL).Value2 = 1: ws.Cells(8, COL_WEB_LEVEL).Value2 = 2
+    ws.Cells(9, COL_LEVEL).Value2 = 2
+    ws.Cells(12, COL_LEVEL).Value2 = 2
+    ws.Cells(15, COL_LEVEL).Value2 = 1: ws.Cells(15, COL_WEB_LEVEL).Value2 = 1
+    PrepareWebTaskSheet ws
+    UnprotectTaskSheet ws
+    ws.Cells(12, COL_WEB_PROGRAM_ID).Value2 = "KEEP-INDEPENDENT-UNIT"
+    ws.Cells(13, COL_WEB_PROGRAM_ID).Value2 = "KEEP-INDEPENDENT-UNIT"
+    ws.Cells(14, COL_WEB_PROGRAM_ID).Value2 = "KEEP-INDEPENDENT-UNIT"
+    Set item = BuildWebItemForRow(ws, 9)
+    RememberWebGroupBases ws
+    Set server = item("Values")
+    server("REQ_UID") = "requester2"
+    WebUploadMockReset "success", True
+    WebUploadMockSetServer "RQROWDELETE", server
+    Set session = CreateObject("Scripting.Dictionary")
+    ConnectWebRequest ws, 9, "RQROWDELETE", session, False
+    WebUploadRegressionEqual CStr(ws.Cells(9, COL_WEB_REQUESTER).Value2), "요청자 둘 [requester2]", "connecting an existing request adopts the different server requester", checked
+    WebUploadRegressionEqual CStr(ws.Cells(10, COL_WEB_REQUESTER).Value2), "요청자 둘 [requester2]", "connected requester is inherited by the registered unit's child", checked
+    sourceId = GetWebTaskId(ws, 9)
+    groupId = GetWebTaskId(ws, 8)
+    Set state = WebTaskState(sourceId)
+    stateBefore = WebUploadRegressionStateSnapshot(state)
+    WebUploadRegressionAssert WebGroupIsLocked(ws, 8), "row deletion fixture contains a registered locked group", checked
+
+    savedPasteRow = ws.Range("A11:" & COL_STATUS & "11").Value2
+    ws.Range("A11:" & COL_STATUS & "11").Value2 = ws.Range("A9:" & COL_STATUS & "9").Value2
+    WebUploadRegressionAssert Not WebRowDeletionKeepsSettings(ws, ws.Rows(11)), "whole-row paste without fewer rows must use normal edit checks", checked
+    ws.Range("A11:" & COL_STATUS & "11").Value2 = savedPasteRow
+
+    ws.Rows(10).Delete Shift:=xlUp
+    For Each field In Array(COL_WEB_LEVEL, COL_WEB_REQUESTER, COL_WEB_PROGRAM_ID)
+        fieldBefore = ws.Cells(9, CStr(field)).Value2
+        ws.Cells(9, CStr(field)).Value2 = "TAMPERED-AFTER-DELETE"
+        WebUploadRegressionAssert Not WebRowDeletionKeepsSettings(ws, ws.Rows(10)), "row deletion cannot bypass changed web field " & CStr(field), checked
+        ws.Cells(9, CStr(field)).Value2 = fieldBefore
+    Next field
+    WebUploadRegressionAssert WebRowDeletionKeepsSettings(ws, ws.Rows(10)), "restoring every surviving web setting permits safe row deletion", checked
+    HandleWebTaskChange ws, ws.Rows(10)
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "deleting a nonrepresentative child keeps registered structure valid", checked
+    WebUploadRegressionEqual GetWebTaskId(ws, 9), sourceId, "child deletion retains registered representative identity", checked
+    WebUploadRegressionEqual CStr(ws.Cells(11, COL_WEB_PROGRAM_ID).Value2), "KEEP-INDEPENDENT-UNIT", "whole-row deletion does not propagate neighboring unit settings", checked
+
+    ws.Rows(7).Delete Shift:=xlUp
+    HandleWebTaskChange ws, ws.Rows(7)
+    WebUploadRegressionEqual GetWebTaskId(ws, 8), sourceId, "deleting a blank row above a registered group preserves its binding", checked
+    ws.Rows("5:6").Delete Shift:=xlUp
+    HandleWebTaskChange ws, ws.Rows("5:6")
+    WebUploadRegressionEqual GetWebTaskId(ws, 5), groupId, "deleting a separate unregistered group retains registered group identity", checked
+    WebUploadRegressionEqual GetWebTaskId(ws, 6), sourceId, "multiple deleted rows only move the registered representative", checked
+    ws.Rows("9:10").Delete Shift:=xlUp
+    HandleWebTaskChange ws, ws.Rows("9:10")
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "multiple child deletion leaves existing representative ownership valid", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_PROGRAM_ID).Value2), "KEEP-INDEPENDENT-UNIT", "multiple deletion retains independent registration settings", checked
+    Set state = WebTaskState(sourceId)
+    WebUploadRegressionEqual WebUploadRegressionStateSnapshot(state), stateBefore, "safe row deletion preserves request number history and fingerprints", checked
+
+    ApplyWebTaskProtection ws
+    WebUploadRegressionAssert ws.Cells(5, COL_WEB_LEVEL).Locked And ws.Cells(6, COL_WEB_LEVEL).Locked, "row deletion keeps direct registration-basis edits locked", checked
+    WebUploadRegressionAssert ws.Cells(6, COL_WEB_REQUESTER).Locked, "row deletion keeps registered requester edits locked", checked
+    rowBefore = CStr(ws.Cells(5, COL_WEB_LEVEL).Value2)
+    ws.Cells(5, COL_WEB_LEVEL).Value2 = 1
+    WebUploadRegressionContains WebTaskStructureIssue(ws), "등록 단위", "actual registration-basis changes remain invalid", checked
+    ws.Cells(5, COL_WEB_LEVEL).Value2 = rowBefore
+
+    ' Event-driven deletion runs separately after reopening the saved test project.
+    ws.Rows(7).Delete Shift:=xlUp
+    HandleWebTaskChange ws, ws.Rows(7)
+    WebUploadRegressionEqual GetWebTaskId(ws, 6), sourceId, "last-child deletion retains registered representative", checked
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "last-child deletion leaves valid web structure", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_PROGRAM_ID).Value2), "KEEP-INDEPENDENT-UNIT", "last-child deletion preserves independent unit settings", checked
+
+    ' Check destructive structures without calling Undo from a VBA-originated edit.
+    savedGroupRow = ws.Range("A5:" & COL_STATUS & "5").Value2
+    ws.Rows(5).Delete Shift:=xlUp
+    WebUploadRegressionContains WebTaskStructureIssue(ws), "레벨1 그룹", "deleting a registered unit's parent remains invalid", checked
+    ws.Rows(5).Insert Shift:=xlDown
+    ws.Range("A5:" & COL_STATUS & "5").Value2 = savedGroupRow
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "restoring the registered parent repairs its group structure", checked
+    ws.Rows(6).Delete Shift:=xlUp
+    WebUploadRegressionContains WebTaskStructureIssue(ws), "삭제", "deleting the registered representative remains invalid", checked
+    GoTo CleanUp
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+CleanUp:
+    Application.EnableEvents = False
+    On Error Resume Next
+    WebUploadRegressionResetJournal
+    original.Activate
+    Set mPreviewSource = original
+    Application.DisplayAlerts = False
+    If Not ws Is Nothing Then ws.Delete
+    Application.DisplayAlerts = previousAlerts
+    On Error GoTo 0
+    If errorNumber <> 0 Then Err.Raise errorNumber, "WebUploadRegressionRowDeletion", errorText
+End Sub
+
+Public Function RunNativeWebRowDeletionRegression() As String
+    Dim ws As Worksheet, original As Worksheet, item As Object, state As Object
+    Dim sourceId As String, nextId As String, stateBefore As String, r As Long, checked As Long
+    Dim previousAlerts As Boolean, errorText As String
+    previousAlerts = Application.DisplayAlerts
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    Set original = ThisWorkbook.Worksheets("WebUploadFixture")
+    WebUploadRegressionResetJournal
+    Set ws = ThisWorkbook.Worksheets.Add
+    ws.Name = "WebNativeDeleteFixture"
+    SetupDataHeaders ws
+    For r = 5 To 8
+        WebUploadRegressionSeedRow ws, r
+        ws.Cells(r, COL_REQUEST).Value2 = "기본 행 삭제 검증 " & CStr(r)
+        ws.Cells(r, COL_LEVEL).Value2 = 2
+    Next r
+    ws.Cells(5, COL_LEVEL).Value2 = 1: ws.Cells(5, COL_WEB_LEVEL).Value2 = 2
+    ws.Cells(7, COL_LEVEL).Value2 = 3
+    PrepareWebTaskSheet ws
+    UnprotectTaskSheet ws
+    Set item = BuildWebItemForRow(ws, 6)
+    Set mPreviewSource = ws
+    RecordWebOutcome item, "등록완료", "RQNATIVEDELETE", "offline native deletion fixture"
+    sourceId = GetWebTaskId(ws, 6)
+    nextId = GetWebTaskId(ws, 8)
+    Set state = WebTaskState(sourceId)
+    stateBefore = WebUploadRegressionStateSnapshot(state)
+    ws.Activate
+    Application.EnableEvents = True
+    ws.Rows(7).Delete Shift:=xlUp
+    WebUploadRegressionAssert Application.EnableEvents, "native row deletion restores workbook events", checked
+    Application.EnableEvents = False
+    WebUploadRegressionEqual GetWebTaskId(ws, 6), sourceId, "native deletion retains registered representative identity", checked
+    WebUploadRegressionEqual GetWebTaskId(ws, 7), nextId, "native deletion shifts the next independent unit into the deleted row", checked
+    WebUploadRegressionEqual WebTaskStructureIssue(ws), "", "native deletion leaves valid registered web structure", checked
+    Set state = WebTaskState(sourceId)
+    WebUploadRegressionEqual WebUploadRegressionStateSnapshot(state), stateBefore, "native deletion preserves the existing request connection", checked
+    RunNativeWebRowDeletionRegression = "PASS: " & CStr(checked) & " native web row deletion assertions"
+    GoTo CleanUp
+Failed:
+    errorText = Err.Source & " / " & Err.Description
+    RunNativeWebRowDeletionRegression = "FAIL during native web row deletion: " & errorText
+CleanUp:
+    Application.EnableEvents = False
+    On Error Resume Next
+    WebUploadRegressionResetJournal
+    If Not original Is Nothing Then original.Activate
+    Set mPreviewSource = original
+    Application.DisplayAlerts = False
+    If Not ws Is Nothing Then ws.Delete
+    Application.DisplayAlerts = previousAlerts
+    On Error GoTo 0
 End Function
 
 Private Sub WebUploadRegressionGroupedCompletion(ByVal original As Worksheet, ByRef checked As Long)

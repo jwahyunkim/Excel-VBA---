@@ -87,6 +87,11 @@ try {
     $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunSavedWebHistoryRegression")
     if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
     Write-Output $webResult
+    # 2026-10-26 김좌현 수정 : 저장 중인 VBA 실행과 분리하여 재열기 후 기본 행 삭제 이벤트 검증
+    $webPhase = 'verify native row deletion after reopening'
+    $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunNativeWebRowDeletionRegression")
+    if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
+    Write-Output $webResult
 }
 catch {
     Write-Error ('Web upload integration regression failed during ' + $webPhase + ': ' + $_.Exception.Message) -ErrorAction Continue

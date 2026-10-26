@@ -1,5 +1,6 @@
 Attribute VB_Name = "modWebUpload"
 Option Explicit
+' 2026-10-26 김좌현 수정 : 웹 연결 구조와 보호값을 보존하는 행 삭제의 등록 기준 변경 오탐 방지
 ' 2026-10-23 김좌현 수정 : 업무가 한 행인 이관 시트의 단일 셀 초기화 비교와 재열기 오류 방지
 ' 2026-10-23 김좌현 수정 : 데이터 이관용 웹 이력 시트 준비와 이전 미리보기·연결 확인 초기화
 ' 2026-10-23 김좌현 수정 : 미리보기 실행 종료 시 결과와 관계없이 원본 WEB UPDATE 전체 N 초기화
@@ -574,6 +575,10 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
             Err.Raise vbObjectError + 2605, , structureIssue
         End If
     End If
+    If WebRowDeletionKeepsSettings(ws, target) Then
+        RememberWebGroupBases ws
+        Exit Sub
+    End If
     Set changed = Intersect(target, ws.Range(COL_WEB_LEVEL & DATA_START_ROW & ":" & COL_WEB_LEVEL & ws.Rows.Count))
     Set groups = CreateObject("Scripting.Dictionary")
     Set units = CreateObject("Scripting.Dictionary")
@@ -634,7 +639,10 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
             End If
         Next cell
     End If
-    If groups.Count = 0 And units.Count = 0 Then Exit Sub
+    If groups.Count = 0 And units.Count = 0 Then
+        RememberWebGroupBases ws
+        Exit Sub
+    End If
     Set mergePlans = CreateObject("Scripting.Dictionary")
     On Error GoTo InvalidMerge
     For Each key In groups.Keys
@@ -1451,6 +1459,7 @@ Public Sub ConnectWebRequest(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal 
     requesterLabel = WebOptionLabel("REQ_UID", CStr(server("REQ_UID")))
     If Len(requesterLabel) = 0 Then requesterLabel = "[웹 요청자: " & CStr(server("REQ_UID")) & "]"
     ws.Range(COL_WEB_REQUESTER & CLng(item("Row")) & ":" & COL_WEB_REQUESTER & GetTaskSubtreeEndRow(ws, CLng(item("Row")), GetLastDataRow(ws))).Value2 = requesterLabel
+    RememberWebGroupBases ws
     RecordWebOutcome item, "연결완료", requestNo, "요청번호 상세 확인 및 현재 웹 비교값 저장", "연결", server
     If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     SaveWebJournal
