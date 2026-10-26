@@ -1,5 +1,6 @@
 Attribute VB_Name = "modWebState"
 Option Explicit
+' 2026-10-26 김좌현 수정 : 업무 ID와 보호된 웹 설정의 행 이동을 비교해 정상 행 삭제 구분
 ' 2026-10-23 김좌현 수정 : 웹 미리보기와 등록 전 하위 작업시간을 상위 합계에 반영
 ' 2026-10-22 김좌현 수정 : 요청번호 연결과 최근 시도를 분리하고 등록 단위 편집 및 구조 잠금 추가
 ' 2026-10-22 김좌현 수정 : 이력 삭제 후 새로고침 시 남은 웹 연결과 잠금 해제
@@ -7,6 +8,7 @@ Option Explicit
 Public Const WEB_STATE_SHEET_NAME As String = "웹등록_연결"
 Private Const WEB_STATE_FIRST_ROW As Long = 2
 Private mWebBasisCache As Object
+Private mWebRowCache As Object
 
 Public Function WebManagedFields() As Variant
     WebManagedFields = Array("GUBUN", "REQ_UID", "REQ_TIT", "REQ_RMK", "STS", "PGM_MD", "ACT_GUBUN", "ACT_UID", "PGM_NM", "PGM_ID", "ACT_DT_FR", "ACT_DT", "ACT_TIME")
@@ -206,9 +208,11 @@ Failed:
 End Function
 
 Public Sub RememberWebGroupBases(ByVal ws As Worksheet)
-    Dim r As Long, raw As Variant, key As String
+    Dim r As Long, raw As Variant, key As String, lastRow As Long
     If mWebBasisCache Is Nothing Then Set mWebBasisCache = CreateObject("Scripting.Dictionary")
-    For r = DATA_START_ROW To GetLastDataRow(ws)
+    If mWebRowCache Is Nothing Then Set mWebRowCache = CreateObject("Scripting.Dictionary")
+    lastRow = GetLastDataRow(ws)
+    For r = DATA_START_ROW To lastRow
         If HasTaskContent(ws, r) And GetTaskLevel(ws, r) = 1 Then
             raw = ws.Cells(r, COL_WEB_LEVEL).Value2
             If Not IsError(raw) Then
@@ -219,7 +223,55 @@ Public Sub RememberWebGroupBases(ByVal ws As Worksheet)
             End If
         End If
     Next r
+    mWebRowCache(ws.CodeName) = WebRowSettingsSnapshot(ws, lastRow)
 End Sub
+
+Private Function WebRowSettingsSnapshot(ByVal ws As Worksheet, ByVal lastRow As Long) As Variant
+    Dim rowSettings() As String, values As Variant, r As Long, c As Long, resultColumn As Long, raw As Variant, value As String
+    ReDim rowSettings(0 To Application.Max(0, lastRow - DATA_START_ROW + 1))
+    rowSettings(0) = CStr(lastRow)
+    If lastRow >= DATA_START_ROW Then
+        values = ws.Range(COL_WEB_LEVEL & DATA_START_ROW & ":" & COL_WEB_TASK_ID & lastRow).Value2
+        resultColumn = ws.Range(COL_WEB_RESULT & "1").Column - ws.Range(COL_WEB_LEVEL & "1").Column + 1
+        For r = 1 To UBound(values, 1)
+            For c = 1 To UBound(values, 2)
+                ' Uploads change Y/N and the result automatically; neither is a row identity setting.
+                If c <> resultColumn Then
+                    raw = values(r, c)
+                    If IsError(raw) Then value = "#ERROR" Else value = CStr(raw)
+                    rowSettings(r) = rowSettings(r) & CStr(VarType(raw)) & ":" & CStr(Len(value)) & ":" & value
+                End If
+            Next c
+        Next r
+    End If
+    WebRowSettingsSnapshot = rowSettings
+End Function
+
+Public Function WebRowDeletionKeepsSettings(ByVal ws As Worksheet, ByVal target As Range) As Boolean
+    Dim area As Range, previous As Variant, current As Variant, previousIndex As Long, lastRow As Long, r As Long
+    If mWebRowCache Is Nothing Then Exit Function
+    If Not mWebRowCache.Exists(ws.CodeName) Then Exit Function
+    For Each area In target.Areas
+        If area.Columns.Count <> ws.Columns.Count Then Exit Function
+    Next area
+    previous = mWebRowCache(ws.CodeName)
+    lastRow = GetLastDataRow(ws)
+    If lastRow >= CLng(previous(0)) Then Exit Function
+    current = WebRowSettingsSnapshot(ws, lastRow)
+
+    ' A deletion removes rows while every surviving identity and protected value
+    ' keeps its order. Whole-row pastes that edit those values must use normal checks.
+    previousIndex = 1
+    For r = 1 To UBound(current)
+        Do While previousIndex <= UBound(previous)
+            If previous(previousIndex) = current(r) Then Exit Do
+            previousIndex = previousIndex + 1
+        Loop
+        If previousIndex > UBound(previous) Then Exit Function
+        previousIndex = previousIndex + 1
+    Next r
+    WebRowDeletionKeepsSettings = True
+End Function
 
 Public Function WebBasisMergePlan(ByVal ws As Worksheet, ByVal groupRow As Long, ByVal newBasis As Long) As Object
     Dim result As Object, fields As Variant, oldBasis As Long, groupEnd As Long, r As Long, child As Long
