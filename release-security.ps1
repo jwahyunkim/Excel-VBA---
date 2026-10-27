@@ -357,6 +357,9 @@ function Invoke-WorkbookUpdate {
         Set-WorkbookVbaSource -Workbook $workbook -Components $components
 
         if ($ConfigureRelease) {
+            # 2026-10-27 김좌현 수정 : 임시 배포본의 업무 ID·기본값 초기화를 저장해 첫 개봉 시 변경 상태 방지
+            $initializeWebMacro = "'$($workbook.Name.Replace("'", "''"))'!InitializeWebUpload"
+            $null = $excel.Run($initializeWebMacro)
             $macroName = "'$($workbook.Name.Replace("'", "''"))'!ConfigureReleaseSecurity"
             $vbaCode = [string]$excel.Run(
                 $macroName,
