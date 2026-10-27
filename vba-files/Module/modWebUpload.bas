@@ -1,5 +1,7 @@
 Attribute VB_Name = "modWebUpload"
 Option Explicit
+' 2026-10-27 김좌현 수정 : 등록 기준 입력 오류는 편집을 막지 않고 미리보기·모두 새로고침에서 행별 안내
+' 2026-10-27 김좌현 수정 : 기존 웹 연결과 설정이 유지되는 빈 행 삽입을 등록 기준 직접 편집과 구분
 ' 2026-10-26 김좌현 수정 : 웹 연결 구조와 보호값을 보존하는 행 삭제의 등록 기준 변경 오탐 방지
 ' 2026-10-23 김좌현 수정 : 업무가 한 행인 이관 시트의 단일 셀 초기화 비교와 재열기 오류 방지
 ' 2026-10-23 김좌현 수정 : 데이터 이관용 웹 이력 시트 준비와 이전 미리보기·연결 확인 초기화
@@ -400,6 +402,7 @@ Public Sub PrepareWebTaskSheet(ByVal ws As Worksheet)
     Dim r As Long, lastRow As Long, rootRow As Long, levelValue As Variant, field As Variant
     Dim config As Worksheet, wasProtected As Boolean, eventsEnabled As Boolean, seen As Object, taskId As String
     Dim errNumber As Long, errText As String, stepName As String, hiddenColumns As Object, columnKey As Variant, c As Long
+    Dim isNewTask As Boolean, taskBasis As Variant
     If ws Is Nothing Or IsWebUtilitySheet(ws) Then Exit Sub
     Set hiddenColumns = CreateObject("Scripting.Dictionary")
     For c = ws.Range(COL_WEB_ENABLED & "1").Column To ws.Range(COL_WEB_RESULT & "1").Column
@@ -420,7 +423,8 @@ Public Sub PrepareWebTaskSheet(ByVal ws As Worksheet)
     For r = DATA_START_ROW To lastRow
         If HasTaskContent(ws, r) Then
             taskId = GetWebTaskId(ws, r)
-            If Len(taskId) = 0 Then
+            isNewTask = (Len(taskId) = 0)
+            If isNewTask Then
                 taskId = NewWebTaskId()
                 ws.Cells(r, COL_WEB_TASK_ID).NumberFormat = "@"
                 ws.Cells(r, COL_WEB_TASK_ID).Value2 = taskId
@@ -433,9 +437,17 @@ Public Sub PrepareWebTaskSheet(ByVal ws As Worksheet)
             If GetTaskLevel(ws, r) = 1 Then
                 rootRow = r
                 levelValue = ws.Cells(r, COL_WEB_LEVEL).Value2
-                If Len(CStr(levelValue)) = 0 Then levelValue = config.Range("B6").Value2
+                If Not IsError(levelValue) Then
+                    If Len(CStr(levelValue)) = 0 And isNewTask Then levelValue = config.Range("B6").Value2
+                End If
             End If
-            If rootRow > 0 Then ws.Cells(r, COL_WEB_LEVEL).Value2 = levelValue
+            ' Keep existing invalid values visible until the requested validation action.
+            If rootRow > 0 And isNewTask And WebBasisValueIsValid(levelValue) Then
+                taskBasis = ws.Cells(r, COL_WEB_LEVEL).Value2
+                If Not IsError(taskBasis) Then
+                    If Len(Trim$(CStr(taskBasis))) = 0 Then ws.Cells(r, COL_WEB_LEVEL).Value2 = levelValue
+                End If
+            End If
             If Len(CStr(ws.Cells(r, COL_WEB_ENABLED).Value2)) = 0 Then ws.Cells(r, COL_WEB_ENABLED).Value2 = config.Range("B7").Value2
             For Each field In Array("REQ_UID", "ACT_GUBUN", "STS", "PGM_MD", "ACT_UID")
                 If Len(CStr(ws.Cells(r, WebTaskOptionColumn(CStr(field))).Value2)) = 0 Then
@@ -549,6 +561,7 @@ Public Sub ApplyWebTaskValidation(ByVal ws As Worksheet)
         .IgnoreBlank = True
         .InputTitle = "그룹 등록 기준"
         .InputMessage = "선택한 값은 같은 레벨1 그룹 전체에 적용됩니다."
+        .ShowError = False
     End With
     With ws.Range(COL_WORK_MINUTES & DATA_START_ROW & ":" & COL_WORK_MINUTES & lastRow).Validation
         .Delete
@@ -567,6 +580,7 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
     Dim units As Object, unitKey As String, columnNum As Long, structureIssue As String, state As Object
     Dim basisChange As Boolean, unitChange As Boolean, wasProtected As Boolean
     Dim mergePlans As Object, mergePlan As Object, mergeKey As Variant, errorNumber As Long, errorText As String
+    Dim deferBasisValidation As Boolean
     If Not IsWebTaskSheet(ws) Then Exit Sub
     structureIssue = WebTaskStructureIssue(ws)
     If Len(structureIssue) > 0 Then
@@ -578,6 +592,24 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
     If WebRowDeletionKeepsSettings(ws, target) Then
         RememberWebGroupBases ws
         Exit Sub
+    End If
+    If WebRowInsertionKeepsSettings(ws, target) Then
+        RememberWebGroupBases ws
+        Exit Sub
+    End If
+    lastRow = GetLastDataRow(ws)
+    Set changed = Intersect(target, ws.Range(COL_WEB_REQUESTER & DATA_START_ROW & ":" & COL_WEB_REQUESTER & Application.Max(DATA_START_ROW, lastRow)))
+    If Not changed Is Nothing Then
+        For Each cell In changed.Cells
+            rootRow = WebRegistrationRootRow(ws, cell.Row)
+            If rootRow > 0 Then
+                Set state = WebTaskState(GetWebTaskId(ws, rootRow))
+                If Len(CStr(state("RequestNo"))) > 0 Or WebStateUnresolved(state) Then
+                    Application.Undo
+                    Err.Raise vbObjectError + 2605, , "등록된 요청자는 웹 상세 화면에서 변경할 수 없어 엑셀에서도 잠깁니다."
+                End If
+            End If
+        Next cell
     End If
     Set changed = Intersect(target, ws.Range(COL_WEB_LEVEL & DATA_START_ROW & ":" & COL_WEB_LEVEL & ws.Rows.Count))
     Set groups = CreateObject("Scripting.Dictionary")
@@ -593,15 +625,11 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
                         Application.Undo
                         Err.Raise vbObjectError + 2605, , "등록 이력 또는 미확인 전송이 있는 레벨1 그룹의 등록 기준은 변경할 수 없습니다."
                     End If
-                    If IsError(cell.Value2) Then Application.Undo: Err.Raise vbObjectError + 2605, , "등록 기준은 1, 2, 3 중에서 선택하세요."
-                    If CStr(cell.Value2) <> "1" And CStr(cell.Value2) <> "2" And CStr(cell.Value2) <> "3" Then
-                        Application.Undo
-                        Err.Raise vbObjectError + 2605, , "등록 기준은 1, 2, 3 중에서 선택하세요."
-                    End If
-                    If groups.Exists(CStr(rootRow)) Then
+                    If Not WebBasisValueIsValid(cell.Value2) Then
+                        deferBasisValidation = True
+                    ElseIf groups.Exists(CStr(rootRow)) Then
                         If groups(CStr(rootRow)) <> CStr(cell.Value2) Then
-                            Application.Undo
-                            Err.Raise vbObjectError + 2605, , "한 레벨1 그룹에는 같은 등록 기준을 적용해야 합니다."
+                            deferBasisValidation = True
                         End If
                     Else
                         groups.Add CStr(rootRow), CStr(cell.Value2)
@@ -610,23 +638,28 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
             Next cell
         End If
     End If
+    If deferBasisValidation Then
+        RememberWebGroupBases ws
+        Exit Sub
+    End If
     Set changed = Intersect(target, Union(ws.Range(COL_WEB_ENABLED & DATA_START_ROW & ":" & COL_WEB_ENABLED & Application.Max(DATA_START_ROW, lastRow)), _
                                         ws.Range(COL_WEB_REQUESTER & DATA_START_ROW & ":" & COL_WEB_PROGRAM_ID & Application.Max(DATA_START_ROW, lastRow))))
     If Not changed Is Nothing Then
         For Each cell In changed.Cells
             rootRow = WebRegistrationRootRow(ws, cell.Row)
             If rootRow = 0 Then
+                r = WebGroupRootRow(ws, cell.Row)
+                If r > 0 Then
+                    If Not WebBasisValueIsValid(ws.Cells(r, COL_WEB_LEVEL).Value2) Then
+                        RememberWebGroupBases ws
+                        Exit Sub
+                    End If
+                End If
                 If Len(CStr(cell.Value2)) > 0 Then
                     Application.Undo
                     Err.Raise vbObjectError + 2605, , "이 상위 행은 현재 등록 기준의 등록 대상이 아닙니다. 실제 등록 단위에서 설정하세요."
                 End If
             Else
-                Set state = WebTaskState(GetWebTaskId(ws, rootRow))
-                If cell.Column = ws.Range(COL_WEB_REQUESTER & "1").Column And _
-                   (Len(CStr(state("RequestNo"))) > 0 Or WebStateUnresolved(state)) Then
-                    Application.Undo
-                    Err.Raise vbObjectError + 2605, , "등록된 요청자는 웹 상세 화면에서 변경할 수 없어 엑셀에서도 잠깁니다."
-                End If
                 unitKey = CStr(rootRow) & ":" & CStr(cell.Column)
                 If units.Exists(unitKey) Then
                     If CStr(units(unitKey)) <> CStr(cell.Value2) Then
@@ -678,6 +711,7 @@ End Sub
 
 Public Sub SynchronizeWebUnits(ByVal ws As Worksheet)
     Dim r As Long, root As Long, lastRow As Long, c As Variant, child As Long
+    If Len(WebTaskBasisIssues(ws)) > 0 Then Exit Sub
     lastRow = GetLastDataRow(ws)
     For r = DATA_START_ROW To lastRow
         If HasTaskContent(ws, r) Then
@@ -1049,6 +1083,7 @@ Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = Tru
         Set ws = ActiveSheet
     End If
     If Not IsWebTaskSheet(ws) Then Err.Raise vbObjectError + 2606, , "메인 업무 시트에서 실행하세요."
+    AssertWebTaskBases ws
     structureIssue = WebTaskStructureIssue(ws)
     PrepareWebTaskSheet ws
     eventsEnabled = Application.EnableEvents
@@ -1275,6 +1310,7 @@ Public Sub UploadWebTasks(Optional ByVal showCompletionMessage As Boolean = True
     If mPreviewItems Is Nothing Or mPreviewSource Is Nothing Then Err.Raise vbObjectError + 2607, , "메인 시트에서 미리보기를 다시 만드세요."
     If PreviewDecisionSnapshot(mPreviewItems) <> mPreviewDecisionSnapshot Then _
         Err.Raise vbObjectError + 2607, , "미리보기의 실행 정보가 바뀌었습니다. 미리보기를 갱신하세요."
+    AssertWebTaskBases mPreviewSource
     structureIssue = WebTaskStructureIssue(mPreviewSource)
     If Len(structureIssue) > 0 Then Err.Raise vbObjectError + 2607, , structureIssue
     Application.EnableEvents = False
