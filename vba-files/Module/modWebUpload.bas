@@ -1,5 +1,6 @@
 Attribute VB_Name = "modWebUpload"
 Option Explicit
+' 2026-10-27 김좌현 수정 : 웹 관련 입력·업무 구조 변경에만 검사하고 일반 문구 입력의 전체 순회 생략
 ' 2026-10-27 김좌현 수정 : 등록 기준 입력 오류는 편집을 막지 않고 미리보기·모두 새로고침에서 행별 안내
 ' 2026-10-27 김좌현 수정 : 기존 웹 연결과 설정이 유지되는 빈 행 삽입을 등록 기준 직접 편집과 구분
 ' 2026-10-26 김좌현 수정 : 웹 연결 구조와 보호값을 보존하는 행 삭제의 등록 기준 변경 오탐 방지
@@ -581,8 +582,37 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
     Dim basisChange As Boolean, unitChange As Boolean, wasProtected As Boolean
     Dim mergePlans As Object, mergePlan As Object, mergeKey As Variant, errorNumber As Long, errorText As String
     Dim deferBasisValidation As Boolean
+    Dim structureChanged As Boolean, watched As Range, cacheChanges As Range, changedUnit As Range
+    Dim area As Range, wholeRowChange As Boolean
+    If ws Is Nothing Or target Is Nothing Then Exit Sub
     If Not IsWebTaskSheet(ws) Then Exit Sub
-    structureIssue = WebTaskStructureIssue(ws)
+    ' Ordinary task text edits only update the lightweight row-presence cache.
+    If target.Areas.Count = 1 And target.Rows.Count = 1 And target.Row >= DATA_START_ROW And _
+       target.Column >= ws.Columns(COL_REQUEST).Column And _
+       target.Column + target.Columns.Count - 1 <= ws.Columns(COL_MODIFICATION).Column Then
+        UpdateWebRowCacheForChange ws, target
+        Exit Sub
+    End If
+    structureChanged = WebTaskContentStructureChanged(ws, target)
+    For Each area In target.Areas
+        If area.Columns.Count = ws.Columns.Count Then wholeRowChange = True: Exit For
+    Next area
+    Set watched = Union(ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
+                        ws.Range(COL_WEB_ENABLED & DATA_START_ROW & ":" & COL_WEB_PROGRAM_ID & ws.Rows.Count), _
+                        ws.Range(COL_WEB_TASK_ID & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count))
+    If Intersect(target, watched) Is Nothing Then
+        UpdateWebRowCacheForChange ws, target
+        Exit Sub
+    End If
+    If Not structureChanged Then
+        If Intersect(target, ws.Range(COL_WEB_ENABLED & DATA_START_ROW & ":" & COL_WEB_TASK_ID & ws.Rows.Count)) Is Nothing Then
+            UpdateWebRowCacheForChange ws, target
+            Exit Sub
+        End If
+    End If
+    ' A row deletion must still protect registered history immediately.
+    ' Ordinary cell edits are checked by refresh and web preview instead.
+    If structureChanged And wholeRowChange Then structureIssue = WebTaskStructureIssue(ws)
     If Len(structureIssue) > 0 Then
         If Not Intersect(target, Union(ws.Columns(COL_LEVEL), ws.Columns(COL_REQUEST), ws.Columns(COL_MODIFICATION), ws.Columns(COL_WEB_LEVEL))) Is Nothing Then
             Application.Undo
@@ -597,11 +627,13 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
         RememberWebGroupBases ws
         Exit Sub
     End If
-    lastRow = GetLastDataRow(ws)
+    lastRow = WebCachedLastDataRow(ws)
+    If lastRow = 0 Or wholeRowChange Or target.Row + target.Rows.Count - 1 > lastRow Then _
+        lastRow = GetLastDataRow(ws)
     Set changed = Intersect(target, ws.Range(COL_WEB_REQUESTER & DATA_START_ROW & ":" & COL_WEB_REQUESTER & Application.Max(DATA_START_ROW, lastRow)))
     If Not changed Is Nothing Then
         For Each cell In changed.Cells
-            rootRow = WebRegistrationRootRow(ws, cell.Row)
+            rootRow = WebRegistrationRootRow(ws, cell.Row, lastRow)
             If rootRow > 0 Then
                 Set state = WebTaskState(GetWebTaskId(ws, rootRow))
                 If Len(CStr(state("RequestNo"))) > 0 Or WebStateUnresolved(state) Then
@@ -614,7 +646,6 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
     Set changed = Intersect(target, ws.Range(COL_WEB_LEVEL & DATA_START_ROW & ":" & COL_WEB_LEVEL & ws.Rows.Count))
     Set groups = CreateObject("Scripting.Dictionary")
     Set units = CreateObject("Scripting.Dictionary")
-    lastRow = GetLastDataRow(ws)
     If Not changed Is Nothing Then
         Set changed = Intersect(changed, ws.Rows(DATA_START_ROW & ":" & Application.Max(DATA_START_ROW, lastRow)))
         If Not changed Is Nothing Then
@@ -646,12 +677,12 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
                                         ws.Range(COL_WEB_REQUESTER & DATA_START_ROW & ":" & COL_WEB_PROGRAM_ID & Application.Max(DATA_START_ROW, lastRow))))
     If Not changed Is Nothing Then
         For Each cell In changed.Cells
-            rootRow = WebRegistrationRootRow(ws, cell.Row)
+            rootRow = WebRegistrationRootRow(ws, cell.Row, lastRow)
             If rootRow = 0 Then
                 r = WebGroupRootRow(ws, cell.Row)
                 If r > 0 Then
                     If Not WebBasisValueIsValid(ws.Cells(r, COL_WEB_LEVEL).Value2) Then
-                        RememberWebGroupBases ws
+                        UpdateWebRowCacheForChange ws, target
                         Exit Sub
                     End If
                 End If
@@ -673,7 +704,7 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
         Next cell
     End If
     If groups.Count = 0 And units.Count = 0 Then
-        RememberWebGroupBases ws
+        UpdateWebRowCacheForChange ws, target
         Exit Sub
     End If
     Set mergePlans = CreateObject("Scripting.Dictionary")
@@ -685,7 +716,7 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
         Next mergeKey
     Next key
     On Error GoTo 0
-    wasProtected = ws.ProtectContents
+    wasProtected = ws.ProtectContents And (groups.Count > 0 Or Not ws.ProtectionMode)
     If wasProtected Then UnprotectTaskSheet ws
     For Each key In groups.Keys
         rootRow = CLng(key)
@@ -697,10 +728,22 @@ Public Sub HandleWebTaskChange(ByVal ws As Worksheet, ByVal target As Range)
     For Each key In units.Keys
         rootRow = CLng(Split(CStr(key), ":")(0))
         columnNum = CLng(Split(CStr(key), ":")(1))
-        ws.Range(ws.Cells(rootRow, columnNum), ws.Cells(GetTaskSubtreeEndRow(ws, rootRow, lastRow), columnNum)).Value2 = units(key)
+        Set changedUnit = ws.Range(ws.Cells(rootRow, columnNum), ws.Cells(GetTaskSubtreeEndRow(ws, rootRow, lastRow), columnNum))
+        changedUnit.Value2 = units(key)
+        If cacheChanges Is Nothing Then
+            Set cacheChanges = changedUnit
+        Else
+            Set cacheChanges = Union(cacheChanges, changedUnit)
+        End If
     Next key
     If groups.Count > 0 Then SynchronizeWebUnits ws
-    RememberWebGroupBases ws
+    If groups.Count > 0 Or structureChanged Then
+        RememberWebGroupBases ws
+    ElseIf cacheChanges Is Nothing Then
+        UpdateWebRowCacheForChange ws, target
+    Else
+        UpdateWebRowCacheForChange ws, Union(target, cacheChanges)
+    End If
     If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
     Exit Sub
 InvalidMerge:
@@ -1071,7 +1114,7 @@ End Function
 Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = True)
     Dim ws As Worksheet, preview As Worksheet, item As Object, r As Long, i As Long, headers As Variant
     Dim requestNo As String, outcome As String, issue As String, periodFields As Variant, errorNumber As Long, errorText As String
-    Dim session As Object, structureIssue As String, eventsEnabled As Boolean, wasProtected As Boolean
+    Dim session As Object, structureIssue As String, typeIssues As String, eventsEnabled As Boolean, wasProtected As Boolean
     Dim selectedItems As Collection
     eventsEnabled = Application.EnableEvents
     On Error GoTo Failed
@@ -1083,6 +1126,9 @@ Public Sub PreviewWebTasks(Optional ByVal showCompletionMessage As Boolean = Tru
         Set ws = ActiveSheet
     End If
     If Not IsWebTaskSheet(ws) Then Err.Raise vbObjectError + 2606, , "메인 업무 시트에서 실행하세요."
+    ' 2026-10-27 김좌현 수정 : 입력 중 유예한 타입 검사를 값 동기화 전에 수행
+    typeIssues = TaskTypeIssues(ws)
+    If Len(typeIssues) > 0 Then Err.Raise vbObjectError + 2606, , "타입 오류:" & vbCrLf & typeIssues
     AssertWebTaskBases ws
     structureIssue = WebTaskStructureIssue(ws)
     PrepareWebTaskSheet ws
@@ -1298,7 +1344,7 @@ Public Sub UploadWebTasks(Optional ByVal showCompletionMessage As Boolean = True
     Dim currentItems As Collection, item As Object, session As Object, form As Object, result As Object
     Dim requestNo As String, previous As String, count As Long, skipped As Long, outcome As String
     Dim eventsEnabled As Boolean, currentStarted As Boolean, errorText As String, errorNumber As Long
-    Dim operation As String, state As Object, confirmedValues As Object, structureIssue As String, sourceProtected As Boolean, eligible As Long
+    Dim operation As String, state As Object, confirmedValues As Object, structureIssue As String, typeIssues As String, sourceProtected As Boolean, eligible As Long
     Dim newIssue As String, executionAccepted As Boolean, selectionsReset As Boolean
     If mWebBusy Then Exit Sub
     If ActiveSheet.Name <> WEB_PREVIEW_SHEET_NAME Then
@@ -1311,6 +1357,8 @@ Public Sub UploadWebTasks(Optional ByVal showCompletionMessage As Boolean = True
     If PreviewDecisionSnapshot(mPreviewItems) <> mPreviewDecisionSnapshot Then _
         Err.Raise vbObjectError + 2607, , "미리보기의 실행 정보가 바뀌었습니다. 미리보기를 갱신하세요."
     AssertWebTaskBases mPreviewSource
+    typeIssues = TaskTypeIssues(mPreviewSource)
+    If Len(typeIssues) > 0 Then Err.Raise vbObjectError + 2607, , "타입 오류:" & vbCrLf & typeIssues
     structureIssue = WebTaskStructureIssue(mPreviewSource)
     If Len(structureIssue) > 0 Then Err.Raise vbObjectError + 2607, , structureIssue
     Application.EnableEvents = False

@@ -8,6 +8,7 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-10-27 김좌현 수정 : 입력한 셀의 업무 구조 변경 여부와 타입 선택목록만 검사해 전체 재계산 축소
 ' 2026-10-26 김좌현 수정 : 타입 오류로 실행 취소한 행 변경의 웹 설정 비교 상태 복원
 ' 2026-10-22 김좌현 수정 : 간트 셀 직접 수정 시 간트 전용 새로고침 캐시 무효화
 ' 2026-10-22 김좌현 수정 : 웹등록 초기화, 보호 비밀번호와 그룹별 등록 기준 이벤트 연결
@@ -24,6 +25,7 @@ Private Sub Workbook_Open()
     Next ws
     InitializeTaskHierarchyOutlines
     StartTaskOutlineViewMonitor
+    RegisterGanttShortcuts
 End Sub
 
 Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
@@ -55,7 +57,6 @@ End Sub
 
 Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     Dim duplicateModule As String
-    Dim invalidTypeCell As String
 
     On Error GoTo EH
 
@@ -110,21 +111,6 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     If Not Intersect(Target, Sh.Range(COL_GANTT_START & ":XFD")) Is Nothing Then InvalidateGanttRenderCache Sh
     Application.enableEvents = False
     HandleWebTaskChange Sh, Target
-    invalidTypeCell = GetInvalidTaskType(Sh, Target)
-    If Len(invalidTypeCell) > 0 Then
-        Application.Undo
-        If CStr(Sh.Cells(HEADER_ROW, COL_REQUEST).Value2) = "요청 내용" Then RememberWebGroupBases Sh
-        RefreshTaskTypeValidation
-        MsgBox "config 시트에 등록한 타입만 입력할 수 있습니다: " & invalidTypeCell, _
-               vbExclamation, "타입 입력 오류"
-        GoTo SafeExit
-    End If
-    If CStr(Sh.Range(COL_TYPE & HEADER_ROW).Value2) = "타입" And _
-       Not Intersect(Target, Sh.Range(COL_TYPE & DATA_START_ROW & ":" & _
-                                     COL_TYPE & Sh.Rows.Count)) Is Nothing Then
-        RefreshTaskTypeValidation
-    End If
-    HandleTaskHierarchyChange Sh, Target
 
 SafeExit:
     Application.enableEvents = True
@@ -180,20 +166,37 @@ End Sub
 
 Private Sub Workbook_Activate()
     StartTaskOutlineViewMonitor
+    RegisterGanttShortcuts
 End Sub
 
 Private Sub Workbook_Deactivate()
     StopTaskOutlineViewMonitor
+    UnregisterGanttShortcuts
 End Sub
 
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
     StopTaskOutlineViewMonitor
+    UnregisterGanttShortcuts
 End Sub
 
 Private Sub Workbook_AfterSave(ByVal Success As Boolean)
     StartTaskOutlineViewMonitor
+    If Success Then RegisterGanttShortcuts
+End Sub
+
+' 단축키는 Excel 전체에 적용되므로 이 통합문서가 활성화된 동안만 연결한다.
+Private Sub RegisterGanttShortcuts()
+    Dim workbookPrefix As String
+    workbookPrefix = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!"
+    Application.OnKey "^+r", workbookPrefix & "칸트차트_모두새로고침"
+    Application.OnKey "^+h", workbookPrefix & "칸트차트_완료숨김"
+End Sub
+
+Private Sub UnregisterGanttShortcuts()
+    Application.OnKey "^+r"
+    Application.OnKey "^+h"
 End Sub
 
 Private Sub Workbook_SheetSelectionChange(ByVal Sh As Object, ByVal Target As Range)
-    StartTaskOutlineViewMonitor
+    If TypeOf Sh Is Worksheet Then MaintainTaskOutlineOnSelection Sh
 End Sub

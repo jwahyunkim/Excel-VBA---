@@ -1,9 +1,9 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
-' 2026-10-27 김좌현 수정 : 모두 새로고침 후 등록 기준 문제 행을 완료 메시지에 안내
+' 2026-10-27 김좌현 수정 : 새로고침 후 등록 기준 문제 행을 완료 메시지에 안내
 ' 2026-10-23 김좌현 수정 : 간트 전용 새로고침도 이전 웹등록 헤더를 안전하게 WEB UPDATE로 갱신
 ' 2026-10-22 김좌현 수정 : 새로고침 서명 계산의 열 번호를 한 번만 조회해 반복 Range 접근 제거
-' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로를 제거하고 모두 새로고침으로 버튼 연결 통일
+' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로를 제거하고 새로고침으로 버튼 연결 통일
 ' 2026-10-22 김좌현 수정 : 모두/간트 새로고침 분리, 중복 렌더 제거와 변경된 레이아웃만 재구성
 ' 2026-10-22 김좌현 수정 : 웹 유틸리티 시트 제외 및 웹등록 설정/버튼 초기화
 ' 2026-10-20 김좌현 수정 : 새로고침 실패 시 완료 숨김과 수동/계층 보기 및 보호 복원
@@ -107,6 +107,7 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     Dim holidayDict As Object, workdayDict As Object
     Dim taskSheetWasProtected As Boolean, previousScreenUpdating As Boolean, previousEnableEvents As Boolean
     Dim errorText As String, detailColumnHidden As Variant, webBasisIssues As String
+    Dim typeIssues As String, structureIssue As String, validationIssues As String
     Dim detailScrollColumn As Long, detailScrollRow As Long
     Dim rowView As Object, originalRowView As Object
     Dim originalLastRow As Long, taskViewCaptured As Boolean
@@ -122,13 +123,25 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
         Err.Raise vbObjectError + 2120, , "config 시트에서는 실행할 수 없습니다."
     If includeWebSetup Then
         EnsureTaskSheetLayout ws
+        EnsureConfigSheet
+        If HasTaskWebHeader(ws) Then RefreshWebHistoryState ws
+        ' 2026-10-27 김좌현 수정 : 새로고침이 기존 입력값을 바꾸기 전에 오류를 확인
+        If HasTaskWebHeader(ws) Then
+            typeIssues = TaskTypeIssues(ws)
+            webBasisIssues = WebTaskBasisIssues(ws)
+            structureIssue = WebTaskStructureIssue(ws)
+            If Len(typeIssues) > 0 Then validationIssues = "타입 오류:" & vbCrLf & typeIssues
+            If Len(webBasisIssues) > 0 Then validationIssues = validationIssues & vbCrLf & "등록 기준 오류:" & vbCrLf & webBasisIssues
+            If Len(structureIssue) > 0 Then validationIssues = validationIssues & vbCrLf & "웹등록 구조 오류: " & structureIssue
+            If Len(validationIssues) > 0 Then Err.Raise vbObjectError + 2121, "RefreshGanttCore", validationIssues
+        End If
     Else
         On Error Resume Next
         Set config = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
         On Error GoTo EH
         If config Is Nothing Or Not HasTaskWebHeader(ws) Or _
            CStr(ws.Cells(HEADER_ROW, COL_REQUEST).Value2) <> "요청 내용" Then _
-            Err.Raise vbObjectError + 2120, , "모두 새로고침을 먼저 실행해 주세요."
+            Err.Raise vbObjectError + 2120, , "새로고침을 먼저 실행해 주세요."
     End If
     detailColumnHidden = CaptureTaskDetailColumnHidden(ws)
     If Not ActiveWindow Is Nothing Then
@@ -145,9 +158,8 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     If Not includeWebSetup And CStr(ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2) <> "WEB UPDATE" Then _
         ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2 = "WEB UPDATE"
     ' 2026-10-22 김좌현 수정 : 삭제한 웹등록 이력의 연결과 잠금을 두 새로고침에 반영
-    RefreshWebHistoryState ws
+    If Not includeWebSetup Then RefreshWebHistoryState ws
     If includeWebSetup Then
-        EnsureConfigSheet
         SetupDataHeaders ws
         UpgradeGanttRefreshButtons ws
         webBasisIssues = WebTaskBasisIssues(ws)
@@ -213,11 +225,11 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     If showCompletionMessage Then
         If includeWebSetup Then
             If Len(webBasisIssues) > 0 Then
-                MsgBox "모두 새로고침 완료" & vbCrLf & vbCrLf & _
+                MsgBox "새로고침 완료" & vbCrLf & vbCrLf & _
                        "웹 등록 기준에 문제가 있습니다. 해당 행을 수정한 뒤 웹등록 미리보기를 실행하세요." & _
-                       vbCrLf & webBasisIssues, vbExclamation, "모두 새로고침"
+                       vbCrLf & webBasisIssues, vbExclamation, "새로고침"
             Else
-                MsgBox "모두 새로고침 완료", vbInformation
+                MsgBox "새로고침 완료", vbInformation
             End If
         Else
             MsgBox "간트 새로고침 완료", vbInformation
@@ -304,7 +316,7 @@ EH:
 End Sub
 
 Public Sub 칸트차트_새로고침버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttRefresh", "모두 새로고침", "칸트차트_모두새로고침", 1
+    CreateGanttActionButton ActiveSheet, "btnGanttRefresh", "새로고침", "칸트차트_모두새로고침", 1
     EnsureMainActionButtons ActiveSheet
 End Sub
 

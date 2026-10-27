@@ -61,6 +61,11 @@ Option Explicit
 Private Sub Check(ByVal ok As Boolean, ByVal label As String)
     If Not ok Then Err.Raise vbObjectError + 910, "TaskLayoutRegression", label
 End Sub
+Private Function HasValidationRule(ByVal cell As Range) As Boolean
+    On Error GoTo NoRule
+    HasValidationRule = (cell.Validation.Type <> xlValidateInputOnly)
+NoRule:
+End Function
 Public Function RunTaskLayoutRegression() As String
     Dim ws As Worksheet, r As Long, c As Long, lastRow As Long
     Dim requests As Variant, modifications As Variant, details As Variant, manual As Variant
@@ -196,8 +201,8 @@ Public Function RunTaskLayoutRegression() As String
     CheckCopiedTaskRows
     CheckTaskWorkMinutes
     ApplyTaskInputValidation ws
-    Check InStr(ws.Range("R5").Validation.Formula1, "LEN(R5)") > 0, "request length validation"
-    Check InStr(ws.Range("S5").Validation.Formula1, "LEN(S5)") > 0, "modification length validation"
+    Check Not HasValidationRule(ws.Range("R5")), "request still has live length validation"
+    Check Not HasValidationRule(ws.Range("S5")), "modification still has live length validation"
     ws.Activate
     UnprotectTaskSheet ws
     If ws.FilterMode Then ws.ShowAllData
@@ -238,11 +243,13 @@ Public Function RunTaskLayoutRegression() As String
     UpgradeGanttRefreshButtons ws
     Check ws.ProtectContents, "button migration lost protection"
     ' Excel may quantize shape coordinates by a fraction of one point after protection.
-    Check Abs(ws.Shapes("btnGanttRefresh").Top - ws.Shapes("btnGanttRefreshOnly").Top) < 0.5, "refresh buttons are not aligned"
-    Check ws.Shapes("btnGanttRefreshOnly").Left > ws.Shapes("btnGanttRefresh").Left, "Gantt-only refresh missing after full refresh"
     Check ws.Shapes("btnGanttRefresh").OnAction = "칸트차트_모두새로고침", "legacy button action"
-    Check ws.Shapes("btnGanttRefresh").TextFrame2.TextRange.Text = "모두 새로고침", "legacy button caption"
-    Check ws.Shapes("btnGanttRefreshOnly").OnAction = "칸트차트_간트새로고침", "Gantt-only refresh action"
+    Check ws.Shapes("btnGanttRefresh").TextFrame2.TextRange.Text = "새로고침", "refresh button caption"
+    Set legacyButton = Nothing
+    On Error Resume Next
+    Set legacyButton = ws.Shapes("btnGanttRefreshOnly")
+    On Error GoTo Failed
+    Check legacyButton Is Nothing, "obsolete Gantt-only refresh button survived"
     Check Right$(ws.Shapes("btnWebPreview").OnAction, Len("!PreviewWebTasks")) = "!PreviewWebTasks", "web preview button missing"
     Set legacyButton = Nothing
     On Error Resume Next
@@ -276,10 +283,9 @@ Public Function RunTaskLayoutRegression() As String
     ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     버튼_생성_선택
     Set setupWs = ActiveSheet
-    Check setupWs.CheckBoxes.Count >= 7, "split refresh button options missing"
-    Check setupWs.DropDowns.Count >= 7, "button order options missing"
-    Check setupWs.CheckBoxes("chkButtonOption2").Caption = "모두 새로고침", "full refresh option caption"
-    Check setupWs.CheckBoxes("chkButtonOption7").Caption = "간트 새로고침", "Gantt refresh option caption"
+    Check setupWs.CheckBoxes.Count >= 6, "refresh button options missing"
+    Check setupWs.DropDowns.Count >= 6, "button order options missing"
+    Check setupWs.CheckBoxes("chkButtonOption2").Caption = "새로고침", "refresh option caption"
     선택한_버튼_생성 False
     Check ActiveSheet.Name = ws.Name, "button creation did not return to task sheet"
     buttonCount = 0
@@ -299,7 +305,7 @@ Public Function RunTaskLayoutRegression() As String
     Check ws.Shapes("btnPeriodTextReport").TextFrame2.TextRange.Text = "TXT 출력", "TXT button caption"
     Check ws.Range("S5").Locked = False, "modification input locked"
     Check ws.ProtectContents, "task sheet protection disabled"
-    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, cross-workbook row insertion without name/link imports, receiving dropdown lists and updates, live hierarchical work-minute sums without double counting, zero/blank and leaf preservation, split refresh, display period preserved without only filters, legacy button migration, seven button options, TXT button, protection"
+    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, cross-workbook row insertion without name/link imports, receiving dropdown lists and updates, deferred hierarchical work-minute sums without double counting, zero/blank and leaf preservation, single refresh, display period preserved without only filters, legacy button migration, six button options, TXT button, protection"
     Exit Function
 Failed:
     RunTaskLayoutRegression = "FAIL: " & Err.Description
@@ -390,65 +396,36 @@ Private Sub CheckTaskWorkMinutes()
     Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 90, "setup double counted nested work minutes"
     Check CDbl(fixture.Cells(11, COL_WORK_MINUTES).Value2) = 20, "independent root work minutes missing"
     Check Not Application.EnableEvents And Not fixture.ProtectContents, "setup changed work-minute event/protection state"
+    fixture.Columns(COL_WEB_ENABLED & ":" & COL_WEB_RESULT).Hidden = True
+    fixture.Columns(COL_WORK_MINUTES).Hidden = True
+    RefreshWebModeView fixture
     ApplyCalculatedColumnsProtection fixture, 13
     fixture.Rows(8).Hidden = True
     Application.EnableEvents = True
 
-    ' These edits use the production workbook event; no refresh is called.
+    ' Input keeps existing totals until refresh; the shared aggregator still handles nested rows.
     fixture.Cells(7, COL_WORK_MINUTES).Value2 = 60
-    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 105, "live child edit did not update parent minutes"
-    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 120, "live child edit did not update all ancestors"
-    Check fixture.ProtectContents And Application.EnableEvents, "live minutes edit lost protection or events"
-    values(1, 1) = 30: values(2, 1) = 45
-    fixture.Range(COL_WORK_MINUTES & "7:" & COL_WORK_MINUTES & "8").Value2 = values
-    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 90, "multirow minute paste did not sum children"
-    Union(fixture.Cells(7, COL_WORK_MINUTES), fixture.Cells(10, COL_WORK_MINUTES)).Value2 = 10
-    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 55, "multiarea minutes omitted hidden child"
-    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 65, "multiarea minute edit left stale ancestor"
-    Check fixture.Rows(8).Hidden, "minute aggregation expanded hidden child"
-    Check CDbl(fixture.Cells(11, COL_WORK_MINUTES).Value2) = 20, "minute edit crossed next root boundary"
-    Union(fixture.Cells(7, COL_WORK_MINUTES), fixture.Cells(10, COL_WORK_MINUTES)).ClearContents
-    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 45, "cleared child minutes were retained"
-    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 45, "cleared multiarea minutes left stale root"
-    fixture.Cells(8, COL_WORK_MINUTES).ClearContents
-    Check IsEmpty(fixture.Cells(6, COL_WORK_MINUTES).Value2), "all-blank child minutes became zero"
-    Check IsEmpty(fixture.Cells(5, COL_WORK_MINUTES).Value2), "all-blank branch minutes retained root total"
+    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 75, "minute edit recalculated during input"
+    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 90, "root minutes recalculated during input"
+    Check fixture.ProtectContents And Application.EnableEvents, "deferred edit lost protection or events"
+    UpdateTaskWorkMinutes fixture, 13
+    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 105, "refresh omitted nested minutes"
+    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 120, "refresh omitted root minutes"
     fixture.Cells(7, COL_WORK_MINUTES).Value2 = 0
-    Check Not IsEmpty(fixture.Cells(6, COL_WORK_MINUTES).Value2), "explicit zero minutes became blank"
-    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 0 And _
-          CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 0, "zero minutes did not reach ancestors"
-    fixture.Cells(7, COL_WORK_MINUTES).ClearContents
-    Check IsEmpty(fixture.Cells(5, COL_WORK_MINUTES).Value2), "clearing last zero left a zero subtotal"
-    fixture.Range(COL_WORK_MINUTES & "7:" & COL_WORK_MINUTES & "8").Value2 = values
-    fixture.Cells(10, COL_WORK_MINUTES).Value2 = 15
-    fixture.Cells(6, COL_WORK_MINUTES).Value2 = 999
-    fixture.Cells(5, COL_WORK_MINUTES).Value2 = 999
-    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 75, "manual parent minutes replaced child total"
-    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 90, "manual root minutes replaced child total"
-    fixture.Cells(10, COL_LEVEL).Value2 = 3
-    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 90, "level change did not move minutes into branch"
-    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 90, "level change double counted child minutes"
-    fixture.Cells(10, COL_LEVEL).Value2 = 2
-    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 75, "level change left old branch minutes"
-    fixture.Cells(8, COL_REQUEST).ClearContents
-    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 45, "blank task row contributed stale minutes"
-    fixture.Cells(8, COL_MODIFICATION).Value2 = "modification-only child"
-    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 90, "modification-only task minutes were ignored"
-    Check CStr(fixture.Cells(13, COL_WORK_MINUTES).Formula) = "=12+13", "aggregation replaced manual leaf formula"
-    Check CDbl(fixture.Cells(13, COL_WORK_MINUTES).Value2) = 25, "aggregation changed standalone leaf minutes"
-    Check CDbl(fixture.Cells(7, COL_PROGRESS).Value2) = 0.5, "minute edit changed leaf progress"
-    Check CStr(fixture.Cells(7, COL_WEEKLY_REPORT).Value2) = "minutes must preserve report", "minute edit changed report state"
-    Check fixture.ProtectContents And Application.EnableEvents, "multiple minute edits lost protection or events"
-    For Each invalidValue In Array("invalid work minutes", -1, 1.5, True, 2147483648#, CVErr(xlErrDiv0))
-        fixture.Cells(7, COL_WORK_MINUTES).Value2 = invalidValue
-        Check CStr(fixture.Cells(7, COL_WORK_MINUTES).Value2) = CStr(invalidValue), "aggregation replaced invalid leaf minutes"
-        Check CStr(fixture.Cells(6, COL_WORK_MINUTES).Value2) = CStr(CVErr(xlErrValue)), "invalid child produced a valid-looking subtotal"
-        Check CStr(fixture.Cells(5, COL_WORK_MINUTES).Value2) = CStr(CVErr(xlErrValue)), "invalid child did not propagate to root"
-        fixture.Cells(7, COL_WORK_MINUTES).Value2 = 30
-        Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 90, "correcting invalid child did not restore ancestor totals"
-    Next invalidValue
-    Check fixture.ProtectContents And Application.EnableEvents, "invalid minute recovery lost protection/events"
-
+    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 120, "zero edit recalculated during input"
+    UpdateTaskWorkMinutes fixture, 13
+    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 45, "zero child minutes were lost"
+    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 60, "zero root minutes were lost"
+    fixture.Cells(7, COL_WORK_MINUTES).Value2 = 30
+    UpdateTaskWorkMinutes fixture, 13
+    Check CDbl(fixture.Cells(6, COL_WORK_MINUTES).Value2) = 75, "corrected nested minutes were not restored"
+    Check CDbl(fixture.Cells(5, COL_WORK_MINUTES).Value2) = 90, "corrected root minutes were not restored"
+    Check fixture.Rows(8).Hidden, "minute aggregation expanded hidden child"
+    Check CDbl(fixture.Cells(11, COL_WORK_MINUTES).Value2) = 20, "minute aggregation crossed next root"
+    Check CStr(fixture.Cells(13, COL_WORK_MINUTES).Formula) = "=12+13", "aggregation replaced leaf formula"
+    Check CDbl(fixture.Cells(7, COL_PROGRESS).Value2) = 0.5, "aggregation changed progress"
+    Check CStr(fixture.Cells(7, COL_WEEKLY_REPORT).Value2) = "minutes must preserve report", "aggregation changed report"
+    Check fixture.ProtectContents And Application.EnableEvents, "minute aggregation lost protection or events"
     Application.EnableEvents = False
     fixture.Cells(7, COL_WORK_MINUTES).Value2 = 25
     UpdateTaskWorkMinutes fixture, 13

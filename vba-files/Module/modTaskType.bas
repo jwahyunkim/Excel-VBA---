@@ -1,5 +1,6 @@
 Attribute VB_Name = "modTaskType"
 Option Explicit
+' 2026-10-27 김좌현 수정 : 일반 타입 입력은 기존 선택목록을 유지하고 붙여넣은 셀만 목록 복구
 ' 2026-10-23 김좌현 수정 : 행 복사 시 타입 목록 이름과 원본 파일 연결이 따라오지 않도록 참조
 ' 2026-10-20 김좌현 수정 : config 타입 목록 이동 및 기존 값 보존 이전
 
@@ -80,21 +81,52 @@ Public Sub EnsureTaskTypeConfig()
     ws.Columns("AB").Hidden = True
 End Sub
 
-Public Sub ApplyTaskTypeValidation(ByVal ws As Worksheet)
-    With ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_TYPE & ws.Rows.Count).Validation
+Public Sub ApplyTaskTypeValidation(ByVal ws As Worksheet, Optional ByVal target As Range)
+    Dim cells As Range, wasProtected As Boolean, errorNumber As Long, errorText As String
+    Set cells = ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_TYPE & ws.Rows.Count)
+    If Not target Is Nothing Then
+        Set cells = Intersect(cells, target)
+        If cells Is Nothing Then Exit Sub
+        If cells.CountLarge = 1 Then
+            If HasTaskTypeValidation(cells) Then Exit Sub
+        End If
+    End If
+    wasProtected = ws.ProtectContents And Not ws.ProtectionMode
+    On Error GoTo Failed
+    If wasProtected Then UnprotectTaskSheet ws
+    With cells.Validation
         .Delete
         ' Resolve the existing list in the receiving workbook when rows are copied.
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
              Formula1:="=INDIRECT(""" & TASK_TYPE_LIST_NAME & """)"
         .IgnoreBlank = False
         .InCellDropdown = True
-        .ShowError = True
+        ' 2026-10-27 김좌현 수정 : 웹 모드에서는 타입 오류를 새로고침에서 행별로 안내
+        .ShowError = False
         .InputTitle = "타입 선택"
         .InputMessage = "config 시트의 허용 타입 목록에서 선택하세요."
         .ErrorTitle = "타입 입력 오류"
         .ErrorMessage = "config 시트에 등록한 타입만 입력할 수 있습니다."
     End With
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    On Error GoTo 0
+    Err.Raise errorNumber, "ApplyTaskTypeValidation", errorText
 End Sub
+
+Private Function HasTaskTypeValidation(ByVal cell As Range) As Boolean
+    On Error GoTo MissingValidation
+    With cell.Validation
+        HasTaskTypeValidation = (.Type = xlValidateList And _
+            .Formula1 = "=INDIRECT(""" & TASK_TYPE_LIST_NAME & """)" And _
+            Not .ShowError And .InCellDropdown And Not .IgnoreBlank)
+    End With
+MissingValidation:
+End Function
 
 Public Sub RefreshTaskTypeValidation()
     Dim ws As Worksheet, wasProtected As Boolean
@@ -146,4 +178,43 @@ Public Function GetInvalidTaskType(ByVal ws As Worksheet, ByVal Target As Range)
             End If
         End If
     Next item
+End Function
+
+' 2026-10-27 김좌현 수정 : 웹 모드에서 입력한 타입을 새로고침 전에 일괄 검사
+Public Function TaskTypeIssues(ByVal ws As Worksheet) As String
+    Const MAX_DISPLAY_ERROR_COUNT As Long = 20
+    Dim allowed As Object, configured As Range, values As Variant, raw As Variant
+    Dim lastRow As Long, r As Long, issueCount As Long, details As String, bad As Boolean
+    If ws Is Nothing Then Exit Function
+    If CStr(ws.Range(COL_TYPE & HEADER_ROW).Value2) <> "타입" Then Exit Function
+    lastRow = GetLastDataRow(ws)
+    If lastRow < DATA_START_ROW Then Exit Function
+    Set allowed = CreateObject("Scripting.Dictionary")
+    allowed.CompareMode = vbBinaryCompare
+    For Each configured In ThisWorkbook.Worksheets(CONFIG_SHEET_NAME).Range(TASK_TYPE_CONFIG_RANGE)
+        If Not IsError(configured.Value2) Then allowed(CStr(configured.Value2)) = True
+    Next configured
+    values = ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_TYPE & lastRow).Value2
+    For r = DATA_START_ROW To lastRow
+        If lastRow = DATA_START_ROW Then
+            raw = values
+        Else
+            raw = values(r - DATA_START_ROW + 1, 1)
+        End If
+        bad = False
+        If IsError(raw) Then
+            bad = True
+        ElseIf Len(CStr(raw)) > 0 Then
+            If Not allowed.Exists(CStr(raw)) Then bad = True
+        End If
+        If bad Then
+            issueCount = issueCount + 1
+            If issueCount <= MAX_DISPLAY_ERROR_COUNT Then
+                If Len(details) > 0 Then details = details & vbCrLf
+                details = details & "- " & CStr(r) & "행 (" & COL_TYPE & CStr(r) & "): config에 없는 타입"
+            End If
+        End If
+    Next r
+    If issueCount > MAX_DISPLAY_ERROR_COUNT Then details = details & vbCrLf & "- 그 외 " & CStr(issueCount - MAX_DISPLAY_ERROR_COUNT) & "건"
+    TaskTypeIssues = details
 End Function
