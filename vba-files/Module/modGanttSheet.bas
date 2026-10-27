@@ -1725,54 +1725,10 @@ End Sub
 
 Public Sub ApplyTaskTextLengthValidation(ByVal ws As Worksheet)
     Dim lastValidationRow As Long
-    Dim rngTask As Range
-    Dim contentColumn As Variant
-    Dim contentLabel As String
-    Dim validationFormula As String
-
     If ws Is Nothing Then Exit Sub
-
-    lastValidationRow = GetLastDataRow(ws) + TASK_VALIDATION_EXTRA_ROWS
-    If lastValidationRow < TASK_VALIDATION_MIN_LAST_ROW Then
-        lastValidationRow = TASK_VALIDATION_MIN_LAST_ROW
-    End If
-    If lastValidationRow > ws.Rows.Count Then lastValidationRow = ws.Rows.Count
-
-    For Each contentColumn In Array(COL_REQUEST, COL_MODIFICATION)
-        Set rngTask = ws.Range(CStr(contentColumn) & DATA_START_ROW & ":" & _
-                               CStr(contentColumn) & lastValidationRow)
-
-        On Error Resume Next
-        rngTask.Validation.Delete
-        On Error GoTo 0
-
-        validationFormula = "=LEN(" & CStr(contentColumn) & DATA_START_ROW & ")<=" & _
-            "IF($" & COL_LEVEL & DATA_START_ROW & "=2," & _
-            "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
-            TASK_MAX_LENGTH_LEVEL2_VALUE_CELL & """)," & _
-            "IF($" & COL_LEVEL & DATA_START_ROW & "=3," & _
-            "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
-            TASK_MAX_LENGTH_LEVEL3_VALUE_CELL & """)," & _
-            "INDIRECT(""'" & CONFIG_SHEET_NAME & "'!$" & _
-            TASK_MAX_LENGTH_LEVEL1_VALUE_CELL & """)))"
-
-        If CStr(contentColumn) = COL_REQUEST Then
-            contentLabel = "요청 내용"
-        Else
-            contentLabel = "수정 내용"
-        End If
-        rngTask.Validation.Add Type:=xlValidateCustom, _
-                               AlertStyle:=xlValidAlertStop, _
-                               Formula1:=validationFormula
-        rngTask.Validation.IgnoreBlank = True
-        rngTask.Validation.InputTitle = contentLabel & " 입력"
-        rngTask.Validation.InputMessage = _
-            contentLabel & "은 config 시트의 Level별 최대 글자 수 이내로 입력하세요."
-        rngTask.Validation.ErrorTitle = contentLabel & " 글자 수 초과"
-        rngTask.Validation.ErrorMessage = _
-            "입력한 " & contentLabel & "이 현재 Level에 설정된 최대 글자 수를 초과했습니다. " & _
-            "config 시트의 입력 제한 설정을 확인하세요."
-    Next contentColumn
+    ' Length is checked by GetTaskErrorReason during refresh. Remove the old volatile input rules.
+    lastValidationRow = Application.Max(TASK_VALIDATION_MIN_LAST_ROW, GetLastDataRow(ws) + TASK_VALIDATION_EXTRA_ROWS)
+    ws.Range(COL_REQUEST & DATA_START_ROW & ":" & COL_MODIFICATION & lastValidationRow).Validation.Delete
 End Sub
 
 Private Sub ApplyManualStatusValidation(ws As Worksheet, ByVal lastSheetRow As Long)

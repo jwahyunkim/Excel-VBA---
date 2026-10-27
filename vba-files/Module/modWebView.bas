@@ -80,7 +80,7 @@ Failed:
 End Sub
 
 Public Sub EnsureMainActionButtons(ByVal ws As Worksheet)
-    Dim button As Shape, refreshButton As Shape, fastButton As Shape, temp As Shape
+    Dim button As Shape, refreshButton As Shape, temp As Shape
     Dim managed As Variant, ordered() As Shape, name As Variant
     Dim count As Long, i As Long, j As Long
     Dim leftValue As Double, topValue As Double, caption As String, action As String
@@ -92,12 +92,8 @@ Public Sub EnsureMainActionButtons(ByVal ws As Worksheet)
         Set refreshButton = ws.Shapes.AddShape(msoShapeRoundedRectangle, ws.Range("B2").Left, ws.Range("B2").Top, 72, 22)
         refreshButton.Name = "btnGanttRefresh"
     End If
-    Set fastButton = FindActionShape(ws, "btnGanttRefreshOnly")
-    If fastButton Is Nothing Then
-        Set fastButton = ws.Shapes.AddShape(msoShapeRoundedRectangle, refreshButton.Left + 0.5, refreshButton.Top, 72, 22)
-        fastButton.Name = "btnGanttRefreshOnly"
-    End If
-    managed = Array("btnDataImport", "btnGanttRefresh", "btnGanttRefreshOnly", "btnGanttReset", _
+    ' 2026-10-27 김좌현 수정 : 입력 검사는 새로고침 하나로 모음
+    managed = Array("btnDataImport", "btnGanttRefresh", "btnGanttReset", _
                     "btnGanttObjectInsert", "btnPeriodTextReport", COMPLETED_TASK_BUTTON_NAME)
     ReDim ordered(1 To UBound(managed) + 1)
     For Each name In managed
@@ -125,9 +121,7 @@ Public Sub EnsureMainActionButtons(ByVal ws As Worksheet)
         caption = button.TextFrame2.TextRange.Text
         action = vbNullString
         If button.Name = "btnGanttRefresh" Then
-            caption = "모두 새로고침": action = "칸트차트_모두새로고침"
-        ElseIf button.Name = "btnGanttRefreshOnly" Then
-            caption = "간트 새로고침": action = "칸트차트_간트새로고침"
+            caption = "새로고침": action = "칸트차트_모두새로고침"
         End If
         ApplyActionStyle button, leftValue, topValue, 72, caption, action, False
         leftValue = leftValue + 80
@@ -167,6 +161,18 @@ Public Function IsWebRegistrationMode(ByVal ws As Worksheet) As Boolean
     ElseIf visibleCount > 0 Then
         IsWebRegistrationMode = previousMode
     End If
+End Function
+
+' 2026-10-27 김좌현 수정 : 셀 입력에서는 이미 판정한 웹 모드를 재사용
+Public Function IsWebRegistrationModeCached(ByVal ws As Worksheet) As Boolean
+    If ws Is Nothing Then Exit Function
+    If Not mWebModeCache Is Nothing Then
+        If mWebModeCache.Exists(ws.CodeName) Then
+            IsWebRegistrationModeCached = CBool(mWebModeCache(ws.CodeName))
+            Exit Function
+        End If
+    End If
+    IsWebRegistrationModeCached = IsWebRegistrationMode(ws)
 End Function
 
 Public Sub RefreshWebModeView(ByVal ws As Worksheet, Optional ByVal force As Boolean = False)

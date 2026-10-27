@@ -15,7 +15,7 @@ Private Const FILE_DIALOG_PICKER As Long = 3
 Private Const PPT_OLE_PREFIX As String = "oleGanttPpt_"
 Private Const TEMP_PPT_OLE_PREFIX As String = "tmpGanttPptOle_"
 Private Const BUTTON_SETUP_SHEET_NAME As String = "_버튼생성"
-Private Const BUTTON_OPTION_COUNT As Long = 7
+Private Const BUTTON_OPTION_COUNT As Long = 6
 
 Public Sub 데이터_가져오기()
     Dim targetBook As Workbook
@@ -240,12 +240,11 @@ Public Sub 버튼_생성_선택()
 
     optionCaptions = Array( _
         "데이터 가져오기", _
-        "모두 새로고침", _
+        "새로고침", _
         "초기화", _
         "개체삽입", _
         "TXT 출력", _
-        "완료 숨김", _
-        "간트 새로고침")
+        "완료 숨김")
 
     setupSheet.Range("A2").Value = "버튼"
     setupSheet.Range("B2").Value = "순서"
@@ -432,7 +431,7 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 1
             CreateVersionButton ws, "btnDataImport", "데이터 가져오기", "데이터_가져오기", buttonOrder, 72
         Case 2
-            CreateVersionButton ws, "btnGanttRefresh", "모두 새로고침", "칸트차트_모두새로고침", buttonOrder, 72
+            CreateVersionButton ws, "btnGanttRefresh", "새로고침", "칸트차트_모두새로고침", buttonOrder, 72
         Case 3
             CreateVersionButton ws, "btnGanttReset", "초기화", "칸트차트_초기화", buttonOrder, 72
         Case 4
@@ -442,8 +441,6 @@ Private Sub CreateSelectedButtonByIndex(ByVal ws As Worksheet, _
         Case 6
             CreateVersionButton ws, COMPLETED_TASK_BUTTON_NAME, CompletedTaskButtonCaption(ws), _
                                 "칸트차트_완료숨김", buttonOrder, 72
-        Case 7
-            CreateVersionButton ws, "btnGanttRefreshOnly", "간트 새로고침", "칸트차트_간트새로고침", buttonOrder, 72
     End Select
 End Sub
 
@@ -611,7 +608,7 @@ Public Function GetNextVersionButtonOrder(ByVal ws As Worksheet) As Long
     Dim buttonCount As Long
 
     buttonNames = Array( _
-        "btnDataImport", "btnGanttCreate", "btnGanttRefresh", "btnGanttRefreshOnly", _
+        "btnDataImport", "btnGanttCreate", "btnGanttRefresh", _
         "btnGanttReset", "btnGanttObjectInsert", COMPLETED_TASK_BUTTON_NAME, _
         "btnPeriodTextReport")
 
@@ -640,7 +637,7 @@ End Function
 ' Converts managed legacy buttons and workbook-qualified custom assignments.
 ' Called on open and refresh; keeps the existing refresh button when both exist.
 Public Sub UpgradeGanttRefreshButtons(ByVal ws As Worksheet)
-    Dim createButton As Shape, refreshButton As Shape, button As Shape
+    Dim createButton As Shape, refreshButton As Shape, fastButton As Shape, button As Shape
     Dim macroName As String, wasProtected As Boolean, needsUpdate As Boolean
     Dim errNumber As Long, errDescription As String
 
@@ -651,15 +648,16 @@ Public Sub UpgradeGanttRefreshButtons(ByVal ws As Worksheet)
     On Error Resume Next
     Set createButton = ws.Shapes("btnGanttCreate")
     Set refreshButton = ws.Shapes("btnGanttRefresh")
+    Set fastButton = ws.Shapes("btnGanttRefreshOnly")
     On Error GoTo Failed
-    needsUpdate = Not createButton Is Nothing
-    If Not VersionShapeExistsOnSheet(ws, "btnGanttRefreshOnly") Then needsUpdate = True
+    ' 2026-10-27 김좌현 수정 : 두 새로고침 버튼을 한 버튼으로 이관
+    needsUpdate = refreshButton Is Nothing Or Not createButton Is Nothing Or Not fastButton Is Nothing
     For Each button In ws.Shapes
         macroName = GetGanttButtonMacroName(button)
         If macroName = "칸트차트_생성" Or macroName = "칸트차트_새로고침" Then needsUpdate = True
         If button.Name = "btnGanttRefresh" Then
             If macroName <> "칸트차트_모두새로고침" Or _
-               button.TextFrame2.TextRange.Text <> "모두 새로고침" Then needsUpdate = True
+               button.TextFrame2.TextRange.Text <> "새로고침" Then needsUpdate = True
         End If
     Next button
     ' Leave already migrated workbooks unchanged when opened.
@@ -673,11 +671,12 @@ Public Sub UpgradeGanttRefreshButtons(ByVal ws As Worksheet)
             createButton.Delete
         End If
     End If
+    If Not fastButton Is Nothing Then fastButton.Delete
     For Each button In ws.Shapes
         macroName = GetGanttButtonMacroName(button)
         If button.Name = "btnGanttRefresh" Or macroName = "칸트차트_생성" Or macroName = "칸트차트_새로고침" Then
             button.OnAction = "칸트차트_모두새로고침"
-            button.TextFrame2.TextRange.Text = "모두 새로고침"
+            button.TextFrame2.TextRange.Text = "새로고침"
         End If
     Next button
     EnsureMainActionButtons ws

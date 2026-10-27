@@ -682,6 +682,9 @@ Private Sub WebUploadRegressionBasisValidation(ByVal original As Worksheet, ByRe
     ws.Cells(9, COL_LEVEL).Value2 = 1: ws.Cells(9, COL_WEB_LEVEL).Value2 = 1
     PrepareWebTaskSheet ws
     UnprotectTaskSheet ws
+    ws.Cells(5, COL_TYPE).Value2 = "UNREGISTERED-TYPE"
+    WebUploadRegressionContains TaskTypeIssues(ws), "D5", "deferred type error identifies its row before refresh", checked
+    ws.Cells(5, COL_TYPE).ClearContents
     ws.Cells(8, COL_WEB_PROGRAM_ID).Value2 = "KEEP-DIFFERENT-BASIS-UNIT"
     RememberWebGroupBases ws
     ws.Activate
@@ -730,10 +733,13 @@ Private Sub WebUploadRegressionBasisValidation(ByVal original As Worksheet, ByRe
     WebUploadRegressionContains caught, "I8", "preview reports the mixed-basis row", checked
     WebUploadRegressionContains caught, "I9", "preview reports the blank-basis row", checked
     WebUploadRegressionEqual CStr(WebUploadMockOpenCount + WebUploadMockLoadCount + WebUploadMockReadCount + WebUploadMockPostCount + WebUploadMockUpdateCount), "0", "invalid preview does not call web transport", checked
+    On Error Resume Next
     RefreshGanttSheet False
-    WebUploadRegressionContains WebTaskBasisIssues(ws), "I7", "completed all refresh retains the invalid row for its completion notice", checked
-    WebUploadRegressionContains WebTaskBasisIssues(ws), "I8", "completed all refresh retains the mixed-basis row for its completion notice", checked
-    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_LEVEL).Value2), "4", "ordinary chart refresh leaves the offending basis value visible", checked
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionContains caught, "I7", "refresh reports the invalid row before changing values", checked
+    WebUploadRegressionContains caught, "I8", "refresh reports the mixed-basis row before changing values", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_LEVEL).Value2), "4", "failed refresh leaves the offending basis value visible", checked
     UnprotectTaskSheet ws
 
     For Each raw In Array(1E+100, CVErr(xlErrNA))
@@ -818,8 +824,12 @@ Private Sub WebUploadRegressionMixedBasisPreservation(ByVal ws As Worksheet, ByR
         RememberWebGroupBases ws
         PrepareWebTaskSheet ws
         WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "5:" & COL_WEB_PROGRAM_ID & "8")), settingsBefore, "mixed old basis " & CStr(oldBasis) & " preserves every H:O value through preparation", checked
+        On Error Resume Next
         RefreshGanttSheet False
-        WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "5:" & COL_WEB_PROGRAM_ID & "8")), settingsBefore, "mixed old basis " & CStr(oldBasis) & " preserves independent settings through all refresh", checked
+        caught = Err.Description: Err.Clear
+        On Error GoTo 0
+        WebUploadRegressionContains caught, "등록 기준 오류", "mixed old basis " & CStr(oldBasis) & " blocks refresh before synchronization", checked
+        WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "5:" & COL_WEB_PROGRAM_ID & "8")), settingsBefore, "mixed old basis " & CStr(oldBasis) & " preserves independent settings after blocked refresh", checked
         UnprotectTaskSheet ws
         On Error Resume Next
         Set plan = WebBasisMergePlan(ws, 5, 1)

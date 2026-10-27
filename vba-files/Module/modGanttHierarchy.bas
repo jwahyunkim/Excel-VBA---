@@ -11,9 +11,9 @@ Option Explicit
 
 ' 2026-10-19 김좌현 수정 : 쉼표로 선택한 여러 열을 접힌 화면에 고정하고 접기 범위 안의 선택 열도 표시
 
-Private mTaskOutlineViewEvents As CGanttOutlineView
 Private mTaskOutlineViewStarting As Boolean
 Private mTaskViewResetSheets As Object
+Private mTaskVisibleColumns As Object
 Private Const TASK_FOLD_RANGE_NAME As String = "_GanttDetailFoldRange"
 Private Const TASK_FOLD_SELECTION_NAME As String = "_GanttFoldSelection"
 
@@ -491,11 +491,9 @@ Public Sub StartTaskOutlineViewMonitor()
         StopTaskOutlineViewMonitor
         GoTo Finished
     End If
-    If mTaskOutlineViewEvents Is Nothing Then
-        Set mTaskOutlineViewEvents = New CGanttOutlineView
-        mTaskOutlineViewEvents.StartListening
-    End If
     EnsureTaskRequestFreeze ws
+    RefreshWebModeView ws
+    RecordTaskVisibleColumns ws
 Finished:
     mTaskOutlineViewStarting = False
     Exit Sub
@@ -505,10 +503,32 @@ Failed:
 End Sub
 
 Public Sub StopTaskOutlineViewMonitor()
-    If Not mTaskOutlineViewEvents Is Nothing Then
-        mTaskOutlineViewEvents.StopListening
-        Set mTaskOutlineViewEvents = Nothing
-    End If
+    Set mTaskVisibleColumns = Nothing
+End Sub
+
+Private Function TaskVisibleColumnSignature(ByVal ws As Worksheet) As String
+    Dim visibleHeaders As Range
+    On Error Resume Next
+    Set visibleHeaders = ws.Range(COL_NO & HEADER_ROW & ":" & COL_STATUS & HEADER_ROW).SpecialCells(xlCellTypeVisible)
+    On Error GoTo 0
+    If visibleHeaders Is Nothing Then Exit Function
+    TaskVisibleColumnSignature = visibleHeaders.Address(False, False)
+End Function
+
+Private Sub RecordTaskVisibleColumns(ByVal ws As Worksheet)
+    If mTaskVisibleColumns Is Nothing Then Set mTaskVisibleColumns = CreateObject("Scripting.Dictionary")
+    mTaskVisibleColumns(ws.CodeName) = TaskVisibleColumnSignature(ws)
+End Sub
+
+Public Sub MaintainTaskOutlineOnSelection(ByVal ws As Worksheet)
+    Dim signature As String
+    If mTaskOutlineViewStarting Or Not Application.EnableEvents Then Exit Sub
+    If ws Is Nothing Or mTaskVisibleColumns Is Nothing Then Exit Sub
+    If Not mTaskVisibleColumns.Exists(ws.CodeName) Then Exit Sub
+    signature = TaskVisibleColumnSignature(ws)
+    If signature = CStr(mTaskVisibleColumns(ws.CodeName)) Then Exit Sub
+    TaskOutlineViewTick
+    RecordTaskVisibleColumns ws
 End Sub
 
 Public Sub TaskOutlineViewTick()

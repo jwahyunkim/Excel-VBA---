@@ -422,6 +422,25 @@ Public Sub UpdateWebRowCacheForChange(ByVal ws As Worksheet, ByVal target As Ran
     If ws Is Nothing Or target Is Nothing Then Exit Sub
     If mWebRowCache Is Nothing Then Exit Sub
     If Not mWebRowCache.Exists(ws.CodeName) Then Exit Sub
+    If target.Areas.Count = 1 And target.Rows.Count = 1 And target.Row >= DATA_START_ROW And _
+       target.Column >= ws.Columns(COL_REQUEST).Column And _
+       target.Column + target.Columns.Count - 1 <= ws.Columns(COL_MODIFICATION).Column Then
+        cached = mWebRowCache(ws.CodeName)
+        oldLast = CLng(cached(0))
+        If target.Row <= oldLast Then
+            rowIndex = target.Row - DATA_START_ROW + 1
+            If Len(CStr(cached(rowIndex))) >= 2 Then
+                If WebCachedContentPresent(ws.Cells(target.Row, COL_REQUEST).Value2, _
+                                           ws.Cells(target.Row, COL_MODIFICATION).Value2) Then
+                    cached(rowIndex) = "1|" & Mid$(CStr(cached(rowIndex)), 3)
+                Else
+                    cached(rowIndex) = "0|" & Mid$(CStr(cached(rowIndex)), 3)
+                End If
+                mWebRowCache(ws.CodeName) = cached
+                Exit Sub
+            End If
+        End If
+    End If
     Set changed = Intersect(target, Union(ws.Range(COL_WEB_LEVEL & DATA_START_ROW & ":" & COL_WEB_PROGRAM_ID & ws.Rows.Count), _
                                          ws.Range(COL_WEB_TASK_ID & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count)))
     Set tailChanges = Intersect(target, Union(ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_MINOR_CATEGORY & ws.Rows.Count), _
