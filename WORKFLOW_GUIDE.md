@@ -19,7 +19,7 @@ Windows PowerShell에서 추가 옵션을 전달할 때는 구분자를 작은�
 | 새 버전 개발 시작 | `npm run version:start` |
 | 자식 작업 브랜치 생성 | `npm run branch:create '--' feature/브랜치명` |
 | 현재 자식 브랜치 병합 | `npm run branch:merge` |
-| 개발 완료(커밋·푸시) | 메뉴 `[2]` 또는 `npm run version:complete` |
+| 개발 완료(main 병합) | 메뉴 `[2]` 또는 `npm run version:complete` |
 | 정식 릴리즈 | `npm run version:release` |
 | 현재 버전 개발 취소 | `npm run version:cancel` |
 | 상태 확인 | `npm run workflow:status` |
@@ -168,9 +168,9 @@ npm run branch:merge '--' -SourceBranch feature/report-export -TargetBranch deve
 npm run version:complete
 ```
 
-메뉴 `[2]`도 같은 작업을 수행합니다. 남은 변경을 자동 스테이징·커밋하고 개발 브랜치를 푸시한 뒤 종료합니다. 릴리즈 브랜치 생성과 배포는 실행하지 않습니다.
+메뉴 `[2]`도 같은 작업을 수행합니다. 남은 변경을 자동 스테이징·커밋하고 개발 브랜치를 푸시한 뒤, PR 일반 merge로 `main`에 병합합니다. 병합을 확인하면 개발 브랜치를 삭제하고 `main`에서 종료합니다. 릴리즈 브랜치 생성과 배포·태그는 실행하지 않습니다.
 
-정식 릴리즈를 진행할 때 별도로 실행합니다.
+배포본과 버전 태그까지 필요한 경우에는 `[2]` 대신 별도의 정식 릴리즈 명령을 실행합니다.
 
 ```powershell
 npm run version:release

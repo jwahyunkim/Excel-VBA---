@@ -288,21 +288,26 @@ Add-WorkflowCase 'automatic commit still rejects unresolved merge conflicts' {
     finally { Pop-Location }
 }
 
-Add-WorkflowCase 'development completion commits and pushes without releasing' {
+Add-WorkflowCase 'development completion merges into main without releasing' {
     $fixturePath = New-WorkflowMergeRepository
     Push-Location $fixturePath
     try {
+        . $workflowGhMockDefinitions
+        $originalRelease = Invoke-FixtureGit rev-parse release/v1.0.1
         [IO.File]::WriteAllText((Join-Path $fixturePath 'final-change.txt'), 'ready for release later')
         Complete-VersionDevelopment
-        $head = Invoke-FixtureGit rev-parse HEAD
-        Assert-WorkflowEqual (Invoke-FixtureGit rev-parse origin/develop/v1.0.1) $head `
-            'Development completion must push the new commit'
-        Assert-WorkflowEqual (Get-CurrentBranch) 'develop/v1.0.1' `
-            'Development completion must stay on the development branch'
+        Assert-WorkflowEqual (Get-CurrentBranch) 'main' `
+            'Development completion must end on main'
         Assert-WorkflowTrue (Test-Path -LiteralPath 'final-change.txt') `
-            'Development completion must include the changed file'
-        Assert-WorkflowEqual (Invoke-FixtureGit rev-parse release/v1.0.1) (Invoke-FixtureGit rev-parse main) `
-            'Development completion must not merge into the release branch'
+            'Development completion must merge the changed file into main'
+        Assert-WorkflowEqual (Invoke-FixtureGit rev-parse origin/main) (Invoke-FixtureGit rev-parse main) `
+            'Development completion must push the main merge'
+        Assert-WorkflowTrue (-not (Test-LocalBranch develop/v1.0.1)) `
+            'Development completion must remove the merged local development branch'
+        Assert-WorkflowTrue (-not (Test-RemoteTrackingBranch develop/v1.0.1)) `
+            'Development completion must remove the merged remote development branch'
+        Assert-WorkflowEqual (Invoke-FixtureGit rev-parse release/v1.0.1) $originalRelease `
+            'Development completion must not change the release branch'
         Assert-WorkflowTrue ($null -eq (Get-PendingVersionRelease)) `
             'Development completion must not start release progress'
     }

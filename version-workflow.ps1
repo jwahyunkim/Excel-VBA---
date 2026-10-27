@@ -1351,7 +1351,12 @@ function Complete-VersionDevelopment {
 
     Write-Host "개발 변경 사항을 프로젝트 워크플로가 자동 스테이징·커밋합니다." -ForegroundColor Yellow
     Commit-DevelopmentChanges -DevelopmentBranch $developmentBranch
-    Write-Host "$developmentBranch 개발 변경을 커밋하고 원격에 반영했습니다." -ForegroundColor Green
+    $headCommit = Get-GitOutput -Arguments @("rev-parse", "HEAD")
+    $releaseVersion = Get-VersionFromDevelopmentBranch -Name $developmentBranch
+    $null = Merge-WorkBranch -HeadBranch $developmentBranch -BaseBranchName $DefaultVersionBaseBranch `
+        -Title "develop: v$releaseVersion" -Body "v$releaseVersion 개발 변경을 main에 반영합니다." `
+        -ExpectedHeadCommit $headCommit
+    Write-Host "v$releaseVersion 개발 변경을 main에 병합하고 main으로 이동했습니다." -ForegroundColor Green
 }
 
 function Complete-VersionDevelopmentAndRelease {
@@ -1669,7 +1674,7 @@ function Resume-VersionRelease {
 function Select-MenuAction {
     Write-Host ""
     Write-Host "[1] 새 버전 개발 시작"
-    Write-Host "[2] 개발 완료 + 자동 커밋·푸시"
+    Write-Host "[2] 개발 완료 + main 병합"
     Write-Host "[3] 현재 버전 개발 취소"
     Write-Host "[4] 설정 및 Git 상태 확인"
     Write-Host "[5] 현재/지정 브랜치에서 자식 브랜치 생성"
