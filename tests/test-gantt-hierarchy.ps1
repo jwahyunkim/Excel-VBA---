@@ -215,6 +215,38 @@ Public Function ReopenGanttHierarchyRegression() As String
 Failed:
     ReopenGanttHierarchyRegression = "FAIL: " & Err.Description
 End Function
+Public Function RunOutlineSelectionRegression() As String
+    Dim ws As Worksheet
+    On Error GoTo Failed
+    Set ws = ThisWorkbook.Worksheets("WebOutlineRegression")
+    ws.Activate
+    Application.EnableEvents = True
+    ws.Outline.ShowLevels ColumnLevels:=3
+    StartTaskOutlineViewMonitor
+    Check ActiveWindow.SplitColumn = 0, "stage 3 should not freeze a detail column"
+    ws.Outline.ShowLevels ColumnLevels:=1
+    ws.Cells(7, COL_REQUEST).Select
+    Check ActiveWindow.SplitColumn = 0, "selection event changed panes before returning"
+    RunOutlineSelectionRegression = "PASS: stage 1 selection returned without changing panes inside the event"
+Finished:
+    Exit Function
+Failed:
+    RunOutlineSelectionRegression = "FAIL: " & Err.Source & " / " & Err.Description
+    Application.EnableEvents = False
+    Resume Finished
+End Function
+Public Function VerifyScheduledOutlineSelection() As String
+    On Error GoTo Failed
+    Check ActiveWindow.FreezePanes And ActiveWindow.SplitRow = HEADER_ROW, "scheduled stage 1 lost frozen headers"
+    Check ActiveWindow.SplitColumn > 0, "scheduled stage 1 did not freeze the selected column"
+    Check ActiveWindow.Panes(1).ScrollColumn = 7, "scheduled stage 1 lost G viewport"
+    VerifyScheduledOutlineSelection = "PASS: deferred stage 1 pane refresh completed"
+    Application.EnableEvents = False
+    Exit Function
+Failed:
+    VerifyScheduledOutlineSelection = "FAIL: " & Err.Source & " / " & Err.Description
+    Application.EnableEvents = False
+End Function
 '@)
     $taskPhase = 'save and reload imported VBA'
     $taskBook.Save()
@@ -235,6 +267,15 @@ End Function
     $harness = $taskComponents.Item('GanttHierarchyRegression')
     $taskPhase = 'reopen regression'
     $result = [string]$taskExcel.Run("'$($taskBook.Name)'!ReopenGanttHierarchyRegression")
+    if (-not $result.StartsWith('PASS:')) { throw $result }
+    Write-Output $result
+    $taskPhase = 'stage 1 selection event regression'
+    $result = [string]$taskExcel.Run("'$($taskBook.Name)'!RunOutlineSelectionRegression")
+    if (-not $result.StartsWith('PASS:')) { throw $result }
+    Write-Output $result
+    Start-Sleep -Seconds 3
+    $taskPhase = 'scheduled stage 1 pane regression'
+    $result = [string]$taskExcel.Run("'$($taskBook.Name)'!VerifyScheduledOutlineSelection")
     if (-not $result.StartsWith('PASS:')) { throw $result }
     Write-Output $result
     $taskComponents.Remove($harness)
