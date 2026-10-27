@@ -7,6 +7,33 @@
 ' 2026-10-23 김좌현 수정 : WEB UPDATE 선택과 행별 자동 신규·갱신 및 완료 선택 해제·실행 재검증 회귀 검증
 ' 2026-10-23 김좌현 수정 : 실행 수락 후 결과와 관계없는 원본 전체 선택 초기화 및 검증 거절 시 선택 보존 검증
 ' 2026-10-26 김좌현 수정 : 웹 연결을 보존하는 기본 행 삭제와 등록 구조·직접 편집 보호 회귀 검증
+' 2026-10-27 김좌현 수정 : 빈 행 삽입의 등록 기준 오탐 방지와 기존 웹 설정·이력 보존 회귀 검증
+' 2026-10-27 김좌현 수정 : 등록 기준 입력 경고 유예와 미리보기·모두 새로고침의 문제 행 확인 검증
+' 2026-10-27 김좌현 수정 : 혼합 기준의 개별 웹 설정·이전 기준 캐시와 신규 하위 행의 입력값 보존 검증
+Public Function PrepareWebEditRegression() As String
+    Dim config As Worksheet, ws As Worksheet
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    EnsureWebConfigSheet
+    Set config = ThisWorkbook.Worksheets(WEB_CONFIG_SHEET_NAME)
+    config.Range("B2").Value2 = "http://fixture.invalid/support/"
+    config.Range("B3").Value2 = "fixture-login"
+    StoreWebOptionLists WebUploadRegressionForm(False, False)
+    config.Range("B6").Value2 = 3: config.Range("B7").Value2 = "N"
+    config.Range("B8").Value2 = "요청자 [requester1]": config.Range("B9").Value2 = "개발"
+    config.Range("B10").Value2 = "처리중": config.Range("B11").Value2 = "생산": config.Range("B12").Value2 = "처리자 [worker1]"
+    Set ws = ThisWorkbook.Worksheets.Add
+    ws.Name = "WebUploadFixture"
+    SetupDataHeaders ws
+    WebUploadRegressionResetJournal
+    ws.Activate
+    Set mPreviewSource = ws
+    PrepareWebEditRegression = "PASS: offline web edit fixtures prepared"
+    Exit Function
+Failed:
+    PrepareWebEditRegression = "FAIL preparing web edit fixtures: " & Err.Source & " / " & Err.Description
+End Function
+
 Public Function RunWebUploadRegression() As String
     Dim ws As Worksheet, config As Worksheet, preview As Worksheet, log As Worksheet
     Dim form As Object, item As Object, state As Object, server As Object, session As Object, items As Collection
@@ -64,6 +91,12 @@ Public Function RunWebUploadRegression() As String
 
     stage = "native row deletion preserves existing web connections"
     WebUploadRegressionRowDeletion ws, checked
+
+    stage = "blank row insertion preserves existing web connections"
+    WebUploadRegressionRowInsertion ws, checked
+
+    stage = "registration basis validation is deferred to explicit actions"
+    WebUploadRegressionBasisValidation ws, checked
 
     stage = "registration unit propagation and merge conflicts"
     ws.Cells(7, COL_WEB_LEVEL).Value2 = 2
@@ -625,6 +658,341 @@ CleanUp:
     On Error GoTo 0
     If errorNumber <> 0 Then Err.Raise errorNumber, "WebUploadRegressionRowDeletion", errorText
 End Sub
+
+Private Sub WebUploadRegressionBasisValidation(ByVal original As Worksheet, ByRef checked As Long, _
+                                               Optional ByVal nativeEvents As Boolean = False)
+    Dim ws As Worksheet, raw As Variant, pasteValues(1 To 2, 1 To 1) As Variant, corrected(1 To 5, 1 To 1) As Variant
+    Dim r As Long, caught As String, issues As String, plan As Object, eventsBefore As Boolean, previousAlerts As Boolean
+    Dim errorNumber As Long, errorText As String, newRow As Long
+    eventsBefore = Application.EnableEvents
+    previousAlerts = Application.DisplayAlerts
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    WebUploadRegressionResetJournal
+    Set ws = ThisWorkbook.Worksheets.Add
+    ws.Name = IIf(nativeEvents, "WebNativeBasisFixture", "WebBasisValidationFixture")
+    SetupDataHeaders ws
+    For r = 5 To 9
+        WebUploadRegressionSeedRow ws, r
+        ws.Cells(r, COL_REQUEST).Value2 = "기준 검증 " & CStr(r)
+        ws.Cells(r, COL_LEVEL).Value2 = 2
+    Next r
+    ws.Cells(5, COL_LEVEL).Value2 = 1: ws.Cells(5, COL_WEB_LEVEL).Value2 = 2
+    ws.Cells(7, COL_LEVEL).Value2 = 3
+    ws.Cells(9, COL_LEVEL).Value2 = 1: ws.Cells(9, COL_WEB_LEVEL).Value2 = 1
+    PrepareWebTaskSheet ws
+    UnprotectTaskSheet ws
+    ws.Cells(8, COL_WEB_PROGRAM_ID).Value2 = "KEEP-DIFFERENT-BASIS-UNIT"
+    RememberWebGroupBases ws
+    ws.Activate
+    WebUploadRegressionMixedBasisPreservation ws, checked
+    WebUploadRegressionAssert Not ws.Cells(6, COL_WEB_LEVEL).Validation.ShowError, "basis dropdown does not show an immediate validation popup", checked
+    For Each raw In Array(1, 2, 3, "2")
+        WebUploadRegressionAssert WebBasisValueIsValid(raw), "valid basis is accepted: " & CStr(raw), checked
+    Next raw
+    For Each raw In Array(0, 4, 1.5, True, False, "invalid", "", 1E+100, CVErr(xlErrNA))
+        WebUploadRegressionAssert Not WebBasisValueIsValid(raw), "invalid basis is safely rejected by the shared validator", checked
+    Next raw
+
+    WebUploadRegressionEditBasis ws, 7, 4, nativeEvents, checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_LEVEL).Value2), "4", "invalid basis edit is retained without Undo or immediate error", checked
+    newRow = GetLastDataRow(ws) + 1
+    Application.EnableEvents = nativeEvents
+    ws.Rows(CStr(newRow) & ":" & CStr(newRow + 1)).Insert Shift:=xlDown
+    WebUploadRegressionAssert WebRowInsertionKeepsSettings(ws, ws.Rows(CStr(newRow) & ":" & CStr(newRow + 1))), "deferred invalid edits refresh the row snapshot before the next blank insertion", checked
+    If Not nativeEvents Then HandleWebTaskChange ws, ws.Rows(CStr(newRow) & ":" & CStr(newRow + 1))
+    WebUploadRegressionAssert Application.EnableEvents = nativeEvents, "blank insertion after a deferred edit retains the existing event state", checked
+    Application.EnableEvents = False
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_LEVEL).Value2), "4", "blank insertion after a deferred edit preserves the unresolved basis", checked
+    pasteValues(1, 1) = 4: pasteValues(2, 1) = 1
+    Application.EnableEvents = nativeEvents
+    ws.Range(COL_WEB_LEVEL & "7:" & COL_WEB_LEVEL & "8").Value2 = pasteValues
+    If Not nativeEvents Then HandleWebTaskChange ws, ws.Range(COL_WEB_LEVEL & "7:" & COL_WEB_LEVEL & "8")
+    WebUploadRegressionAssert Application.EnableEvents = nativeEvents, "mixed-basis edit restores the existing event state", checked
+    Application.EnableEvents = False
+    WebUploadRegressionEditBasis ws, 9, vbNullString, nativeEvents, checked
+    PrepareWebTaskSheet ws
+    UnprotectTaskSheet ws
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_LEVEL).Value2), "4", "prepare preserves an existing invalid child basis for action-time diagnosis", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_LEVEL).Value2), "1", "prepare preserves a mixed child basis for action-time diagnosis", checked
+    WebUploadRegressionEqual CStr(ws.Cells(9, COL_WEB_LEVEL).Value2), "", "prepare preserves an existing task's blank basis", checked
+    issues = WebTaskBasisIssues(ws)
+    WebUploadRegressionContains issues, "7행 (I7)", "diagnosis identifies the actual invalid child cell", checked
+    WebUploadRegressionContains issues, "8행 (I8)", "diagnosis identifies the actual mixed child cell", checked
+    WebUploadRegressionContains issues, "9행 (I9)", "diagnosis identifies the existing task's blank cell", checked
+    WebUploadRegressionContains issues, "I5", "mixed basis diagnosis identifies its group root", checked
+    WebUploadMockReset "success", True
+    On Error Resume Next
+    PreviewWebTasks False
+    caught = Err.Description: Err.Clear
+    On Error GoTo Failed
+    WebUploadRegressionContains caught, "I7", "preview reports invalid basis before normalizing existing values", checked
+    WebUploadRegressionContains caught, "I8", "preview reports the mixed-basis row", checked
+    WebUploadRegressionContains caught, "I9", "preview reports the blank-basis row", checked
+    WebUploadRegressionEqual CStr(WebUploadMockOpenCount + WebUploadMockLoadCount + WebUploadMockReadCount + WebUploadMockPostCount + WebUploadMockUpdateCount), "0", "invalid preview does not call web transport", checked
+    RefreshGanttSheet False
+    WebUploadRegressionContains WebTaskBasisIssues(ws), "I7", "completed all refresh retains the invalid row for its completion notice", checked
+    WebUploadRegressionContains WebTaskBasisIssues(ws), "I8", "completed all refresh retains the mixed-basis row for its completion notice", checked
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_LEVEL).Value2), "4", "ordinary chart refresh leaves the offending basis value visible", checked
+    UnprotectTaskSheet ws
+
+    For Each raw In Array(1E+100, CVErr(xlErrNA))
+        WebUploadRegressionEditBasis ws, 5, raw, nativeEvents, checked
+        RememberWebGroupBases ws
+        issues = WebTaskBasisIssues(ws)
+        WebUploadRegressionContains issues, "5행 (I5)", "huge numeric and error basis values remain diagnosable", checked
+        On Error Resume Next
+        Set plan = WebBasisMergePlan(ws, 5, 1)
+        caught = Err.Description: Err.Clear
+        On Error GoTo Failed
+        WebUploadRegressionContains caught, "합쳐", "invalid basis does not overwrite the last valid merge-basis cache", checked
+    Next raw
+
+    For r = 1 To 4: corrected(r, 1) = 2: Next r
+    corrected(5, 1) = 1
+    ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "9").Value2 = corrected
+    HandleWebTaskChange ws, ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "9")
+    WebUploadRegressionEqual WebTaskBasisIssues(ws), "", "valid correction restores a consistent basis", checked
+    AssertWebTaskBases ws
+    ws.Rows(7).Insert Shift:=xlDown
+    HandleWebTaskChange ws, ws.Rows(7)
+    WebUploadRegressionEqual WebTaskBasisIssues(ws), "", "completely blank inserted rows are ignored by action-time validation", checked
+    newRow = GetLastDataRow(ws) + 1
+    WebUploadRegressionSeedRow ws, newRow
+    ws.Cells(newRow, COL_REQUEST).Value2 = "새 업무의 기본 기준 상속"
+    ws.Cells(newRow, COL_LEVEL).Value2 = 1
+    WebUploadRegressionEqual WebTaskBasisIssues(ws), "", "new tasks without an ID may inherit a blank basis during preparation", checked
+    PrepareWebTaskSheet ws
+    UnprotectTaskSheet ws
+    WebUploadRegressionAssert WebBasisValueIsValid(ws.Cells(newRow, COL_WEB_LEVEL).Value2), "prepare applies the default basis to the new task", checked
+    ws.Cells(6, COL_WEB_ENABLED).Value2 = "Y"
+    HandleWebTaskChange ws, ws.Cells(6, COL_WEB_ENABLED)
+    PreviewWebTasks False
+    WebUploadRegressionEqual CStr(mPreviewItems.Count), "1", "corrected selected unit reaches the preview normally", checked
+    WebUploadRegressionEqual CStr(mPreviewItems(1)("Error")), "", "corrected unit has no basis or payload error", checked
+    Application.EnableEvents = False
+    UnprotectTaskSheet ws
+    WebUploadRegressionSeedRow ws, 7
+    ws.Cells(7, COL_REQUEST).Value2 = "새 하위 업무의 잘못된 기준"
+    ws.Cells(7, COL_LEVEL).Value2 = 3
+    ws.Cells(7, COL_WEB_LEVEL).Value2 = 4
+    ws.Rows(8).Insert Shift:=xlDown
+    WebUploadRegressionSeedRow ws, 8
+    ws.Cells(8, COL_REQUEST).Value2 = "새 하위 업무의 다른 기준"
+    ws.Cells(8, COL_LEVEL).Value2 = 3
+    ws.Cells(8, COL_WEB_LEVEL).Value2 = 3
+    WebUploadRegressionEqual GetWebTaskId(ws, 7) & GetWebTaskId(ws, 8), "", "new child criteria fixture has no existing identities", checked
+    PrepareWebTaskSheet ws
+    WebUploadRegressionEqual CStr(ws.Cells(7, COL_WEB_LEVEL).Value2), "4", "prepare preserves a new child's explicitly invalid basis", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_LEVEL).Value2), "3", "prepare preserves a new child's explicitly different valid basis", checked
+    issues = WebTaskBasisIssues(ws)
+    WebUploadRegressionContains issues, "7행 (I7)", "new invalid child remains identifiable after preparation", checked
+    WebUploadRegressionContains issues, "8행 (I8)", "new mixed child remains identifiable after preparation", checked
+    GoTo CleanUp
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+CleanUp:
+    Application.EnableEvents = False
+    On Error Resume Next
+    WebUploadRegressionResetJournal
+    original.Activate
+    Set mPreviewSource = original
+    Application.DisplayAlerts = False
+    If Not ws Is Nothing Then ws.Delete
+    Application.DisplayAlerts = previousAlerts
+    Application.EnableEvents = eventsBefore
+    On Error GoTo 0
+    If errorNumber <> 0 Then Err.Raise errorNumber, "WebUploadRegressionBasisValidation", errorText
+End Sub
+
+Private Sub WebUploadRegressionMixedBasisPreservation(ByVal ws As Worksheet, ByRef checked As Long)
+    Dim oldBasis As Variant, mixed(1 To 2, 1 To 1) As Variant, settingsBefore As String
+    Dim caught As String, groupId As String, plan As Object
+    For Each oldBasis In Array(2, 3)
+        ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "8").Value2 = oldBasis
+        HandleWebTaskChange ws, ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "8")
+        mixed(1, 1) = 1: mixed(2, 1) = 2
+        ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "6").Value2 = mixed
+        HandleWebTaskChange ws, ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "6")
+        settingsBefore = WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "5:" & COL_WEB_PROGRAM_ID & "8"))
+        RememberWebGroupBases ws
+        PrepareWebTaskSheet ws
+        WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "5:" & COL_WEB_PROGRAM_ID & "8")), settingsBefore, "mixed old basis " & CStr(oldBasis) & " preserves every H:O value through preparation", checked
+        RefreshGanttSheet False
+        WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "5:" & COL_WEB_PROGRAM_ID & "8")), settingsBefore, "mixed old basis " & CStr(oldBasis) & " preserves independent settings through all refresh", checked
+        UnprotectTaskSheet ws
+        On Error Resume Next
+        Set plan = WebBasisMergePlan(ws, 5, 1)
+        caught = Err.Description: Err.Clear
+        On Error GoTo 0
+        WebUploadRegressionContains caught, "합쳐", "mixed criteria cannot replace old basis " & CStr(oldBasis) & " in the merge cache", checked
+        groupId = GetWebTaskId(ws, 5)
+        ws.Cells(5, COL_WEB_TASK_ID).Value2 = NewWebTaskId()
+        On Error Resume Next
+        Set plan = WebBasisMergePlan(ws, 5, 1)
+        caught = Err.Description: Err.Clear
+        On Error GoTo 0
+        ws.Cells(5, COL_WEB_TASK_ID).Value2 = groupId
+        WebUploadRegressionContains caught, "합쳐", "a group without a cached basis checks every original row before merging", checked
+        ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "8").Value2 = oldBasis
+        RememberWebGroupBases ws
+    Next oldBasis
+    ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "8").Value2 = 2
+    HandleWebTaskChange ws, ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "8")
+End Sub
+
+Private Sub WebUploadRegressionEditBasis(ByVal ws As Worksheet, ByVal rowNum As Long, ByVal value As Variant, _
+                                         ByVal nativeEvents As Boolean, ByRef checked As Long)
+    Application.EnableEvents = nativeEvents
+    ws.Cells(rowNum, COL_WEB_LEVEL).Value2 = value
+    If Not nativeEvents Then HandleWebTaskChange ws, ws.Cells(rowNum, COL_WEB_LEVEL)
+    WebUploadRegressionAssert Application.EnableEvents = nativeEvents, "basis edit retains the existing event state", checked
+    Application.EnableEvents = False
+End Sub
+
+Private Sub WebUploadRegressionRowInsertion(ByVal original As Worksheet, ByRef checked As Long, _
+                                            Optional ByVal nativeEvents As Boolean = False)
+    Dim ws As Worksheet, item As Object, state As Object, settings As Object, sourceId As String
+    Dim groupId As String, childId As String, freeGroupId As String, freeChildId As String, endGroupId As String, lastId As String
+    Dim anchors As Variant, counts As Variant, labels As Variant, key As Variant, field As Variant, fieldBefore As Variant
+    Dim r As Long, scenario As Long, insertionRow As Long, insertedCount As Long, rowNum As Long, lastBefore As Long
+    Dim stateBefore As String, historyBefore As String, savedPasteRow As Variant, previousAlerts As Boolean
+    Dim errorNumber As Long, errorText As String, eventsBefore As Boolean
+    previousAlerts = Application.DisplayAlerts
+    eventsBefore = Application.EnableEvents
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    WebUploadRegressionResetJournal
+    Set ws = ThisWorkbook.Worksheets.Add
+    ws.Name = IIf(nativeEvents, "WebNativeInsertFixture", "WebRowInsertFixture")
+    SetupDataHeaders ws
+    For r = 5 To 13
+        WebUploadRegressionSeedRow ws, r
+        ws.Cells(r, COL_REQUEST).Value2 = "행 삽입 검증 " & CStr(r)
+        ws.Cells(r, COL_LEVEL).Value2 = 2
+    Next r
+    ws.Cells(5, COL_LEVEL).Value2 = 1: ws.Cells(5, COL_WEB_LEVEL).Value2 = 2
+    ws.Cells(7, COL_LEVEL).Value2 = 3
+    ws.Cells(9, COL_LEVEL).Value2 = 1: ws.Cells(9, COL_WEB_LEVEL).Value2 = 2
+    ws.Cells(11, COL_LEVEL).Value2 = 3
+    ws.Cells(12, COL_LEVEL).Value2 = 1: ws.Cells(12, COL_WEB_LEVEL).Value2 = 1
+    ws.Cells(13, COL_LEVEL).Value2 = 1: ws.Cells(13, COL_WEB_LEVEL).Value2 = 1
+    PrepareWebTaskSheet ws
+    UnprotectTaskSheet ws
+    ws.Cells(8, COL_WEB_PROGRAM_ID).Value2 = "KEEP-INDEPENDENT-INSERT-UNIT"
+    Set item = BuildWebItemForRow(ws, 6)
+    Set mPreviewSource = ws
+    RecordWebOutcome item, "등록완료", "RQROWINSERT", "offline row insertion fixture"
+    RememberWebGroupBases ws
+    sourceId = GetWebTaskId(ws, 6)
+    groupId = GetWebTaskId(ws, 5)
+    childId = GetWebTaskId(ws, 7)
+    freeGroupId = GetWebTaskId(ws, 9)
+    freeChildId = GetWebTaskId(ws, 11)
+    endGroupId = GetWebTaskId(ws, 12)
+    lastId = GetWebTaskId(ws, 13)
+    Set state = WebTaskState(sourceId)
+    stateBefore = WebUploadRegressionStateSnapshot(state)
+    historyBefore = WebUploadRegressionRangeSnapshot(ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME).Range("A2:M2"))
+    Set settings = CreateObject("Scripting.Dictionary")
+    For r = 5 To 13
+        settings(GetWebTaskId(ws, r)) = WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & r & ":" & COL_WEB_TASK_ID & r))
+    Next r
+    WebUploadRegressionAssert WebGroupIsLocked(ws, 5), "row insertion fixture contains a registered locked group", checked
+    WebUploadRegressionAssert Not WebGroupIsLocked(ws, 9), "row insertion fixture also contains an unregistered group", checked
+
+    If Not nativeEvents Then
+        savedPasteRow = ws.Range("A11:" & COL_STATUS & "11").Value2
+        ws.Range("A11:" & COL_STATUS & "11").Value2 = ws.Range("A6:" & COL_STATUS & "6").Value2
+        WebUploadRegressionAssert Not WebRowInsertionKeepsSettings(ws, ws.Rows(11)), "whole-row paste without inserted rows uses normal edit checks", checked
+        ws.Range("A11:" & COL_STATUS & "11").Value2 = savedPasteRow
+        ws.Rows("7:8").Insert Shift:=xlDown
+        WebUploadRegressionAssert Not WebRowInsertionKeepsSettings(ws, ws.Range("I7:Q8")), "partial-row paste cannot use the insertion exemption", checked
+        For Each field In Array(COL_WEB_LEVEL, COL_WEB_REQUESTER, COL_WEB_PROGRAM_ID, COL_WEB_TASK_ID)
+            fieldBefore = ws.Cells(6, CStr(field)).Value2
+            ws.Cells(6, CStr(field)).Value2 = "TAMPERED-AFTER-INSERT"
+            WebUploadRegressionAssert Not WebRowInsertionKeepsSettings(ws, ws.Rows("7:8")), "insertion cannot bypass surviving web field " & CStr(field), checked
+            ws.Cells(6, CStr(field)).Value2 = fieldBefore
+        Next field
+        ws.Cells(7, COL_WEB_LEVEL).Value2 = 1
+        WebUploadRegressionAssert Not WebRowInsertionKeepsSettings(ws, ws.Rows("7:8")), "new rows with pasted web settings use normal edit checks", checked
+        ws.Cells(7, COL_WEB_LEVEL).ClearContents
+        ws.Cells(7, COL_REQUEST).Value2 = "PASTED-TASK-CONTENT"
+        WebUploadRegressionAssert Not WebRowInsertionKeepsSettings(ws, ws.Rows("7:8")), "inserted task content cannot be mistaken for a blank-row insertion", checked
+        ws.Cells(7, COL_REQUEST).ClearContents
+        WebUploadRegressionAssert WebRowInsertionKeepsSettings(ws, ws.Rows("7:8")), "restored surviving settings permit two blank inserted rows", checked
+        HandleWebTaskChange ws, ws.Rows("7:8")
+    End If
+
+    anchors = Array(groupId, childId, freeGroupId, freeGroupId, freeChildId, endGroupId, lastId, "")
+    counts = Array(1, 2, 1, 2, 1, 2, 1, 2)
+    labels = Array("registered group top", "registered group middle", "registered group end", _
+                   "unregistered group top", "unregistered group middle", "unregistered group end", "last data row", "empty append")
+    ws.Activate
+    For scenario = LBound(anchors) To UBound(anchors)
+        insertedCount = CLng(counts(scenario))
+        lastBefore = GetLastDataRow(ws)
+        If Len(CStr(anchors(scenario))) = 0 Then
+            insertionRow = lastBefore + 1
+        Else
+            insertionRow = WebFindTaskRow(ws, CStr(anchors(scenario)))
+        End If
+        Application.EnableEvents = nativeEvents
+        ws.Rows(CStr(insertionRow) & ":" & CStr(insertionRow + insertedCount - 1)).Insert Shift:=xlDown
+        If nativeEvents Then
+            WebUploadRegressionAssert Application.EnableEvents, CStr(labels(scenario)) & " native insertion restores workbook events", checked
+        Else
+            WebUploadRegressionAssert WebRowInsertionKeepsSettings(ws, ws.Rows(CStr(insertionRow) & ":" & CStr(insertionRow + insertedCount - 1))), CStr(labels(scenario)) & " is recognized as blank insertion", checked
+            HandleWebTaskChange ws, ws.Rows(CStr(insertionRow) & ":" & CStr(insertionRow + insertedCount - 1))
+        End If
+        Application.EnableEvents = False
+        WebUploadRegressionEqual CStr(GetLastDataRow(ws)), CStr(lastBefore + IIf(insertionRow <= lastBefore, insertedCount, 0)), CStr(labels(scenario)) & " retains the expected last data row", checked
+        For r = insertionRow To insertionRow + insertedCount - 1
+            WebUploadRegressionEqual CStr(Application.CountA(ws.Range(COL_WEB_ENABLED & r & ":" & COL_WEB_TASK_ID & r))), "0", CStr(labels(scenario)) & " leaves new web settings empty", checked
+        Next r
+        For Each key In settings.Keys
+            rowNum = WebFindTaskRow(ws, CStr(key))
+            WebUploadRegressionAssert rowNum >= DATA_START_ROW, CStr(labels(scenario)) & " retains original task identity", checked
+            WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & rowNum & ":" & COL_WEB_TASK_ID & rowNum)), CStr(settings(key)), CStr(labels(scenario)) & " preserves each original web setting", checked
+        Next key
+        WebUploadRegressionEqual WebTaskStructureIssue(ws), "", CStr(labels(scenario)) & " retains registered structure", checked
+        Set state = WebTaskState(sourceId)
+        WebUploadRegressionEqual WebUploadRegressionStateSnapshot(state), stateBefore, CStr(labels(scenario)) & " preserves request connection and fingerprints", checked
+        WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ThisWorkbook.Worksheets(WEB_LOG_SHEET_NAME).Range("A2:M2")), historyBefore, CStr(labels(scenario)) & " preserves registration history", checked
+    Next scenario
+    ApplyWebTaskProtection ws
+    rowNum = WebFindTaskRow(ws, groupId)
+    WebUploadRegressionAssert ws.Cells(rowNum, COL_WEB_LEVEL).Locked, "insertion keeps registered group basis locked", checked
+    rowNum = WebFindTaskRow(ws, sourceId)
+    WebUploadRegressionAssert ws.Cells(rowNum, COL_WEB_REQUESTER).Locked, "insertion keeps registered requester locked", checked
+    GoTo CleanUp
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+CleanUp:
+    Application.EnableEvents = False
+    On Error Resume Next
+    WebUploadRegressionResetJournal
+    original.Activate
+    Set mPreviewSource = original
+    Application.DisplayAlerts = False
+    If Not ws Is Nothing Then ws.Delete
+    Application.DisplayAlerts = previousAlerts
+    Application.EnableEvents = eventsBefore
+    On Error GoTo 0
+    If errorNumber <> 0 Then Err.Raise errorNumber, "WebUploadRegressionRowInsertion", errorText
+End Sub
+
+Public Function RunNativeWebRowInsertionRegression() As String
+    Dim original As Worksheet, checked As Long
+    On Error GoTo Failed
+    Set original = ThisWorkbook.Worksheets("WebUploadFixture")
+    WebUploadRegressionRowInsertion original, checked, True
+    WebUploadRegressionBasisValidation original, checked, True
+    RunNativeWebRowInsertionRegression = "PASS: " & CStr(checked) & " native web row insertion assertions"
+    Exit Function
+Failed:
+    RunNativeWebRowInsertionRegression = "FAIL during native web row insertion: " & Err.Source & " / " & Err.Description
+End Function
 
 Public Function RunNativeWebRowDeletionRegression() As String
     Dim ws As Worksheet, original As Worksheet, item As Object, state As Object

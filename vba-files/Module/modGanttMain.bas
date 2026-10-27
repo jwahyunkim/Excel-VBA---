@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-27 김좌현 수정 : 모두 새로고침 후 등록 기준 문제 행을 완료 메시지에 안내
 ' 2026-10-23 김좌현 수정 : 간트 전용 새로고침도 이전 웹등록 헤더를 안전하게 WEB UPDATE로 갱신
 ' 2026-10-22 김좌현 수정 : 새로고침 서명 계산의 열 번호를 한 번만 조회해 반복 Range 접근 제거
 ' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로를 제거하고 모두 새로고침으로 버튼 연결 통일
@@ -105,7 +106,7 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     Dim chartStartDate As Date, chartEndDate As Date
     Dim holidayDict As Object, workdayDict As Object
     Dim taskSheetWasProtected As Boolean, previousScreenUpdating As Boolean, previousEnableEvents As Boolean
-    Dim errorText As String, detailColumnHidden As Variant
+    Dim errorText As String, detailColumnHidden As Variant, webBasisIssues As String
     Dim detailScrollColumn As Long, detailScrollRow As Long
     Dim rowView As Object, originalRowView As Object
     Dim originalLastRow As Long, taskViewCaptured As Boolean
@@ -149,6 +150,7 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
         EnsureConfigSheet
         SetupDataHeaders ws
         UpgradeGanttRefreshButtons ws
+        webBasisIssues = WebTaskBasisIssues(ws)
         PrepareWebTaskSheet ws
         NormalizeGanttPptArtifactNames ws
         ApplyTaskInputValidation ws
@@ -210,7 +212,13 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     AlignAllGanttPptArtifactsToNoteCells ws
     If showCompletionMessage Then
         If includeWebSetup Then
-            MsgBox "모두 새로고침 완료", vbInformation
+            If Len(webBasisIssues) > 0 Then
+                MsgBox "모두 새로고침 완료" & vbCrLf & vbCrLf & _
+                       "웹 등록 기준에 문제가 있습니다. 해당 행을 수정한 뒤 웹등록 미리보기를 실행하세요." & _
+                       vbCrLf & webBasisIssues, vbExclamation, "모두 새로고침"
+            Else
+                MsgBox "모두 새로고침 완료", vbInformation
+            End If
         Else
             MsgBox "간트 새로고침 완료", vbInformation
         End If
