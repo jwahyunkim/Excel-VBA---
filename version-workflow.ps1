@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidateSet(
-        "Menu", "Start", "StartVersion", "CreateBranch", "MergeBranch", "Release", "CancelVersion", "Status",
+        "Menu", "Start", "StartVersion", "CreateBranch", "MergeBranch", "Complete", "Release", "CancelVersion", "Status",
         "Security", "SecurityConfig", "SecurityStatus", "SecuritySync", "SecurityBuild",
         "SecurityValidate", "SecurityAll", "SecurityCode")]
     [string]$Action = "Menu",
@@ -26,7 +26,8 @@ param(
 #   지정 부모의 자식:     .\version-workflow.ps1 -Action CreateBranch -BaseBranch develop/v3.2.13 -BranchName feature/report
 #   기록된 부모로 병합:   .\version-workflow.ps1 -Action MergeBranch
 #   지정 부모로 병합:     .\version-workflow.ps1 -Action MergeBranch -SourceBranch feature/report -TargetBranch develop/v3.2.13
-#   현재 개발 완료/릴리즈: .\version-workflow.ps1 -Action Release
+#   현재 개발 완료:       .\version-workflow.ps1 -Action Complete
+#   정식 릴리즈:         .\version-workflow.ps1 -Action Release
 #   현재 버전 개발 취소:  .\version-workflow.ps1 -Action CancelVersion
 
 # ============================================================================
@@ -1339,6 +1340,20 @@ function Commit-DevelopmentChanges {
     Invoke-Git -Arguments @("push", "origin", $DevelopmentBranch)
 }
 
+function Complete-VersionDevelopment {
+    $developmentBranch = Get-CurrentBranch
+    $null = Get-VersionFromDevelopmentBranch -Name $developmentBranch
+    if (-not [string]::IsNullOrWhiteSpace($SourceBranch) -and
+        $SourceBranch.Trim() -ne $developmentBranch) {
+        throw "개발 완료는 현재 개발 브랜치만 대상으로 실행할 수 있습니다: $developmentBranch"
+    }
+    Assert-NoChildBranches -ParentBranch $developmentBranch
+
+    Write-Host "개발 변경 사항을 프로젝트 워크플로가 자동 스테이징·커밋합니다." -ForegroundColor Yellow
+    Commit-DevelopmentChanges -DevelopmentBranch $developmentBranch
+    Write-Host "$developmentBranch 개발 변경을 커밋하고 원격에 반영했습니다." -ForegroundColor Green
+}
+
 function Complete-VersionDevelopmentAndRelease {
     $developmentBranch = Get-CurrentBranch
     $pending = Get-PendingVersionRelease
@@ -1654,7 +1669,7 @@ function Resume-VersionRelease {
 function Select-MenuAction {
     Write-Host ""
     Write-Host "[1] 새 버전 개발 시작"
-    Write-Host "[2] 개발 완료 + 자동 커밋 + 릴리즈"
+    Write-Host "[2] 개발 완료 + 자동 커밋·푸시"
     Write-Host "[3] 현재 버전 개발 취소"
     Write-Host "[4] 설정 및 Git 상태 확인"
     Write-Host "[5] 현재/지정 브랜치에서 자식 브랜치 생성"
@@ -1665,7 +1680,7 @@ function Select-MenuAction {
 
     switch ($selection) {
         "1" { return "Start" }
-        "2" { return "Release" }
+        "2" { return "Complete" }
         "3" { return "CancelVersion" }
         "4" { return "Status" }
         "5" { return "CreateBranch" }
@@ -1688,6 +1703,7 @@ try {
         { $_ -in @("Start", "StartVersion") } { Start-VersionDevelopment }
         "CreateBranch" { Start-ChildBranch }
         "MergeBranch" { Merge-ChildBranch }
+        "Complete" { Complete-VersionDevelopment }
         "Release" { Complete-VersionDevelopmentAndRelease }
         "CancelVersion" { Cancel-VersionDevelopment }
         "Status" { Show-WorkflowStatus }

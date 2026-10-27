@@ -288,6 +288,27 @@ Add-WorkflowCase 'automatic commit still rejects unresolved merge conflicts' {
     finally { Pop-Location }
 }
 
+Add-WorkflowCase 'development completion commits and pushes without releasing' {
+    $fixturePath = New-WorkflowMergeRepository
+    Push-Location $fixturePath
+    try {
+        [IO.File]::WriteAllText((Join-Path $fixturePath 'final-change.txt'), 'ready for release later')
+        Complete-VersionDevelopment
+        $head = Invoke-FixtureGit rev-parse HEAD
+        Assert-WorkflowEqual (Invoke-FixtureGit rev-parse origin/develop/v1.0.1) $head `
+            'Development completion must push the new commit'
+        Assert-WorkflowEqual (Get-CurrentBranch) 'develop/v1.0.1' `
+            'Development completion must stay on the development branch'
+        Assert-WorkflowTrue (Test-Path -LiteralPath 'final-change.txt') `
+            'Development completion must include the changed file'
+        Assert-WorkflowEqual (Invoke-FixtureGit rev-parse release/v1.0.1) (Invoke-FixtureGit rev-parse main) `
+            'Development completion must not merge into the release branch'
+        Assert-WorkflowTrue ($null -eq (Get-PendingVersionRelease)) `
+            'Development completion must not start release progress'
+    }
+    finally { Pop-Location }
+}
+
 Add-WorkflowCase 'release preparation renames, builds, validates, and commits the workbook' {
     $fixturePath = New-WorkflowRepository
     Push-Location $fixturePath

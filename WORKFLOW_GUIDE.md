@@ -19,7 +19,8 @@ Windows PowerShell에서 추가 옵션을 전달할 때는 구분자를 작은�
 | 새 버전 개발 시작 | `npm run version:start` |
 | 자식 작업 브랜치 생성 | `npm run branch:create '--' feature/브랜치명` |
 | 현재 자식 브랜치 병합 | `npm run branch:merge` |
-| 개발 완료 및 자동 릴리즈 | `npm run version:release` |
+| 개발 완료(커밋·푸시) | 메뉴 `[2]` 또는 `npm run version:complete` |
+| 정식 릴리즈 | `npm run version:release` |
 | 현재 버전 개발 취소 | `npm run version:cancel` |
 | 상태 확인 | `npm run workflow:status` |
 
@@ -159,9 +160,17 @@ npm run branch:merge
 npm run branch:merge '--' -SourceBranch feature/report-export -TargetBranch develop/v3.3.0
 ```
 
-### 5. 개발 완료 및 자동 릴리즈
+### 5. 개발 완료 및 릴리즈
 
 모든 작업 브랜치를 병합한 뒤 `develop/vA.B.C`에서 실행합니다.
+
+```powershell
+npm run version:complete
+```
+
+메뉴 `[2]`도 같은 작업을 수행합니다. 남은 변경을 자동 스테이징·커밋하고 개발 브랜치를 푸시한 뒤 종료합니다. 릴리즈 브랜치 생성과 배포는 실행하지 않습니다.
+
+정식 릴리즈를 진행할 때 별도로 실행합니다.
 
 ```powershell
 npm run version:release
@@ -178,11 +187,11 @@ npm run version:release
 7. PR의 실제 병합 커밋에 `vA.B.C` 태그 생성 및 푸시 확인
 8. 병합된 임시 develop/release 브랜치 삭제
 
-이 자동 스테이징·커밋은 Codex가 임의로 실행하는 것이 아니라 사용자가 `npm run version:release` 또는 메뉴의 완료 항목을 선택했을 때 프로젝트 스크립트가 수행합니다.
+이 자동 스테이징·커밋은 Codex가 임의로 실행하는 것이 아니라 사용자가 `npm run version:complete`, `npm run version:release` 또는 메뉴의 `[2]`를 선택했을 때 프로젝트 스크립트가 수행합니다.
 
 자동 커밋과 배포 준비 커밋에서 줄 끝 공백이나 파일 끝의 추가 빈 줄이 발견되면 경고를 표시하고 커밋을 계속합니다. 파일 내용은 자동으로 수정하지 않습니다. 해결되지 않은 병합 충돌이나 Git 명령 오류가 있으면 중단합니다.
 
-릴리즈 도중 오류가 발생하면 같은 `npm run version:release` 명령 또는 메뉴의 `[2]`를 다시 실행합니다. `develop/vA.B.C`와 `release/vA.B.C`에서는 개발 내용 병합 여부부터 확인합니다. 릴리즈 브랜치만 만들어진 상태에서도 개발 내용을 먼저 병합한 후 배포본을 생성합니다.
+릴리즈 도중 오류가 발생하면 `npm run version:release` 명령을 다시 실행합니다. `develop/vA.B.C`와 `release/vA.B.C`에서는 개발 내용 병합 여부부터 확인합니다. 릴리즈 브랜치만 만들어진 상태에서도 개발 내용을 먼저 병합한 후 배포본을 생성합니다.
 
 진행 상태는 로컬 Git 설정(`workflow.release*`)에 기록됩니다. `main` 병합 후 태그 푸시가 실패해도 같은 저장소의 `main`에서 명령을 다시 실행하면 저장된 병합 커밋에 태그를 푸시하고 브랜치를 정리합니다. 기존 태그가 같은 커밋을 가리키면 재사용하며, 다른 커밋이면 중단합니다. 원격 태그가 확인되기 전에는 개발/릴리즈 브랜치를 유지합니다.
 
