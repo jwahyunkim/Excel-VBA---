@@ -1,5 +1,8 @@
 Attribute VB_Name = "modWebState"
 Option Explicit
+' 2026-10-27 김좌현 수정 : 미리보기·모두 새로고침 전 등록 기준 오류 행 확인과 유효 기준 캐시 보존
+' 2026-10-27 김좌현 수정 : 미해결 혼합 기준의 이전 캐시와 캐시 없는 병합의 개별 웹 설정 보존
+' 2026-10-27 김좌현 수정 : 빈 행 삽입 시 기존 업무 ID와 웹 설정을 비교해 등록 기준 변경 오탐 방지
 ' 2026-10-26 김좌현 수정 : 업무 ID와 보호된 웹 설정의 행 이동을 비교해 정상 행 삭제 구분
 ' 2026-10-23 김좌현 수정 : 웹 미리보기와 등록 전 하위 작업시간을 상위 합계에 반영
 ' 2026-10-22 김좌현 수정 : 요청번호 연결과 최근 시도를 분리하고 등록 단위 편집 및 구조 잠금 추가
@@ -207,22 +210,96 @@ Failed:
     Err.Raise errorNumber, "ReconcileDeletedWebHistory", errorText
 End Function
 
+Public Function WebBasisValueIsValid(ByVal raw As Variant) As Boolean
+    On Error GoTo InvalidValue
+    If IsError(raw) Or IsEmpty(raw) Or IsNull(raw) Then Exit Function
+    If VarType(raw) = vbBoolean Then Exit Function
+    If Not IsNumeric(raw) Then Exit Function
+    If CDbl(raw) < 1 Or CDbl(raw) > 3 Then Exit Function
+    If CDbl(raw) <> Fix(CDbl(raw)) Then Exit Function
+    WebBasisValueIsValid = True
+InvalidValue:
+End Function
+
+Public Function WebTaskBasisIssues(ByVal ws As Worksheet) As String
+    Const MAX_DISPLAY_ERROR_COUNT As Long = 20
+    Dim r As Long, lastRow As Long, groupRow As Long, groupBasis As Long, issueCount As Long
+    Dim raw As Variant, defaultBasis As Variant, reason As String, issueText As String, newTask As Boolean
+    Dim config As Worksheet
+    If ws Is Nothing Then Exit Function
+    On Error Resume Next
+    Set config = ws.Parent.Worksheets(WEB_CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If Not config Is Nothing Then defaultBasis = config.Range("B6").Value2
+    lastRow = GetLastDataRow(ws)
+    For r = DATA_START_ROW To lastRow
+        If HasTaskContent(ws, r) Then
+            raw = ws.Cells(r, COL_WEB_LEVEL).Value2
+            newTask = (Len(GetWebTaskId(ws, r)) = 0)
+            If GetTaskLevel(ws, r) = 1 Then
+                groupRow = r
+                groupBasis = 0
+                If WebBasisValueIsValid(raw) Then
+                    groupBasis = CLng(raw)
+                ElseIf Not IsError(raw) Then
+                    If Len(Trim$(CStr(raw))) = 0 And newTask Then
+                        If WebBasisValueIsValid(defaultBasis) Then groupBasis = CLng(defaultBasis)
+                    End If
+                End If
+            End If
+            reason = vbNullString
+            If IsError(raw) Then
+                reason = "등록 기준에 셀 오류가 있습니다. 1, 2, 3 중에서 선택하세요."
+            ElseIf Len(Trim$(CStr(raw))) = 0 Then
+                If Not newTask Then reason = "등록 기준이 비어 있습니다. 1, 2, 3 중에서 선택하세요."
+            ElseIf Not WebBasisValueIsValid(raw) Then
+                reason = "등록 기준은 1, 2, 3 중에서 선택하세요."
+            ElseIf groupRow > 0 And groupBasis > 0 Then
+                If CLng(raw) <> groupBasis Then
+                    reason = "같은 레벨1 그룹의 " & COL_WEB_LEVEL & CStr(groupRow) & _
+                             " 기준(" & CStr(groupBasis) & ")과 다릅니다."
+                End If
+            End If
+            If Len(reason) > 0 Then
+                issueCount = issueCount + 1
+                If issueCount <= MAX_DISPLAY_ERROR_COUNT Then
+                    If Len(issueText) > 0 Then issueText = issueText & vbCrLf
+                    issueText = issueText & "- " & CStr(r) & "행 (" & COL_WEB_LEVEL & CStr(r) & "): " & reason
+                End If
+            End If
+        End If
+    Next r
+    If issueCount > MAX_DISPLAY_ERROR_COUNT Then
+        issueText = issueText & vbCrLf & "- 그 외 " & CStr(issueCount - MAX_DISPLAY_ERROR_COUNT) & "건"
+    End If
+    WebTaskBasisIssues = issueText
+End Function
+
+Public Sub AssertWebTaskBases(ByVal ws As Worksheet)
+    Dim issues As String
+    issues = WebTaskBasisIssues(ws)
+    If Len(issues) > 0 Then
+        Err.Raise vbObjectError + 2612, "AssertWebTaskBases", _
+                  "웹 등록 기준에 문제가 있습니다. 해당 행을 수정한 뒤 다시 실행하세요." & vbCrLf & vbCrLf & issues
+    End If
+End Sub
+
 Public Sub RememberWebGroupBases(ByVal ws As Worksheet)
     Dim r As Long, raw As Variant, key As String, lastRow As Long
     If mWebBasisCache Is Nothing Then Set mWebBasisCache = CreateObject("Scripting.Dictionary")
     If mWebRowCache Is Nothing Then Set mWebRowCache = CreateObject("Scripting.Dictionary")
     lastRow = GetLastDataRow(ws)
-    For r = DATA_START_ROW To lastRow
-        If HasTaskContent(ws, r) And GetTaskLevel(ws, r) = 1 Then
-            raw = ws.Cells(r, COL_WEB_LEVEL).Value2
-            If Not IsError(raw) Then
-                If IsNumeric(raw) Then
+    If Len(WebTaskBasisIssues(ws)) = 0 Then
+        For r = DATA_START_ROW To lastRow
+            If HasTaskContent(ws, r) And GetTaskLevel(ws, r) = 1 Then
+                raw = ws.Cells(r, COL_WEB_LEVEL).Value2
+                If WebBasisValueIsValid(raw) Then
                     key = GetWebTaskId(ws, r)
                     If Len(key) > 0 Then mWebBasisCache(key) = CLng(raw)
                 End If
             End If
-        End If
-    Next r
+        Next r
+    End If
     mWebRowCache(ws.CodeName) = WebRowSettingsSnapshot(ws, lastRow)
 End Sub
 
@@ -273,16 +350,48 @@ Public Function WebRowDeletionKeepsSettings(ByVal ws As Worksheet, ByVal target 
     WebRowDeletionKeepsSettings = True
 End Function
 
+Public Function WebRowInsertionKeepsSettings(ByVal ws As Worksheet, ByVal target As Range) As Boolean
+    Dim area As Range, previous As Variant, current As Variant, previousIndex As Long
+    Dim lastRow As Long, insertedRows As Long, r As Long, rowNum As Long, endRow As Long
+    If mWebRowCache Is Nothing Then Exit Function
+    If Not mWebRowCache.Exists(ws.CodeName) Then Exit Function
+    If target.Areas.Count <> 1 Then Exit Function
+    Set area = target.Areas(1)
+    If area.Columns.Count <> ws.Columns.Count Or area.Row < DATA_START_ROW Then Exit Function
+    endRow = area.Row + area.Rows.Count - 1
+    ' A native blank-row insertion has no task values or copied identity of its own.
+    If Application.CountA(Intersect(area, ws.Range("A:" & COL_STATUS))) > 0 Then Exit Function
+    previous = mWebRowCache(ws.CodeName)
+    lastRow = GetLastDataRow(ws)
+    If lastRow < CLng(previous(0)) Then Exit Function
+    If area.Row <= lastRow Then insertedRows = Application.Min(area.Rows.Count, lastRow - area.Row + 1)
+    If lastRow - CLng(previous(0)) <> insertedRows Then Exit Function
+    current = WebRowSettingsSnapshot(ws, lastRow)
+
+    ' Skip only the newly inserted blank rows. Every existing identity and protected
+    ' web value must move by exactly that gap; row pastes still use normal edit checks.
+    previousIndex = 1
+    For r = 1 To UBound(current)
+        rowNum = DATA_START_ROW + r - 1
+        If rowNum < area.Row Or rowNum > endRow Then
+            If previousIndex > UBound(previous) Then Exit Function
+            If current(r) <> previous(previousIndex) Then Exit Function
+            previousIndex = previousIndex + 1
+        End If
+    Next r
+    If previousIndex <> UBound(previous) + 1 Then Exit Function
+    WebRowInsertionKeepsSettings = True
+End Function
+
 Public Function WebBasisMergePlan(ByVal ws As Worksheet, ByVal groupRow As Long, ByVal newBasis As Long) As Object
     Dim result As Object, fields As Variant, oldBasis As Long, groupEnd As Long, r As Long, child As Long
-    Dim field As Variant, newEnd As Long, consensus As String, hasValue As Boolean, key As String
+    Dim field As Variant, newEnd As Long, consensus As String, hasValue As Boolean, key As String, includeSource As Boolean
     Set result = CreateObject("Scripting.Dictionary")
     fields = Array(COL_WEB_ENABLED, COL_WEB_REQUESTER, COL_WEB_ACTION, COL_WEB_STATUS, COL_WEB_MODULE, COL_WEB_HANDLER, COL_WEB_PROGRAM_ID)
     key = GetWebTaskId(ws, groupRow)
     If Not mWebBasisCache Is Nothing Then
         If mWebBasisCache.Exists(key) Then oldBasis = CLng(mWebBasisCache(key))
     End If
-    If oldBasis = 0 Then oldBasis = newBasis
     groupEnd = GetTaskSubtreeEndRow(ws, groupRow, GetLastDataRow(ws))
     For r = groupRow To groupEnd
         If IsWebUploadRow(ws, r, newBasis, groupEnd) Then
@@ -290,7 +399,12 @@ Public Function WebBasisMergePlan(ByVal ws As Worksheet, ByVal groupRow As Long,
             For Each field In fields
                 hasValue = False: consensus = vbNullString
                 For child = r To newEnd
-                    If IsWebUploadRow(ws, child, oldBasis, groupEnd) Then
+                    If oldBasis = 0 Then
+                        includeSource = HasTaskContent(ws, child)
+                    Else
+                        includeSource = IsWebUploadRow(ws, child, oldBasis, groupEnd)
+                    End If
+                    If includeSource Then
                         If Not hasValue Then
                             consensus = CStr(ws.Cells(child, CStr(field)).Value2)
                             hasValue = True

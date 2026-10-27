@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$WorkbookPath)
+param([string]$WorkbookPath, [switch]$EditOnly)
 
 $ErrorActionPreference = 'Stop'
 $webRoot = Split-Path -Parent $PSScriptRoot
@@ -71,8 +71,10 @@ try {
     $webCode.AddFromString($webSource)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($webCode)
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($webComponent)
-    $webPhase = 'run VBA regression'
-    $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunWebUploadRegression")
+    # 2026-10-27 김좌현 수정 : 행 편집만 검사할 때 오프라인 설정 후 저장·재열기 이벤트 회귀에 집중
+    $webPhase = if ($EditOnly) { 'prepare focused web edit regression' } else { 'run VBA regression' }
+    $webRegressionMacro = if ($EditOnly) { 'PrepareWebEditRegression' } else { 'RunWebUploadRegression' }
+    $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!$webRegressionMacro")
     if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
     Write-Output $webResult
     # 2026-10-22 김좌현 수정 : 이력 삭제로 해제한 상태를 임시 파일에 저장하고 재열기 후 검증
@@ -84,12 +86,19 @@ try {
     $webBook = $null
     $webPhase = 'reopen and verify deleted history stays released'
     $webBook = $webExcel.Workbooks.Open($webTestCopy, 0, $false)
-    $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunSavedWebHistoryRegression")
-    if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
-    Write-Output $webResult
+    if (-not $EditOnly) {
+        $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunSavedWebHistoryRegression")
+        if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
+        Write-Output $webResult
+    }
     # 2026-10-26 김좌현 수정 : 저장 중인 VBA 실행과 분리하여 재열기 후 기본 행 삭제 이벤트 검증
     $webPhase = 'verify native row deletion after reopening'
     $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunNativeWebRowDeletionRegression")
+    if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
+    Write-Output $webResult
+    # 2026-10-27 김좌현 수정 : 재열기한 프로젝트에서 단일·복수 빈 행 삽입의 실제 통합문서 이벤트 검증
+    $webPhase = 'verify native row insertion after reopening'
+    $webResult = [string]$webExcel.Run("'web-upload-test.xlsm'!RunNativeWebRowInsertionRegression")
     if (-not $webResult.StartsWith('PASS:')) { throw $webResult }
     Write-Output $webResult
 }
