@@ -8,6 +8,7 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-10-27 김좌현 수정 : 입력한 셀의 업무 구조 변경 여부와 타입 선택목록만 검사해 전체 재계산 축소
 ' 2026-10-26 김좌현 수정 : 타입 오류로 실행 취소한 행 변경의 웹 설정 비교 상태 복원
 ' 2026-10-22 김좌현 수정 : 간트 셀 직접 수정 시 간트 전용 새로고침 캐시 무효화
 ' 2026-10-22 김좌현 수정 : 웹등록 초기화, 보호 비밀번호와 그룹별 등록 기준 이벤트 연결
@@ -56,6 +57,7 @@ End Sub
 Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     Dim duplicateModule As String
     Dim invalidTypeCell As String
+    Dim taskStructureChanged As Boolean
 
     On Error GoTo EH
 
@@ -109,6 +111,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
 
     If Not Intersect(Target, Sh.Range(COL_GANTT_START & ":XFD")) Is Nothing Then InvalidateGanttRenderCache Sh
     Application.enableEvents = False
+    taskStructureChanged = WebTaskContentStructureChanged(Sh, Target)
     HandleWebTaskChange Sh, Target
     invalidTypeCell = GetInvalidTaskType(Sh, Target)
     If Len(invalidTypeCell) > 0 Then
@@ -122,9 +125,9 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     If CStr(Sh.Range(COL_TYPE & HEADER_ROW).Value2) = "타입" And _
        Not Intersect(Target, Sh.Range(COL_TYPE & DATA_START_ROW & ":" & _
                                      COL_TYPE & Sh.Rows.Count)) Is Nothing Then
-        RefreshTaskTypeValidation
+        ApplyTaskTypeValidation Sh, Target
     End If
-    HandleTaskHierarchyChange Sh, Target
+    HandleTaskHierarchyChange Sh, Target, taskStructureChanged
 
 SafeExit:
     Application.enableEvents = True

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modTaskType"
 Option Explicit
+' 2026-10-27 김좌현 수정 : 일반 타입 입력은 기존 선택목록을 유지하고 붙여넣은 셀만 목록 복구
 ' 2026-10-23 김좌현 수정 : 행 복사 시 타입 목록 이름과 원본 파일 연결이 따라오지 않도록 참조
 ' 2026-10-20 김좌현 수정 : config 타입 목록 이동 및 기존 값 보존 이전
 
@@ -80,8 +81,20 @@ Public Sub EnsureTaskTypeConfig()
     ws.Columns("AB").Hidden = True
 End Sub
 
-Public Sub ApplyTaskTypeValidation(ByVal ws As Worksheet)
-    With ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_TYPE & ws.Rows.Count).Validation
+Public Sub ApplyTaskTypeValidation(ByVal ws As Worksheet, Optional ByVal target As Range)
+    Dim cells As Range, wasProtected As Boolean, errorNumber As Long, errorText As String
+    Set cells = ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_TYPE & ws.Rows.Count)
+    If Not target Is Nothing Then
+        Set cells = Intersect(cells, target)
+        If cells Is Nothing Then Exit Sub
+        If cells.CountLarge = 1 Then
+            If HasTaskTypeValidation(cells) Then Exit Sub
+        End If
+    End If
+    wasProtected = ws.ProtectContents And Not ws.ProtectionMode
+    On Error GoTo Failed
+    If wasProtected Then UnprotectTaskSheet ws
+    With cells.Validation
         .Delete
         ' Resolve the existing list in the receiving workbook when rows are copied.
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
@@ -94,7 +107,25 @@ Public Sub ApplyTaskTypeValidation(ByVal ws As Worksheet)
         .ErrorTitle = "타입 입력 오류"
         .ErrorMessage = "config 시트에 등록한 타입만 입력할 수 있습니다."
     End With
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If wasProtected Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+    On Error GoTo 0
+    Err.Raise errorNumber, "ApplyTaskTypeValidation", errorText
 End Sub
+
+Private Function HasTaskTypeValidation(ByVal cell As Range) As Boolean
+    On Error GoTo MissingValidation
+    With cell.Validation
+        HasTaskTypeValidation = (.Type = xlValidateList And _
+            .Formula1 = "=INDIRECT(""" & TASK_TYPE_LIST_NAME & """)" And _
+            .ShowError And .InCellDropdown And Not .IgnoreBlank)
+    End With
+MissingValidation:
+End Function
 
 Public Sub RefreshTaskTypeValidation()
     Dim ws As Worksheet, wasProtected As Boolean

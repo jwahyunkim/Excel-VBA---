@@ -1,5 +1,6 @@
 Attribute VB_Name = "modWebState"
 Option Explicit
+' 2026-10-27 김좌현 수정 : 입력한 행의 업무 유무·웹 설정만 캐시 갱신하고 구조 변경 시에만 전체 연결 검사
 ' 2026-10-27 김좌현 수정 : 미리보기·모두 새로고침 전 등록 기준 오류 행 확인과 유효 기준 캐시 보존
 ' 2026-10-27 김좌현 수정 : 미해결 혼합 기준의 이전 캐시와 캐시 없는 병합의 개별 웹 설정 보존
 ' 2026-10-27 김좌현 수정 : 빈 행 삽입 시 기존 업무 ID와 웹 설정을 비교해 등록 기준 변경 오탐 방지
@@ -303,26 +304,169 @@ Public Sub RememberWebGroupBases(ByVal ws As Worksheet)
     mWebRowCache(ws.CodeName) = WebRowSettingsSnapshot(ws, lastRow)
 End Sub
 
-Private Function WebRowSettingsSnapshot(ByVal ws As Worksheet, ByVal lastRow As Long) As Variant
-    Dim rowSettings() As String, values As Variant, r As Long, c As Long, resultColumn As Long, raw As Variant, value As String
-    ReDim rowSettings(0 To Application.Max(0, lastRow - DATA_START_ROW + 1))
+Private Function WebRowSettingsSnapshot(ByVal ws As Worksheet, ByVal lastRow As Long, _
+                                        Optional ByVal firstRow As Long = DATA_START_ROW) As Variant
+    Dim rowSettings() As String, values As Variant, content As Variant, r As Long, resultColumn As Long
+    ReDim rowSettings(0 To Application.Max(0, lastRow - firstRow + 1))
     rowSettings(0) = CStr(lastRow)
-    If lastRow >= DATA_START_ROW Then
-        values = ws.Range(COL_WEB_LEVEL & DATA_START_ROW & ":" & COL_WEB_TASK_ID & lastRow).Value2
+    If lastRow >= firstRow Then
+        values = ws.Range(COL_WEB_LEVEL & firstRow & ":" & COL_WEB_TASK_ID & lastRow).Value2
+        content = ws.Range(COL_REQUEST & firstRow & ":" & COL_MODIFICATION & lastRow).Value2
         resultColumn = ws.Range(COL_WEB_RESULT & "1").Column - ws.Range(COL_WEB_LEVEL & "1").Column + 1
         For r = 1 To UBound(values, 1)
-            For c = 1 To UBound(values, 2)
-                ' Uploads change Y/N and the result automatically; neither is a row identity setting.
-                If c <> resultColumn Then
-                    raw = values(r, c)
-                    If IsError(raw) Then value = "#ERROR" Else value = CStr(raw)
-                    rowSettings(r) = rowSettings(r) & CStr(VarType(raw)) & ":" & CStr(Len(value)) & ":" & value
-                End If
-            Next c
+            rowSettings(r) = WebRowSettingSignature(values, r, resultColumn, WebCachedContentPresent(content(r, 1), content(r, 2)))
         Next r
     End If
     WebRowSettingsSnapshot = rowSettings
 End Function
+
+Private Function WebCachedContentPresent(ByVal requestValue As Variant, ByVal modificationValue As Variant) As Boolean
+    If IsError(requestValue) Or IsError(modificationValue) Then
+        WebCachedContentPresent = True
+    Else
+        WebCachedContentPresent = (Len(Trim$(CStr(requestValue))) > 0 Or Len(Trim$(CStr(modificationValue))) > 0)
+    End If
+End Function
+
+Private Function WebRowSettingSignature(ByRef values As Variant, ByVal rowIndex As Long, _
+                                        ByVal resultColumn As Long, ByVal hasContent As Boolean) As String
+    Dim c As Long, raw As Variant, value As String
+    If hasContent Then WebRowSettingSignature = "1|" Else WebRowSettingSignature = "0|"
+    For c = 1 To UBound(values, 2)
+        ' Uploads change Y/N and the result automatically; neither is a row identity setting.
+        If c <> resultColumn Then
+            raw = values(rowIndex, c)
+            If IsError(raw) Then value = "#ERROR" Else value = CStr(raw)
+            WebRowSettingSignature = WebRowSettingSignature & CStr(VarType(raw)) & ":" & CStr(Len(value)) & ":" & value
+        End If
+    Next c
+End Function
+
+Public Function WebCachedLastDataRow(ByVal ws As Worksheet) As Long
+    Dim cached As Variant
+    If mWebRowCache Is Nothing Then Exit Function
+    If Not mWebRowCache.Exists(ws.CodeName) Then Exit Function
+    cached = mWebRowCache(ws.CodeName)
+    WebCachedLastDataRow = CLng(cached(0))
+End Function
+
+Public Function WebTaskContentStructureChanged(ByVal ws As Worksheet, ByVal target As Range) As Boolean
+    Dim changed As Range, area As Range, beyond As Range, found As Range
+    Dim cached As Variant, cachedLast As Long, r As Long, lastRow As Long, firstAddress As String
+    Dim wasPresent As Boolean, isPresent As Boolean, signature As String
+    If ws Is Nothing Or target Is Nothing Then Exit Function
+    For Each area In target.Areas
+        If area.Columns.Count = ws.Columns.Count And area.Row + area.Rows.Count - 1 >= DATA_START_ROW Then
+            WebTaskContentStructureChanged = True
+            Exit Function
+        End If
+    Next area
+    Set changed = Intersect(target, Union(ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
+                                         ws.Range(COL_WEB_LEVEL & DATA_START_ROW & ":" & COL_WEB_LEVEL & ws.Rows.Count), _
+                                         ws.Range(COL_WEB_TASK_ID & DATA_START_ROW & ":" & COL_WEB_TASK_ID & ws.Rows.Count)))
+    If Not changed Is Nothing Then
+        WebTaskContentStructureChanged = True
+        Exit Function
+    End If
+    Set changed = Intersect(target, ws.Range(COL_REQUEST & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count))
+    If changed Is Nothing Then Exit Function
+    If mWebRowCache Is Nothing Then
+        WebTaskContentStructureChanged = True
+        Exit Function
+    End If
+    If Not mWebRowCache.Exists(ws.CodeName) Then
+        WebTaskContentStructureChanged = True
+        Exit Function
+    End If
+    cached = mWebRowCache(ws.CodeName)
+    cachedLast = CLng(cached(0))
+    For Each area In changed.Areas
+        lastRow = Application.Min(cachedLast, area.Row + area.Rows.Count - 1)
+        For r = area.Row To lastRow
+            signature = Left$(CStr(cached(r - DATA_START_ROW + 1)), 2)
+            If signature <> "0|" And signature <> "1|" Then
+                WebTaskContentStructureChanged = True
+                Exit Function
+            End If
+            wasPresent = (signature = "1|")
+            isPresent = WebCachedContentPresent(ws.Cells(r, COL_REQUEST).Value2, ws.Cells(r, COL_MODIFICATION).Value2)
+            If wasPresent <> isPresent Then
+                WebTaskContentStructureChanged = True
+                Exit Function
+            End If
+        Next r
+        If area.Row + area.Rows.Count - 1 > cachedLast Then
+            Set beyond = Intersect(area, ws.Rows(Application.Max(DATA_START_ROW, cachedLast + 1) & ":" & ws.Rows.Count))
+            If Not beyond Is Nothing Then
+                Set found = beyond.Find(What:="*", After:=beyond.Cells(beyond.Cells.CountLarge), LookIn:=xlValues, _
+                                        LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlNext, MatchCase:=False, SearchFormat:=False)
+                If Not found Is Nothing Then
+                    firstAddress = found.Address
+                    Do
+                        If WebCachedContentPresent(ws.Cells(found.Row, COL_REQUEST).Value2, ws.Cells(found.Row, COL_MODIFICATION).Value2) Then
+                            WebTaskContentStructureChanged = True
+                            Exit Function
+                        End If
+                        Set found = beyond.FindNext(found)
+                        If found Is Nothing Then Exit Do
+                    Loop While found.Address <> firstAddress
+                End If
+            End If
+        End If
+    Next area
+End Function
+
+Public Sub UpdateWebRowCacheForChange(ByVal ws As Worksheet, ByVal target As Range)
+    Dim changed As Range, tailChanges As Range, area As Range, cached As Variant, partial As Variant
+    Dim oldLast As Long, lastRow As Long, firstRow As Long, endRow As Long, r As Long, rowIndex As Long
+    If ws Is Nothing Or target Is Nothing Then Exit Sub
+    If mWebRowCache Is Nothing Then Exit Sub
+    If Not mWebRowCache.Exists(ws.CodeName) Then Exit Sub
+    Set changed = Intersect(target, Union(ws.Range(COL_WEB_LEVEL & DATA_START_ROW & ":" & COL_WEB_PROGRAM_ID & ws.Rows.Count), _
+                                         ws.Range(COL_WEB_TASK_ID & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count)))
+    Set tailChanges = Intersect(target, Union(ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_MINOR_CATEGORY & ws.Rows.Count), _
+                                             ws.Range(COL_REQUEST & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count), _
+                                             ws.Range(COL_NOTE & DATA_START_ROW & ":" & COL_ACTUAL_END & ws.Rows.Count), _
+                                             ws.Range(COL_MANUAL_STATUS & DATA_START_ROW & ":" & COL_WEEKLY_REPORT & ws.Rows.Count)))
+    If changed Is Nothing And tailChanges Is Nothing Then Exit Sub
+    cached = mWebRowCache(ws.CodeName)
+    oldLast = CLng(cached(0))
+    lastRow = oldLast
+    If Not tailChanges Is Nothing Then
+        For Each area In tailChanges.Areas
+            If area.Row + area.Rows.Count - 1 >= oldLast Then
+                lastRow = GetLastDataRow(ws)
+                Exit For
+            End If
+        Next area
+    End If
+    If lastRow <> oldLast Then
+        ReDim Preserve cached(0 To Application.Max(0, lastRow - DATA_START_ROW + 1))
+        cached(0) = CStr(lastRow)
+        If lastRow > oldLast Then
+            firstRow = Application.Max(DATA_START_ROW, oldLast + 1)
+            partial = WebRowSettingsSnapshot(ws, lastRow, firstRow)
+            For r = 1 To UBound(partial)
+                cached(firstRow - DATA_START_ROW + r) = partial(r)
+            Next r
+        End If
+    End If
+    If Not changed Is Nothing And lastRow >= DATA_START_ROW Then
+        Set changed = Intersect(changed, ws.Rows(DATA_START_ROW & ":" & lastRow))
+        If Not changed Is Nothing Then
+            For Each area In changed.Areas
+                firstRow = area.Row
+                endRow = firstRow + area.Rows.Count - 1
+                partial = WebRowSettingsSnapshot(ws, endRow, firstRow)
+                For r = 1 To UBound(partial)
+                    rowIndex = firstRow - DATA_START_ROW + r
+                    cached(rowIndex) = partial(r)
+                Next r
+            Next area
+        End If
+    End If
+    mWebRowCache(ws.CodeName) = cached
+End Sub
 
 Public Function WebRowDeletionKeepsSettings(ByVal ws As Worksheet, ByVal target As Range) As Boolean
     Dim area As Range, previous As Variant, current As Variant, previousIndex As Long, lastRow As Long, r As Long
@@ -667,10 +811,29 @@ Public Function WebTaskStructureIssue(ByVal ws As Worksheet) As String
     Dim stateWs As Worksheet, r As Long, taskRow As Long, groupRow As Long, sourceId As String
     Dim state As Object, taskWs As Worksheet, foundAnywhere As Boolean
     Dim rowMap As Object, entry As Object, member As Variant, memberId As String, owner As Long, memberWs As Worksheet
-    Dim mapRow As Long, mapLast As Long
+    Dim mapRow As Long, mapLast As Long, stateLast As Long, stateRows As Variant, outcome As String
+    Dim connections As Object, hasCheckedConnection As Boolean
     Set stateWs = WebStateSheet()
     If stateWs Is Nothing Then Exit Function
-    If stateWs.Cells(stateWs.Rows.Count, "A").End(xlUp).Row < WEB_STATE_FIRST_ROW Then Exit Function
+    stateLast = stateWs.Cells(stateWs.Rows.Count, "A").End(xlUp).Row
+    If stateLast < WEB_STATE_FIRST_ROW Then Exit Function
+    stateRows = stateWs.Range("A" & WEB_STATE_FIRST_ROW & ":M" & stateLast).Value2
+    Set connections = CreateObject("Scripting.Dictionary")
+    For r = 1 To UBound(stateRows, 1)
+        outcome = CStr(stateRows(r, 9))
+        If Len(CStr(stateRows(r, 4))) > 0 Or outcome = "등록 시작" Or outcome = "갱신 시작" Or _
+           outcome = "결과 미확인" Or outcome = "갱신 결과 미확인" Or outcome = "갱신 일부저장" Or outcome = "기존이력 확인필요" Then _
+            connections(CStr(stateRows(r, 1))) = True
+    Next r
+    For r = 1 To UBound(stateRows, 1)
+        If CStr(stateRows(r, 9)) <> "이력 삭제" Then
+            If connections.Exists(CStr(stateRows(r, 1))) Then
+                hasCheckedConnection = True
+                Exit For
+            End If
+        End If
+    Next r
+    If Not hasCheckedConnection Then Exit Function
     Set rowMap = CreateObject("Scripting.Dictionary")
     For Each taskWs In ThisWorkbook.Worksheets
         If CStr(taskWs.Cells(HEADER_ROW, COL_REQUEST).Value2) = "요청 내용" Then
@@ -687,10 +850,10 @@ Public Function WebTaskStructureIssue(ByVal ws As Worksheet) As String
             Next mapRow
         End If
     Next taskWs
-    For r = WEB_STATE_FIRST_ROW To stateWs.Cells(stateWs.Rows.Count, "A").End(xlUp).Row
-        sourceId = CStr(stateWs.Cells(r, "A").Value2)
-        If CStr(stateWs.Cells(r, "I").Value2) = "이력 삭제" Then GoTo NextState
-        If Not WebHasAnyConnection(sourceId) Then GoTo NextState
+    For r = 1 To UBound(stateRows, 1)
+        sourceId = CStr(stateRows(r, 1))
+        If CStr(stateRows(r, 9)) = "이력 삭제" Then GoTo NextState
+        If Not connections.Exists(sourceId) Then GoTo NextState
         taskRow = 0: foundAnywhere = rowMap.Exists(sourceId)
         If foundAnywhere Then
             Set entry = rowMap(sourceId)
@@ -705,13 +868,13 @@ Public Function WebTaskStructureIssue(ByVal ws As Worksheet) As String
         groupRow = WebGroupRootRow(ws, taskRow)
         If groupRow = 0 Then
             WebTaskStructureIssue = "등록된 업무의 레벨1 그룹이 없습니다: " & CStr(taskRow) & "행"
-        ElseIf GetWebTaskId(ws, groupRow) <> CStr(stateWs.Cells(r, "F").Value2) Or _
-               CStr(ws.Cells(groupRow, COL_WEB_LEVEL).Value2) <> CStr(stateWs.Cells(r, "G").Value2) Or _
+        ElseIf GetWebTaskId(ws, groupRow) <> CStr(stateRows(r, 6)) Or _
+               CStr(ws.Cells(groupRow, COL_WEB_LEVEL).Value2) <> CStr(stateRows(r, 7)) Or _
                WebRegistrationRootRow(ws, taskRow) <> taskRow Then
             WebTaskStructureIssue = "등록된 업무의 그룹·레벨·등록 단위가 바뀌었습니다: " & CStr(taskRow) & "행. 기존 구조를 복원한 뒤 갱신하세요."
         End If
         If Len(WebTaskStructureIssue) > 0 Then Exit Function
-        For Each member In Split(CStr(stateWs.Cells(r, "M").Value2), "|")
+        For Each member In Split(CStr(stateRows(r, 13)), "|")
             memberId = CStr(member)
             If Len(memberId) > 0 And memberId <> sourceId And rowMap.Exists(memberId) Then
                 Set entry = rowMap(memberId)

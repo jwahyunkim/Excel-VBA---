@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-27 김좌현 수정 : 입력 열·변경 그룹만 계층 계산하고 UI 전용 보호의 재설정 생략
 ' 2026-10-23 김좌현 수정 : WEB UPDATE 헤더로 변경하고 기존 웹등록 열의 중복 이전 방지
 ' 2026-10-23 김좌현 수정 : 하위 작업시간의 상위 합계와 입력 즉시 갱신 및 중복 집계 방지
 ' 2026-10-22 김좌현 수정 : 날짜 열 너비 일괄 적용과 덮어쓰는 열 맞춤 제거로 간트 새로고침 가속
@@ -585,31 +586,35 @@ Public Sub ApplyHierarchySummaryValues(ws As Worksheet, ByVal lastRow As Long, B
     Next r
 End Sub
 
-Public Sub UpdateTaskWorkMinutes(ByVal ws As Worksheet, ByVal lastRow As Long)
-    Dim r As Long, eventsEnabled As Boolean, wasProtected As Boolean
+Public Sub UpdateTaskWorkMinutes(ByVal ws As Worksheet, ByVal lastRow As Long, _
+                                 Optional ByVal firstRow As Long = DATA_START_ROW)
+    Dim r As Long, eventsEnabled As Boolean, wasProtected As Boolean, restoreProtection As Boolean
     Dim errorNumber As Long, errorText As String
     If ws Is Nothing Or lastRow < DATA_START_ROW Then Exit Sub
+    firstRow = Application.Max(DATA_START_ROW, firstRow)
+    If firstRow > lastRow Then Exit Sub
     If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
        IsWebUtilitySheet(ws) Then Exit Sub
     If CStr(ws.Cells(HEADER_ROW, COL_REQUEST).Value2) <> "요청 내용" Or _
        CStr(ws.Cells(HEADER_ROW, COL_WORK_MINUTES).Value2) <> "작업시간(분)" Then Exit Sub
     eventsEnabled = Application.EnableEvents
     wasProtected = ws.ProtectContents
+    If wasProtected Then restoreProtection = Not ws.ProtectionMode
     On Error GoTo Failed
     Application.EnableEvents = False
-    If wasProtected Then UnprotectTaskSheet ws
-    For r = lastRow To DATA_START_ROW Step -1
+    If restoreProtection Then UnprotectTaskSheet ws
+    For r = lastRow To firstRow Step -1
         If HasTaskContent(ws, r) Then
             If HasChildTask(ws, r, lastRow) Then SetParentWorkMinutes ws, r, lastRow
         End If
     Next r
-    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    If restoreProtection Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     Application.EnableEvents = eventsEnabled
     Exit Sub
 Failed:
     errorNumber = Err.Number: errorText = Err.Description
     On Error Resume Next
-    If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    If restoreProtection Then ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
     Application.EnableEvents = eventsEnabled
     On Error GoTo 0
     Err.Raise errorNumber, "UpdateTaskWorkMinutes", errorText
@@ -1211,53 +1216,88 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     ActiveWindow.DisplayGridlines = False
 End Sub
 
-Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Range)
-    Dim watchedRange As Range
-    Dim changedRange As Range
-    Dim lastRow As Long
-    Dim r As Long
-    Dim changedArea As Range
-    Dim issueMessages As String
-    Dim changedClassificationOrLevel As Boolean
+Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Range, _
+                                     Optional ByVal taskStructureChanged As Boolean = True)
+    Dim levelChanges As Range, classificationChanges As Range, bodyChanges As Range
+    Dim ownerChanges As Range, minuteChanges As Range, structureChanges As Range
+    Dim classChanges As Range, ownerAffected As Range, minuteAffected As Range, changedArea As Range
+    Dim lastRow As Long, r As Long, firstChanged As Long, lastChanged As Long
+    Dim firstGroupRow As Long, lastGroupRow As Long, changedRows As Object
+    Dim issueMessages As String, structureProtectionNeeded As Boolean
+    Dim errorNumber As Long, errorText As String
 
     If ws Is Nothing Or Target Is Nothing Then Exit Sub
     If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or _
        IsWebUtilitySheet(ws) Then Exit Sub
 
-    Set watchedRange = Union( _
-        ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count), _
-        ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_MINOR_CATEGORY & ws.Rows.Count), _
-        ws.Range(COL_REQUEST & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count), _
-        ws.Range(COL_OWNER & DATA_START_ROW & ":" & COL_OWNER & ws.Rows.Count))
-    Set changedRange = Intersect(Target, watchedRange)
-    If changedRange Is Nothing Then
-        If Not Intersect(Target, ws.Range(COL_WORK_MINUTES & DATA_START_ROW & ":" & _
-                                         COL_WORK_MINUTES & ws.Rows.Count)) Is Nothing Then _
-            UpdateTaskWorkMinutes ws, GetLastDataRow(ws)
-        Exit Sub
+    Set levelChanges = Intersect(Target, ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_LEVEL & ws.Rows.Count))
+    Set classificationChanges = Intersect(Target, ws.Range(COL_TYPE & DATA_START_ROW & ":" & COL_MINOR_CATEGORY & ws.Rows.Count))
+    Set bodyChanges = Intersect(Target, ws.Range(COL_REQUEST & DATA_START_ROW & ":" & COL_MODIFICATION & ws.Rows.Count))
+    Set ownerChanges = Intersect(Target, ws.Range(COL_OWNER & DATA_START_ROW & ":" & COL_OWNER & ws.Rows.Count))
+    Set minuteChanges = Intersect(Target, ws.Range(COL_WORK_MINUTES & DATA_START_ROW & ":" & COL_WORK_MINUTES & ws.Rows.Count))
+
+    Set classChanges = levelChanges
+    If Not classificationChanges Is Nothing Then
+        If classChanges Is Nothing Then
+            Set classChanges = classificationChanges
+        Else
+            Set classChanges = Union(classChanges, classificationChanges)
+        End If
     End If
+    Set structureChanges = levelChanges
+    If taskStructureChanged And Not bodyChanges Is Nothing Then
+        If structureChanges Is Nothing Then
+            Set structureChanges = bodyChanges
+        Else
+            Set structureChanges = Union(structureChanges, bodyChanges)
+        End If
+    End If
+    Set ownerAffected = ownerChanges
+    Set minuteAffected = minuteChanges
+    If Not structureChanges Is Nothing Then
+        If ownerAffected Is Nothing Then Set ownerAffected = structureChanges Else Set ownerAffected = Union(ownerAffected, structureChanges)
+        If minuteAffected Is Nothing Then Set minuteAffected = structureChanges Else Set minuteAffected = Union(minuteAffected, structureChanges)
+    End If
+    If classChanges Is Nothing And ownerAffected Is Nothing And minuteAffected Is Nothing Then Exit Sub
 
     lastRow = GetLastDataRow(ws)
-    For Each changedArea In changedRange.Areas
-        If changedArea.Row + changedArea.Rows.Count - 1 > lastRow Then
-            lastRow = changedArea.Row + changedArea.Rows.Count - 1
-        End If
-    Next changedArea
+    If lastRow < DATA_START_ROW Then Exit Sub
+    If Not structureChanges Is Nothing Then
+        If ws.ProtectContents Then structureProtectionNeeded = ws.ProtectionMode
+    End If
+    If Not classChanges Is Nothing Then
+        Set changedRows = CreateObject("Scripting.Dictionary")
+        firstChanged = lastRow + 1
+        lastChanged = DATA_START_ROW - 1
+        For Each changedArea In classChanges.Areas
+            firstChanged = Application.Min(firstChanged, changedArea.Row)
+            lastChanged = Application.Max(lastChanged, Application.Min(lastRow, changedArea.Row + changedArea.Rows.Count - 1))
+            For r = changedArea.Row To Application.Min(lastRow, changedArea.Row + changedArea.Rows.Count - 1)
+                changedRows(CStr(r)) = True
+            Next r
+        Next changedArea
+        For r = firstChanged To lastChanged
+            If changedRows.Exists(CStr(r)) Then
+                EnforceTaskModuleFromParent ws, r, issueMessages
+                PropagateTaskModuleToDescendants ws, r, lastRow
+            End If
+        Next r
+    End If
 
-    For r = DATA_START_ROW To lastRow
-        changedClassificationOrLevel = _
-            Not Intersect(changedRange, ws.Cells(r, COL_LEVEL)) Is Nothing Or _
-            Not Intersect(changedRange, ws.Range(COL_TYPE & r & ":" & _
-                                                 COL_MINOR_CATEGORY & r)) Is Nothing
-
-        If changedClassificationOrLevel Then
-            EnforceTaskModuleFromParent ws, r, issueMessages
-            PropagateTaskModuleToDescendants ws, r, lastRow
-        End If
-    Next r
-
-    SynchronizeTaskHierarchyOwners ws, lastRow
-    UpdateTaskWorkMinutes ws, lastRow
+    If Not ownerAffected Is Nothing Then
+        TaskChangeGroupBounds ws, ownerAffected, lastRow, Not structureChanges Is Nothing, firstGroupRow, lastGroupRow
+        SynchronizeTaskHierarchyOwners ws, lastGroupRow, firstGroupRow
+    End If
+    If Not minuteAffected Is Nothing Then
+        TaskChangeGroupBounds ws, minuteAffected, lastRow, Not structureChanges Is Nothing, firstGroupRow, lastGroupRow
+        UpdateTaskWorkMinutes ws, lastGroupRow, firstGroupRow
+    End If
+    If structureProtectionNeeded Then
+        On Error GoTo ProtectionFailed
+        UnprotectTaskSheet ws
+        ApplyCalculatedColumnsProtection ws, lastRow
+        On Error GoTo 0
+    End If
 
     If Len(issueMessages) > 0 Then
         MsgBox "분류 계층 정합성을 자동으로 수정했습니다." & vbCrLf & vbCrLf & _
@@ -1266,6 +1306,46 @@ Public Sub HandleTaskHierarchyChange(ByVal ws As Worksheet, ByVal Target As Rang
                vbExclamation, _
                "분류 정합성 오류"
     End If
+    Exit Sub
+ProtectionFailed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    ApplyCalculatedColumnsProtection ws, lastRow
+    On Error GoTo 0
+    Err.Raise errorNumber, "HandleTaskHierarchyChange", errorText
+End Sub
+
+Private Sub TaskChangeGroupBounds(ByVal ws As Worksheet, ByVal changed As Range, _
+                                  ByVal lastRow As Long, ByVal includePreviousRoot As Boolean, _
+                                  ByRef firstGroupRow As Long, ByRef lastGroupRow As Long)
+    Dim area As Range, firstChanged As Long, lastChanged As Long, searchRow As Long, r As Long
+    firstChanged = lastRow
+    lastChanged = DATA_START_ROW
+    For Each area In changed.Areas
+        firstChanged = Application.Min(firstChanged, area.Row)
+        lastChanged = Application.Max(lastChanged, Application.Min(lastRow, area.Row + area.Rows.Count - 1))
+    Next area
+    searchRow = firstChanged
+    ' A new/removed level1 row also changes the group immediately above it.
+    If includePreviousRoot Then searchRow = searchRow - 1
+    firstGroupRow = DATA_START_ROW
+    For r = searchRow To DATA_START_ROW Step -1
+        If HasTaskContent(ws, r) Then
+            If GetTaskLevel(ws, r) = 1 Then
+                firstGroupRow = r
+                Exit For
+            End If
+        End If
+    Next r
+    lastGroupRow = lastRow
+    For r = lastChanged + 1 To lastRow
+        If HasTaskContent(ws, r) Then
+            If GetTaskLevel(ws, r) = 1 Then
+                lastGroupRow = r - 1
+                Exit For
+            End If
+        End If
+    Next r
 End Sub
 
 Public Sub SynchronizeTaskHierarchyModules(ByVal ws As Worksheet, _
@@ -1295,14 +1375,17 @@ Public Sub SynchronizeTaskHierarchyModules(ByVal ws As Worksheet, _
 End Sub
 
 Public Sub SynchronizeTaskHierarchyOwners(ByVal ws As Worksheet, _
-                                          ByVal lastRow As Long)
+                                          ByVal lastRow As Long, _
+                                          Optional ByVal firstRow As Long = DATA_START_ROW)
     Dim r As Long
     Dim ownerText As String
 
     If ws Is Nothing Then Exit Sub
     If lastRow < DATA_START_ROW Then Exit Sub
+    firstRow = Application.Max(DATA_START_ROW, firstRow)
+    If firstRow > lastRow Then Exit Sub
 
-    For r = lastRow To DATA_START_ROW Step -1
+    For r = lastRow To firstRow Step -1
         If HasTaskContent(ws, r) And HasChildTask(ws, r, lastRow) Then
             ownerText = GetDescendantLeafOwnerText(ws, r, lastRow)
             If Len(ownerText) = 0 Then
