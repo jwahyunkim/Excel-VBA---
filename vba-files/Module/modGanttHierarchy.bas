@@ -14,6 +14,8 @@ Option Explicit
 Private mTaskOutlineViewStarting As Boolean
 Private mTaskViewResetSheets As Object
 Private mTaskVisibleColumns As Object
+Private mTaskOutlineTickScheduled As Boolean
+Private mTaskOutlineTickAt As Date
 Private Const TASK_FOLD_RANGE_NAME As String = "_GanttDetailFoldRange"
 Private Const TASK_FOLD_SELECTION_NAME As String = "_GanttFoldSelection"
 
@@ -503,7 +505,38 @@ Failed:
 End Sub
 
 Public Sub StopTaskOutlineViewMonitor()
+    If mTaskOutlineTickScheduled Then
+        On Error Resume Next
+        Application.OnTime EarliestTime:=mTaskOutlineTickAt, _
+                           Procedure:=TaskOutlineTickProcedure(), Schedule:=False
+        On Error GoTo 0
+        mTaskOutlineTickScheduled = False
+    End If
     Set mTaskVisibleColumns = Nothing
+End Sub
+
+Private Function TaskOutlineTickProcedure() As String
+    TaskOutlineTickProcedure = "'" & Replace(ThisWorkbook.Name, "'", "''") & _
+                               "'!RunScheduledTaskOutlineViewTick"
+End Function
+
+Private Sub ScheduleTaskOutlineViewTick()
+    If mTaskOutlineTickScheduled Then Exit Sub
+    mTaskOutlineTickAt = Now + TimeSerial(0, 0, 1)
+    Application.OnTime EarliestTime:=mTaskOutlineTickAt, _
+                       Procedure:=TaskOutlineTickProcedure(), Schedule:=True
+    mTaskOutlineTickScheduled = True
+End Sub
+
+Public Sub RunScheduledTaskOutlineViewTick()
+    Dim ws As Worksheet
+    mTaskOutlineTickScheduled = False
+    Set ws = ActiveTaskOutlineSheet()
+    If ws Is Nothing Then Exit Sub
+    If mTaskVisibleColumns Is Nothing Then Exit Sub
+    If Not mTaskVisibleColumns.Exists(ws.CodeName) Then Exit Sub
+    TaskOutlineViewTick
+    RecordTaskVisibleColumns ws
 End Sub
 
 Private Function TaskVisibleColumnSignature(ByVal ws As Worksheet) As String
@@ -527,8 +560,8 @@ Public Sub MaintainTaskOutlineOnSelection(ByVal ws As Worksheet)
     If Not mTaskVisibleColumns.Exists(ws.CodeName) Then Exit Sub
     signature = TaskVisibleColumnSignature(ws)
     If signature = CStr(mTaskVisibleColumns(ws.CodeName)) Then Exit Sub
-    TaskOutlineViewTick
-    RecordTaskVisibleColumns ws
+    ' Changing panes during SheetSelectionChange can disconnect Excel's COM view.
+    ScheduleTaskOutlineViewTick
 End Sub
 
 Public Sub TaskOutlineViewTick()
