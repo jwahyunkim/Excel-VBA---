@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param()
 
+# 2026-10-29 김좌현 수정 : 태그 없는 개발 완료 후 다음 버전 시작·사전 검사·릴리즈 회귀를 검증합니다.
 $ErrorActionPreference = 'Stop'
 $workflowTestRoot = Split-Path -Parent $PSScriptRoot
 $workflowScriptPath = Join-Path $workflowTestRoot 'version-workflow.ps1'
@@ -22,8 +23,8 @@ $workflowFixtureRoot = Join-Path ([IO.Path]::GetTempPath()) (
 $workflowCases = [Collections.Generic.List[object]]::new()
 
 function Add-WorkflowCase {
-    param([string]$Name, [scriptblock]$Body)
-    $workflowCases.Add([pscustomobject]@{ Name = $Name; Body = $Body })
+    param([string]$Name, [scriptblock]$Body, $Data = $null)
+    $workflowCases.Add([pscustomobject]@{ Name = $Name; Body = $Body; Data = $Data })
 }
 
 function Assert-WorkflowEqual {
@@ -310,6 +311,170 @@ Add-WorkflowCase 'development completion merges into main without releasing' {
             'Development completion must not change the release branch'
         Assert-WorkflowTrue ($null -eq (Get-PendingVersionRelease)) `
             'Development completion must not start release progress'
+    }
+    finally { Pop-Location }
+}
+
+foreach ($versionChoice in @(
+    @{ Part = 'patch'; Version = '1.0.2' },
+    @{ Part = 'minor'; Version = '1.1.0' },
+    @{ Part = 'major'; Version = '2.0.0' }
+)) {
+    $choicePart = $versionChoice.Part
+    $choiceVersion = $versionChoice.Version
+    Add-WorkflowCase "untagged completion supports the next $choicePart development" {
+        param($choice)
+        $choicePart = $choice.Part
+        $choiceVersion = $choice.Version
+        $fixturePath = New-WorkflowMergeRepository
+        Push-Location $fixturePath
+        try {
+            . $workflowGhMockDefinitions
+            function Invoke-ReleaseSecurityCommand {
+                param([string]$ReleaseAction)
+                Assert-WorkflowEqual $ReleaseAction 'SyncDev' 'Development start only synchronizes the workbook'
+            }
+            Set-DevelopmentWorkbookVersion -TargetVersion '1.0.1'
+            Complete-VersionDevelopment
+            $beforeHash = (Get-FileHash -LiteralPath (Get-ConfigFieldValue)).Hash
+            # Start from a different, older branch to verify that main is selected before reading the version.
+            $null = Invoke-FixtureGit switch --quiet release/v1.0.1
+            $Value = $choicePart
+            Start-VersionDevelopment
+            Assert-WorkflowEqual (Get-CurrentBranch) "develop/v$choiceVersion" 'The next version must use the merged workbook'
+            Assert-WorkflowEqual (Get-ConfigFieldValue) "workbooks/dev/Report v$choiceVersion.xlsm" 'Workbook and config must use the next version'
+            Assert-WorkflowEqual (Get-FileHash -LiteralPath (Get-ConfigFieldValue)).Hash $beforeHash 'Version renaming must preserve workbook bytes'
+            Assert-WorkflowEqual (Get-LatestSemanticVersion).Tag 'v1.0.0' 'Starting development must not manufacture a release tag'
+            Assert-WorkflowEqual (Invoke-FixtureGit diff --cached --name-only) '' 'Starting development must not stage changes'
+            Assert-WorkflowEqual (Get-ConfiguredParentBranch -Name "develop/v$choiceVersion") 'main' 'Parent must remain main'
+        }
+        finally { Pop-Location }
+    } -Data $versionChoice
+}
+
+Add-WorkflowCase 'version selection reads updated remote main before offering the next version' {
+    $fixturePath = New-WorkflowMergeRepository
+    Push-Location $fixturePath
+    try {
+        . $workflowGhMockDefinitions
+        function Invoke-ReleaseSecurityCommand { param([string]$ReleaseAction) }
+        $oldMain = Invoke-FixtureGit rev-parse main
+        Set-DevelopmentWorkbookVersion -TargetVersion '1.0.1'
+        Complete-VersionDevelopment
+        $null = Invoke-FixtureGit switch --quiet release/v1.0.1
+        $null = Invoke-FixtureGit branch -f main $oldMain
+        $Value = 'patch'
+        Start-VersionDevelopment
+        Assert-WorkflowEqual (Get-CurrentBranch) 'develop/v1.0.2' 'Remote workbook version must be read after pulling main'
+    }
+    finally { Pop-Location }
+}
+
+Add-WorkflowCase 'automatic security patch and status include untagged completed development' {
+    $fixturePath = New-WorkflowMergeRepository
+    Push-Location $fixturePath
+    try {
+        . $workflowGhMockDefinitions
+        function Invoke-ReleaseSecurityCommand {
+            param([string]$ReleaseAction)
+            $script:workflowSecurityCalls.Add($ReleaseAction)
+        }
+        Set-DevelopmentWorkbookVersion -TargetVersion '1.0.1'
+        Complete-VersionDevelopment
+        $statusText = (Show-WorkflowStatus 6>&1 | Out-String)
+        Assert-WorkflowTrue ($statusText -match 'v1\.0\.0' -and $statusText -match 'v1\.0\.1 \(main\)' -and $statusText -match 'v1\.0\.2') `
+            'Status must distinguish the latest release, main development version, and next patch'
+        $version = Start-AutomaticPatchDevelopment -Reason 'fixture security update'
+        Assert-WorkflowEqual $version '1.0.2' 'Automatic patch must advance beyond untagged completed development'
+        Assert-WorkflowEqual (Get-ConfigFieldValue) 'workbooks/dev/Report v1.0.2.xlsm' 'Automatic patch must align config'
+        Assert-WorkflowEqual ($script:workflowSecurityCalls -join ',') 'SyncDev' 'Automatic patch must preserve security synchronization'
+    }
+    finally { Pop-Location }
+}
+
+Add-WorkflowCase 'a newer release tag prevents version reuse when the base workbook is older' {
+    $fixturePath = New-WorkflowMergeRepository
+    Push-Location $fixturePath
+    try {
+        . $workflowGhMockDefinitions
+        function Invoke-ReleaseSecurityCommand { param([string]$ReleaseAction) }
+        $null = Invoke-FixtureGit tag v1.0.9 main
+        $Value = 'patch'
+        Start-VersionDevelopment
+        Assert-WorkflowEqual (Get-CurrentBranch) 'develop/v1.0.10' 'Version comparison must be numeric and include newer release tags'
+        Assert-WorkflowEqual (Get-ConfigFieldValue) 'workbooks/dev/Report v1.0.10.xlsm' 'Rename must validate the actual workbook version'
+    }
+    finally { Pop-Location }
+}
+
+foreach ($invalidWorkbook in @('missing', 'collision')) {
+    Add-WorkflowCase "a $invalidWorkbook workbook stops before creating a development branch" {
+        param($invalidWorkbook)
+        $fixturePath = New-WorkflowMergeRepository
+        Push-Location $fixturePath
+        try {
+            . $workflowGhMockDefinitions
+            $null = Invoke-FixtureGit switch --quiet main
+            if ($invalidWorkbook -eq 'missing') {
+                Set-ConfigFieldValue -Value 'workbooks/dev/Missing v1.0.0.xlsm'
+            }
+            else {
+                [IO.File]::WriteAllText((Join-Path $fixturePath 'workbooks/dev/Report v1.1.0.xlsm'), 'existing target must survive')
+            }
+            $null = Invoke-FixtureGit add --all
+            $null = Invoke-FixtureGit commit --quiet -m 'fixture: invalid workbook setup'
+            $null = Invoke-FixtureGit push --quiet origin main
+            $beforeConfig = Get-ConfigFieldValue
+            $Value = 'minor'
+            $caught = $null
+            try { Start-VersionDevelopment } catch { $caught = $_ }
+            Assert-WorkflowTrue ($null -ne $caught) 'Invalid workbook must stop development start'
+            Assert-WorkflowEqual (Get-CurrentBranch) 'main' 'Failure must leave the parent branch selected'
+            Assert-WorkflowTrue (-not (Test-LocalBranch 'develop/v1.1.0')) 'Invalid input must not create a local branch'
+            Assert-WorkflowEqual (Invoke-FixtureGit ls-remote origin refs/heads/develop/v1.1.0) '' 'Invalid input must not publish a remote branch'
+            Assert-WorkflowEqual (Get-ConfigFieldValue) $beforeConfig 'Validation must preserve config'
+            Assert-WorkflowEqual (Invoke-FixtureGit status --porcelain) '' 'Validation must preserve workbook files'
+        }
+        finally { Pop-Location }
+    } -Data $invalidWorkbook
+}
+
+Add-WorkflowCase 'release accepts a next patch after an untagged completed version' {
+    $fixturePath = New-WorkflowMergeRepository
+    Push-Location $fixturePath
+    try {
+        . $workflowGhMockDefinitions
+        function Invoke-ReleaseSecurityCommand {
+            param([string]$ReleaseAction, [string]$OutputPath)
+            if ($ReleaseAction -eq 'SyncDev') { return }
+            Invoke-FixtureSecurity $ReleaseAction $OutputPath
+        }
+        Set-DevelopmentWorkbookVersion -TargetVersion '1.0.1'
+        Complete-VersionDevelopment
+        $Value = 'patch'
+        Start-VersionDevelopment
+        Complete-VersionDevelopmentAndRelease
+        Assert-WorkflowEqual (Get-CurrentBranch) 'main' 'Release after an untagged version must complete on main'
+        Assert-WorkflowEqual (Get-LatestSemanticVersion).Tag 'v1.0.2' 'The new development version must be released'
+        Assert-WorkflowEqual (Invoke-FixtureGit tag --list v1.0.1) '' 'The skipped version must remain untagged'
+        Assert-WorkflowEqual ($script:workflowSecurityCalls -join ',') 'Build,Validate' 'Release must still build and validate'
+        Assert-WorkflowTrue ($null -eq (Get-PendingVersionRelease)) 'Release progress must be cleared after publication'
+    }
+    finally { Pop-Location }
+}
+
+Add-WorkflowCase 'release rejects a version outside the base version increments before building' {
+    $fixturePath = New-WorkflowMergeRepository
+    Push-Location $fixturePath
+    try {
+        . $workflowGhMockDefinitions
+        $pending = Set-PendingVersionRelease -Version '1.0.9' -Base main -Development develop/v1.0.9
+        $caught = $null
+        try { Invoke-PendingVersionRelease -Pending $pending } catch { $caught = $_ }
+        Assert-WorkflowTrue ($null -ne $caught) 'An arbitrary version jump must still be rejected'
+        Assert-WorkflowEqual $script:workflowGhCommands.Count 0 'Invalid release must not create or merge a PR'
+        Assert-WorkflowEqual $script:workflowSecurityCalls.Count 0 'Invalid release must not build an artifact'
+        Assert-WorkflowTrue (-not (Test-LocalBranch 'release/v1.0.9')) 'Invalid release must not create a release branch'
     }
     finally { Pop-Location }
 }
@@ -623,8 +788,11 @@ try {
                 $DefaultVersionBaseBranch = 'main'
                 $SourceBranch = ''
                 $TargetBranch = ''
+                $BaseBranch = ''
+                $Value = ''
+                $WorkflowSupportFiles = @('version-workflow.ps1', 'tests/test-version-workflow.ps1', 'WORKFLOW_GUIDE.md')
                 $script:workflowSecurityCalls = [Collections.Generic.List[string]]::new()
-                & $workflowCase.Body
+                & $workflowCase.Body $workflowCase.Data
             } 6> $null | Out-Null
             $workflowPassed++
             Write-Host ('PASS: ' + $workflowCase.Name)

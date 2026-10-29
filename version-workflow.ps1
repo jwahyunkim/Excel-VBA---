@@ -29,6 +29,7 @@ param(
 #   현재 개발 완료:       .\version-workflow.ps1 -Action Complete
 #   정식 릴리즈:         .\version-workflow.ps1 -Action Release
 #   현재 버전 개발 취소:  .\version-workflow.ps1 -Action CancelVersion
+# 2026-10-29 김좌현 수정 : 태그 없이 병합한 개발본을 버전 계산·릴리즈 검사에 반영하고 브랜치 생성 전 파일을 검증합니다.
 
 # ============================================================================
 # 사용자 설정
@@ -159,6 +160,39 @@ function Get-NextSemanticVersion {
         "major" { return "$($CurrentVersion.Major + 1).0.0" }
         default { throw "버전 증가 단위는 patch, minor, major 중 하나여야 합니다: $Part" }
     }
+}
+
+function Get-DevelopmentBaseVersion {
+    param([string]$BaseRef = "", [string]$ExcludeTag = "")
+
+    $latestRelease = Get-LatestSemanticVersion -ExcludeTag $ExcludeTag
+    $excelFile = if ([string]::IsNullOrWhiteSpace($BaseRef)) {
+        Get-ConfigFieldValue
+    }
+    else {
+        $baseConfig = (Get-GitOutput -Arguments @("show", "${BaseRef}:$ConfigFile")) | ConvertFrom-Json
+        [string]$baseConfig.$ConfigField
+    }
+    if ($excelFile -notmatch 'v(\d+)\.(\d+)\.(\d+)\.xlsm$') {
+        throw "$ConfigFile 의 '$ConfigField' 파일명에서 vA.B.C 버전을 찾지 못했습니다: $excelFile"
+    }
+
+    $workbookVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+    $baseVersion = [PSCustomObject]@{
+        Tag = "v$workbookVersion"
+        Version = $workbookVersion
+        Major = [int64]$Matches[1]
+        Minor = [int64]$Matches[2]
+        Patch = [int64]$Matches[3]
+        WorkbookVersion = $workbookVersion
+    }
+    # 개발 완료는 태그를 만들지 않으므로 부모 개발본과 최신 배포 태그 중 큰 버전을 사용합니다.
+    if ([version]$latestRelease.Version -gt [version]$workbookVersion) {
+        foreach ($field in @('Tag', 'Version', 'Major', 'Minor', 'Patch')) {
+            $baseVersion.$field = $latestRelease.$field
+        }
+    }
+    return $baseVersion
 }
 
 function Resolve-VersionPart {
@@ -417,7 +451,8 @@ function Get-DevelopmentVersionForBranch {
 function Set-DevelopmentWorkbookVersion {
     param(
         [Parameter(Mandatory = $true)][string]$TargetVersion,
-        [string]$ExpectedCurrentVersion = ""
+        [string]$ExpectedCurrentVersion = "",
+        [switch]$ValidateOnly
     )
 
     $oldExcelFile = Get-ConfigFieldValue
@@ -453,6 +488,7 @@ function Set-DevelopmentWorkbookVersion {
     if (Test-Path -LiteralPath $newExcelFile) {
         throw "변경할 버전의 개발 원본이 이미 존재합니다: $newExcelFile"
     }
+    if ($ValidateOnly) { return }
 
     $oldWorkbookPath = Resolve-WorkflowPath -Path $oldExcelFile
     $newWorkbookPath = Resolve-WorkflowPath -Path $newExcelFile
@@ -497,9 +533,12 @@ function Start-AutomaticPatchDevelopment {
     Invoke-Git -Arguments @("fetch", "origin", "--tags", "--prune")
     Assert-MainMatchesRemote -BranchName $DefaultVersionBaseBranch
 
-    $currentVersion = Get-LatestSemanticVersion
+    $currentVersion = Get-DevelopmentBaseVersion
     $nextVersion = Get-NextSemanticVersion -CurrentVersion $currentVersion -Part "patch"
     $developmentBranch = "develop/v$nextVersion"
+
+    Set-DevelopmentWorkbookVersion -TargetVersion $nextVersion `
+        -ExpectedCurrentVersion $currentVersion.WorkbookVersion -ValidateOnly
 
     if ((Test-LocalBranch -Name $developmentBranch) -or
         (Test-RemoteTrackingBranch -Name $developmentBranch)) {
@@ -516,7 +555,7 @@ function Start-AutomaticPatchDevelopment {
     Set-ConfiguredParentBranch -Name $developmentBranch -Parent $DefaultVersionBaseBranch
     Set-DevelopmentWorkbookVersion `
         -TargetVersion $nextVersion `
-        -ExpectedCurrentVersion $currentVersion.Version
+        -ExpectedCurrentVersion $currentVersion.WorkbookVersion
     Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
     Invoke-Git -Arguments @("push", "-u", "origin", $developmentBranch)
 
@@ -590,11 +629,14 @@ function Complete-SecurityMutationAndRelease {
 
 function Show-WorkflowStatus {
     $latestVersion = Get-LatestSemanticVersion
-    $nextPatch = Get-NextSemanticVersion -CurrentVersion $latestVersion -Part "patch"
+    $statusBase = if ([string]::IsNullOrWhiteSpace($BaseBranch)) { $DefaultVersionBaseBranch } else { $BaseBranch.Trim() }
+    $developmentBase = Get-DevelopmentBaseVersion -BaseRef $statusBase
+    $nextPatch = Get-NextSemanticVersion -CurrentVersion $developmentBase -Part "patch"
     $currentBranch = Get-CurrentBranch
 
     Write-Host ""
     Write-Host "최신 릴리즈     : $($latestVersion.Tag)"
+    Write-Host "개발 기준       : $($developmentBase.Tag) ($statusBase)"
     Write-Host "다음 patch      : v$nextPatch"
     Write-Host "Config          : $ConfigFile -> $ConfigField"
     Write-Host "현재 Excel      : $(Get-ConfigFieldValue)"
@@ -936,17 +978,22 @@ function Ensure-ReleaseBranch {
 function Start-VersionDevelopment {
     Invoke-Git -Arguments @("fetch", "origin", "--tags", "--prune")
 
-    $currentVersion = Get-LatestSemanticVersion
-    $versionPart = Resolve-VersionPart -RequestedPart $Value -CurrentVersion $currentVersion
-    $nextVersion = Get-NextSemanticVersion -CurrentVersion $currentVersion -Part $versionPart
-    $developmentBranch = "develop/v$nextVersion"
-
     $resolvedBaseBranch = if ([string]::IsNullOrWhiteSpace($BaseBranch)) {
         $DefaultVersionBaseBranch
     }
     else {
         $BaseBranch.Trim()
     }
+
+    Assert-ValidBranchName -Name $resolvedBaseBranch
+    Assert-StartWorkingTreeIsSafe
+    Switch-ToUpdatedBranch -Name $resolvedBaseBranch
+    $currentVersion = Get-DevelopmentBaseVersion
+    $versionPart = Resolve-VersionPart -RequestedPart $Value -CurrentVersion $currentVersion
+    $nextVersion = Get-NextSemanticVersion -CurrentVersion $currentVersion -Part $versionPart
+    $developmentBranch = "develop/v$nextVersion"
+    Set-DevelopmentWorkbookVersion -TargetVersion $nextVersion `
+        -ExpectedCurrentVersion $currentVersion.WorkbookVersion -ValidateOnly
 
     Create-WorkBranch `
         -RequestedBaseBranch $resolvedBaseBranch `
@@ -955,7 +1002,7 @@ function Start-VersionDevelopment {
 
     Set-DevelopmentWorkbookVersion `
         -TargetVersion $nextVersion `
-        -ExpectedCurrentVersion $currentVersion.Version
+        -ExpectedCurrentVersion $currentVersion.WorkbookVersion
     Invoke-ReleaseSecurityCommand -ReleaseAction SyncDev
 
     Write-Host ""
@@ -1015,7 +1062,7 @@ function Prepare-ReleaseCommit {
 
     $fileVersion = $versionMatches[0].Value.TrimStart('v', 'V')
     if ($fileVersion -notin @($PreviousVersion, $ReleaseVersion)) {
-        throw "최신 태그(v$PreviousVersion)와 Excel 파일 버전(v$fileVersion)이 일치하지 않습니다."
+        throw "개발 기준(v$PreviousVersion) 또는 릴리즈(v$ReleaseVersion)와 Excel 파일 버전(v$fileVersion)이 일치하지 않습니다."
     }
 
     $newExcelFile = [regex]::Replace(
@@ -1561,11 +1608,13 @@ function Invoke-PendingVersionRelease {
         return
     }
     $previousVersion = Get-LatestSemanticVersion -ExcludeTag $tag
-    $validVersions = @("patch", "minor", "major" | ForEach-Object {
-        Get-NextSemanticVersion -CurrentVersion $previousVersion -Part $_
+    $baseRef = if (Test-RemoteTrackingBranch -Name $Pending.Base) { "origin/$($Pending.Base)" } else { $Pending.Base }
+    $developmentBase = Get-DevelopmentBaseVersion -BaseRef $baseRef -ExcludeTag $tag
+    $validVersions = @($developmentBase.Version) + @("patch", "minor", "major" | ForEach-Object {
+        Get-NextSemanticVersion -CurrentVersion $developmentBase -Part $_
     })
-    if ($Pending.Version -notin $validVersions) {
-        throw "릴리즈 $tag 은 최신 태그 $($previousVersion.Tag)의 올바른 다음 버전이 아닙니다."
+    if ($Pending.Version -notin $validVersions -or [version]$Pending.Version -le [version]$previousVersion.Version) {
+        throw "릴리즈 $tag 은 개발 기준 $($developmentBase.Tag)의 현재/다음 버전이며 최신 태그 $($previousVersion.Tag)보다 높아야 합니다."
     }
     # release 브랜치와 로컬 진행 기록은 태그 푸시 확인까지 유지합니다.
     if ((Get-CurrentBranch) -ne $releaseBranch) {
@@ -1613,7 +1662,7 @@ function Invoke-PendingVersionRelease {
             })
             if ($verified.Count -eq 0) { throw "개발 내용이 릴리즈 브랜치에 병합되었는지 확인할 수 없습니다." }
         }
-        Prepare-ReleaseCommit -PreviousVersion $previousVersion.Version -ReleaseVersion $Pending.Version
+        Prepare-ReleaseCommit -PreviousVersion $developmentBase.WorkbookVersion -ReleaseVersion $Pending.Version
         Commit-CurrentBranchChanges -ExpectedBranch $releaseBranch -CommitMessage "release: $tag 복구 변경 반영"
     }
     $preparedHead = Get-GitOutput -Arguments @("rev-parse", "HEAD")
