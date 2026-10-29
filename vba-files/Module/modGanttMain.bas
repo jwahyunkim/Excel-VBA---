@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-29 김좌현 수정 : 비고 개체의 행 연결을 이름 범위로 보존하고 숨기기 전에 위치 정렬
 ' 2026-10-27 김좌현 수정 : 새로고침 후 등록 기준 문제 행을 완료 메시지에 안내
 ' 2026-10-23 김좌현 수정 : 간트 전용 새로고침도 이전 웹등록 헤더를 안전하게 WEB UPDATE로 갱신
 ' 2026-10-22 김좌현 수정 : 새로고침 서명 계산의 열 번호를 한 번만 조회해 반복 Range 접근 제거
@@ -164,9 +165,9 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
         UpgradeGanttRefreshButtons ws
         webBasisIssues = WebTaskBasisIssues(ws)
         PrepareWebTaskSheet ws
-        NormalizeGanttPptArtifactNames ws
         ApplyTaskInputValidation ws
     End If
+    NormalizeGanttPptArtifactNames ws
     LoadHolidaySettings holidayDict, workdayDict
     lastRow = GetLastDataRow(ws)
     If lastRow < DATA_START_ROW Then Err.Raise vbObjectError + 2120, , "데이터가 없습니다."
@@ -207,6 +208,7 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
         FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict, fitLayout, rebuildHierarchy
     End If
     ShowAllDateColumns ws
+    AlignAllGanttPptArtifactsToNoteCells ws
     RestoreTaskRowView ws, lastRow, rowView
     ApplyCompletedTaskVisibility ws, lastRow
     RestoreTaskDetailColumnHidden ws, detailColumnHidden
@@ -221,7 +223,6 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     mTaskVisualSignatures(ws.CodeName) = visualSignature
     Application.EnableEvents = previousEnableEvents
     Application.ScreenUpdating = previousScreenUpdating
-    AlignAllGanttPptArtifactsToNoteCells ws
     If showCompletionMessage Then
         If includeWebSetup Then
             If Len(webBasisIssues) > 0 Then
@@ -677,9 +678,64 @@ Private Sub ClearGanttPptCellIcon(ByVal ws As Worksheet, ByVal targetRow As Long
     ApplyGanttPptNoteCellBorder noteCell
 End Sub
 
+' A local range follows inserted/deleted rows even when Excel reports the next visible cell.
+Private Function GanttPptRowAnchorName(ByVal ws As Worksheet, ByVal oleObj As OLEObject) As String
+    GanttPptRowAnchorName = "'" & Replace(ws.Name, "'", "''") & "'!_GanttPptRow_" & CStr(oleObj.ShapeRange.Item(1).ID)
+End Function
+
+Public Function GetGanttPptObjectRow(ByVal ws As Worksheet, ByVal oleObj As OLEObject) As Long
+    Dim anchor As Name, cell As Range, namedRow As Long, suffix As String
+    On Error Resume Next
+    Set anchor = ws.Names(GanttPptRowAnchorName(ws, oleObj))
+    If Not anchor Is Nothing Then Set cell = anchor.RefersToRange
+    On Error GoTo 0
+    If Not cell Is Nothing Then
+        If cell.Parent Is ws Then
+            GetGanttPptObjectRow = cell.Row
+            Exit Function
+        End If
+    End If
+    If Not anchor Is Nothing Then
+        Err.Raise vbObjectError + 2130, "GetGanttPptObjectRow", "첨부 개체의 연결 행이 삭제되었습니다: " & oleObj.Name
+    End If
+    ' Upgrade legacy attachments by their managed row name, including already displaced objects.
+    If Left$(oleObj.Name, Len("oleGanttPpt_")) = "oleGanttPpt_" Then
+        suffix = Mid$(oleObj.Name, Len("oleGanttPpt_") + 1)
+        If Len(suffix) > 0 And Not suffix Like "*[!0-9]*" Then
+            namedRow = CLng(Val(suffix))
+            If namedRow >= DATA_START_ROW And namedRow <= ws.Rows.Count Then
+                GetGanttPptObjectRow = namedRow
+                Exit Function
+            End If
+        End If
+    End If
+    GetGanttPptObjectRow = oleObj.TopLeftCell.Row
+End Function
+
+Public Sub BindGanttPptObjectRow(ByVal ws As Worksheet, ByVal oleObj As OLEObject, ByVal targetRow As Long)
+    Dim anchorName As String, anchor As Name, cell As Range
+    If targetRow < DATA_START_ROW Or targetRow > ws.Rows.Count Then _
+        Err.Raise vbObjectError + 2131, "BindGanttPptObjectRow", "첨부 개체의 업무 행이 올바르지 않습니다."
+    anchorName = GanttPptRowAnchorName(ws, oleObj)
+    On Error Resume Next
+    Set anchor = ws.Names(anchorName)
+    If Not anchor Is Nothing Then Set cell = anchor.RefersToRange
+    On Error GoTo 0
+    If Not cell Is Nothing Then
+        If cell.Parent Is ws Then
+            If cell.Row = targetRow Then Exit Sub
+        End If
+    End If
+    ws.Names.Add Name:=anchorName, _
+        RefersTo:="='" & Replace(ws.Name, "'", "''") & "'!" & ws.Cells(targetRow, COL_NOTE).Address, Visible:=False
+End Sub
+
+
 Private Sub PositionHiddenGanttPptOle(ByVal ws As Worksheet, ByVal oleObj As OLEObject, ByVal targetRow As Long)
     Dim noteCell As Range
 
+    BindGanttPptObjectRow ws, oleObj, targetRow
+    If ws.Rows(targetRow).Hidden Then Exit Sub
     Set noteCell = GetGanttPptNoteCell(ws, targetRow)
 
     With oleObj
@@ -749,7 +805,7 @@ Private Sub ClearOrphanGanttPptCellIcons(ByVal ws As Worksheet)
     Next r
 End Sub
 
-Private Sub AlignAllGanttPptArtifactsToNoteCells(ByVal ws As Worksheet)
+Public Sub AlignAllGanttPptArtifactsToNoteCells(ByVal ws As Worksheet)
     Dim oleObj As OLEObject
     Dim targetRow As Long
 
@@ -757,7 +813,7 @@ Private Sub AlignAllGanttPptArtifactsToNoteCells(ByVal ws As Worksheet)
 
     For Each oleObj In ws.OLEObjects
         If Left$(oleObj.Name, Len("oleGanttPpt_")) = "oleGanttPpt_" Then
-            targetRow = CLng(Val(Mid$(oleObj.Name, Len("oleGanttPpt_") + 1)))
+            targetRow = GetGanttPptObjectRow(ws, oleObj)
             If targetRow >= DATA_START_ROW Then
                 PositionHiddenGanttPptOle ws, oleObj, targetRow
                 SetGanttPptCellIcon ws, targetRow
@@ -778,6 +834,7 @@ Private Sub NormalizeGanttPptArtifactNames(ByVal ws As Worksheet)
 
     For Each oleObj In ws.OLEObjects
         If IsGanttPptOleObject(oleObj) Then
+            BindGanttPptObjectRow ws, oleObj, GetGanttPptObjectRow(ws, oleObj)
             oleObj.Name = "tmpGanttPptOle_" & Format$(Now, "hhnnss") & "_" & CStr(tempIndex)
             tempIndex = tempIndex + 1
         End If
@@ -785,7 +842,7 @@ Private Sub NormalizeGanttPptArtifactNames(ByVal ws As Worksheet)
 
     For Each oleObj In ws.OLEObjects
         If IsGanttPptOleObject(oleObj) Then
-            targetRow = oleObj.TopLeftCell.Row
+            targetRow = GetGanttPptObjectRow(ws, oleObj)
             If targetRow >= DATA_START_ROW Then
                 finalName = GetGanttPptOleName(targetRow)
                 If Not OLEObjectExistsOnSheet(ws, finalName) Then

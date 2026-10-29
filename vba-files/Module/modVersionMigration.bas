@@ -1,5 +1,6 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-10-29 김좌현 수정 : 비고 개체의 실제 행 연결을 보존하고 셀을 지정해 OLE 붙여넣기
 ' 2026-10-23 김좌현 수정 : 현재 웹 업무 열 배치와 업무 ID·등록 이력·요청번호 연결을 함께 이관
 ' 2026-10-22 김좌현 수정 : 중복 새로고침 매크로 제거 후 기존 버튼을 모두 새로고침으로 이관
 ' 2026-10-22 김좌현 수정 : 모두/간트 새로고침 버튼 분리와 웹 등록 모드 버튼 배치 연결
@@ -867,7 +868,7 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
 
     For Each sourceOle In sourceSheet.OLEObjects
         If IsMigratablePptObject(sourceOle) Then
-            rowNum = sourceOle.TopLeftCell.Row
+            rowNum = GetGanttPptObjectRow(sourceSheet, sourceOle)
             If rowNum >= DATA_START_ROW Then
                 If CopyPptObject(sourceOle, targetSheet, rowNum) Then
                     copiedObjectCount = copiedObjectCount + 1
@@ -905,6 +906,7 @@ Private Function CopyPptObject(ByVal sourceOle As OLEObject, _
     sourceOle.Parent.Activate
     sourceOle.Copy
     targetSheet.Activate
+    targetSheet.Cells(targetRow, COL_NOTE).Select
 
     beforeCount = targetSheet.OLEObjects.Count
     targetSheet.Paste
@@ -920,6 +922,9 @@ Private Function CopyPptObject(ByVal sourceOle As OLEObject, _
     Exit Function
 
 CopyFailed:
+    ' Remove a partial paste so a retry cannot leave an unbound or duplicate object.
+    On Error Resume Next
+    If Not pastedOle Is Nothing Then pastedOle.Delete
     Application.CutCopyMode = False
     CopyPptObject = False
 End Function
@@ -963,6 +968,7 @@ Private Function RefreshMigratedSheet(ByVal ws As Worksheet) As Boolean
     DrawTaskBars ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     ShowAllDateColumns ws
+    AlignAllGanttPptArtifactsToNoteCells ws
     RestoreTaskRowView ws, lastRow, rowView
     ApplyCompletedTaskVisibility ws, lastRow
     ApplyCalculatedColumnsProtection ws, lastRow
@@ -979,6 +985,8 @@ Private Sub PositionMigratedPptObject(ByVal ws As Worksheet, _
                                       ByVal targetRow As Long)
     Dim noteCell As Range
 
+    BindGanttPptObjectRow ws, oleItem, targetRow
+    If ws.Rows(targetRow).Hidden Then Exit Sub
     Set noteCell = ws.Cells(targetRow, ws.Range(COL_NOTE & "1").Column)
     With oleItem
         .Placement = xlMoveAndSize
@@ -1100,7 +1108,7 @@ Private Function GetMigrationLastRow(ByVal ws As Worksheet) As Long
 
     For Each oleItem In ws.OLEObjects
         If IsMigratablePptObject(oleItem) Then
-            If oleItem.TopLeftCell.Row > lastRow Then lastRow = oleItem.TopLeftCell.Row
+            lastRow = Application.Max(lastRow, GetGanttPptObjectRow(ws, oleItem))
         End If
     Next oleItem
 
