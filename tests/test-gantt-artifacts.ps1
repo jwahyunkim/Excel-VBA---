@@ -1,11 +1,12 @@
 [CmdletBinding()]
-param([string]$SourcePath, [switch]$Baseline)
+param([string]$SourcePath, [switch]$Baseline, [switch]$ActualRefresh)
 # 2026-10-29 김좌현 수정 : 숨긴 행의 첨부 개체와 실제 데이터 가져오기 경로 회귀 검증
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $config = Get-Content (Join-Path $root 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $testPath = Join-Path ([IO.Path]::GetTempPath()) ('gantt-artifacts-' + [guid]::NewGuid().ToString('N') + '.xlsm')
-Copy-Item -LiteralPath (Join-Path $root $config.excel_file) -Destination $testPath
+if ($ActualRefresh) { Copy-Item -LiteralPath $SourcePath -Destination $testPath }
+else { Copy-Item -LiteralPath (Join-Path $root $config.excel_file) -Destination $testPath }
 function Read-Vba([string]$path) {
     $bytes = [IO.File]::ReadAllBytes($path)
     try { $source = [Text.UTF8Encoding]::new($false, $true).GetString($bytes) }
@@ -23,13 +24,18 @@ try {
     foreach ($file in Get-ChildItem (Join-Path $root 'vba-files/Module') -Filter '*.bas') {
         $source = Read-Vba $file.FullName
         if ($file.BaseName -eq 'modVersionMigration') {
+            if ($Baseline) {
+                $source = $source.Replace("CopyFailed:`r`n", "CopyFailed:`r`n    Err.Raise vbObjectError + 7951, , Err.Description`r`n")
+            }
             $source += "`r`n" + (Read-Vba (Join-Path $PSScriptRoot 'GanttArtifactsRegression.bas'))
         }
         $code = $book.VBProject.VBComponents.Item($file.BaseName).CodeModule
         if ($code.CountOfLines) { $code.DeleteLines(1, $code.CountOfLines) }
         $code.AddFromString($source)
     }
-    if ($SourcePath) {
+    if ($ActualRefresh) {
+        $result = [string]$excel.Run("'$($book.Name)'!RunActualRowRefreshRegression")
+    } elseif ($SourcePath) {
         $excel.AutomationSecurity = 3
         $sourceBook = $excel.Workbooks.Open($SourcePath, 0, $true)
         $excel.AutomationSecurity = 1

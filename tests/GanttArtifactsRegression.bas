@@ -4,9 +4,43 @@ Private Sub ArtifactCheck(ByVal condition As Boolean, ByVal message As String)
     If Not condition Then Err.Raise vbObjectError + 7950, "GanttArtifactsRegression", message
 End Sub
 
+Public Function RunActualRowRefreshRegression() As String
+    Dim ws As Worksheet, lastRow As Long, r As Long, pass As Long
+    Dim before() As Boolean, hiddenBefore As Long, hiddenAfter As Long, changed As String
+    On Error GoTo Failed
+    Set ws = ThisWorkbook.Worksheets("Sheet1")
+    ws.Activate
+    lastRow = GetLastDataRow(ws)
+    ReDim before(5 To lastRow)
+    For r = 5 To lastRow
+        before(r) = ws.Rows(r).Hidden
+        If before(r) Then hiddenBefore = hiddenBefore + 1
+    Next r
+    RefreshGanttSheet False
+    For r = 5 To lastRow
+        If ws.Rows(r).Hidden Then hiddenAfter = hiddenAfter + 1
+        If ws.Rows(r).Hidden And Not before(r) Then changed = changed & r & ":" & ws.Cells(r, COL_STATUS).Value2 & ";"
+    Next r
+    UnprotectTaskSheet ws
+    ClearCompletedTaskFilter ws, lastRow
+    ShowAllTaskRows ws, lastRow
+    For pass = 1 To 3
+        RefreshGanttSheet False
+        For r = 5 To lastRow
+            ArtifactCheck Not ws.Rows(r).Hidden, "filter OFF refresh hid row " & r & " at pass " & pass
+        Next r
+    Next pass
+    RunActualRowRefreshRegression = "PASS: actual row visibility before=" & hiddenBefore & ", after=" & hiddenAfter & _
+        ", newly hidden=" & changed & "; filter OFF 3 refreshes all " & (lastRow - 4) & " rows visible"
+    Exit Function
+Failed:
+    RunActualRowRefreshRegression = "FAIL: " & Err.Description & "; newly hidden=" & changed
+End Function
+
 Public Function RunActualArtifactRegression(ByVal sourceName As String, ByVal baseline As Boolean) As String
     Dim source As Worksheet, target As Worksheet, copied As Long, failed As Long
     Dim o As OLEObject, result As String, expected As Long
+    Dim plan As Object, logs As Long, states As Long
     On Error GoTo Failed
     Set source = Application.Workbooks(sourceName).Worksheets("Sheet1")
     Set target = ThisWorkbook.Worksheets("Sheet1")
@@ -14,7 +48,11 @@ Public Function RunActualArtifactRegression(ByVal sourceName As String, ByVal ba
     For Each o In source.OLEObjects
         result = result & o.Name & "@" & o.TopLeftCell.Row & "; "
     Next o
+    Set plan = BuildWebMigrationPlan(source.Parent, ThisWorkbook)
     ImportTaskSheet source, target, copied, failed
+    EnsureWebHistorySheets
+    ApplyWebMigrationPlan plan, ThisWorkbook, logs, states
+    PrepareWebTaskSheet target
     result = "source=" & result & "copied=" & copied & ", failed=" & failed & "; target="
     For Each o In target.OLEObjects
         result = result & o.Name & "@" & o.TopLeftCell.Row & "; "
@@ -43,9 +81,8 @@ Public Function RunGanttArtifactsRegression() As String
     Dim ws As Worksheet, source As Worksheet, sourceBook As Workbook, o As OLEObject
     Dim r As Long, copied As Long, failed As Long, stepName As String
     On Error GoTo Failed
-    Set ws = ThisWorkbook.Worksheets("Sheet1")
-    UnprotectTaskSheet ws
-    ws.Cells.Clear
+    Set ws = ThisWorkbook.Worksheets.Add
+    ws.Name = "ArtifactFixture"
     SetupDataHeaders ws
     For r = 5 To 12
         ws.Cells(r, COL_LEVEL).Value2 = 1
@@ -89,7 +126,7 @@ Public Function RunGanttArtifactsRegression() As String
     ws.Rows(7).Insert
     ws.Cells(7, COL_LEVEL).Value2 = 3
     ws.Cells(7, COL_REQUEST).Value2 = "Inserted task"
-    RefreshGanttSheet False
+    RefreshGanttOnly False
     ArtifactCheck Not ws.OLEObjects("oleGanttPpt_8") Is Nothing, "first attachment did not follow insertion"
     ArtifactCheck Not ws.OLEObjects("oleGanttPpt_9") Is Nothing, "second attachment did not follow insertion"
     stepName = "migration of hidden attachments"
@@ -119,6 +156,9 @@ Public Function RunSavedArtifactRegression() As String
     Dim ws As Worksheet, o As OLEObject, expected As Object, key As Variant
     On Error GoTo Failed
     Set ws = ThisWorkbook.Worksheets("Sheet1")
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("ArtifactFixture")
+    On Error GoTo Failed
     Set expected = CreateObject("Scripting.Dictionary")
     For Each o In ws.OLEObjects
         expected.Add o.Name, True
