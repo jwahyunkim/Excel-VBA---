@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-29 김좌현 수정 : 폐기한 간트 전용 캐시 무효화 호출 제거
 ' 2026-10-27 김좌현 수정 : 입력 열·변경 그룹만 계층 계산하고 UI 전용 보호의 재설정 생략
 ' 2026-10-23 김좌현 수정 : WEB UPDATE 헤더로 변경하고 기존 웹등록 열의 중복 이전 방지
 ' 2026-10-23 김좌현 수정 : 하위 작업시간의 상위 합계와 입력 즉시 갱신 및 중복 집계 방지
@@ -332,7 +333,6 @@ End Sub
 
 Public Sub ClearGanttArea(ws As Worksheet)
     Dim startCol As Long, lastCol As Long, lastRow As Long, chartArea As Range
-    InvalidateGanttRenderCache ws
     ClearTaskBarVisuals ws
     startCol = ws.Range(COL_GANTT_START & "1").Column
     lastCol = ws.Cells(GANTT_HEADER_ROW_DATE, ws.Columns.Count).End(xlToLeft).Column

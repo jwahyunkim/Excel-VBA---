@@ -1,5 +1,6 @@
 Attribute VB_Name = "RefreshPerformanceRegression"
 Option Explicit
+' 2026-10-29 김좌현 수정 : 통합 새로고침 경로의 반복 실행·기존 결과 보존 검증
 ' 2026-10-23 김좌현 수정 : 중복 등록 버튼 제거에 맞춰 웹 버튼 보기 비교 범위 정리
 ' 2026-10-22 김좌현 수정 : 간트 성능 개선 전후의 계산/막대/레이아웃/보기 보존 회귀
 
@@ -112,20 +113,20 @@ Private Sub CheckView(ByVal ws As Worksheet)
     End If
 End Sub
 
-Private Sub CompareFastAndFull(ByVal ws As Worksheet, ByVal label As String)
-    Dim fast As Object, complete As Object, key As Variant
-    mStage = label & " fast"
-    RefreshGanttOnly False
+Private Sub CheckRepeatedRefresh(ByVal ws As Worksheet, ByVal label As String)
+    Dim first As Object, complete As Object, key As Variant
+    mStage = label & " first"
+    RefreshGanttSheet False
     CheckView ws
-    Set fast = Snapshot(ws)
-    mStage = label & " full oracle"
+    Set first = Snapshot(ws)
+    mStage = label & " repeated refresh"
     RefreshGanttSheet False
     CheckView ws
     Set complete = Snapshot(ws)
-    Check fast.Count = complete.Count, label & " snapshot key count"
-    For Each key In fast.Keys
+    Check first.Count = complete.Count, label & " snapshot key count"
+    For Each key In first.Keys
         Check complete.Exists(key), label & " missing key " & CStr(key)
-        Check CStr(fast(key)) = CStr(complete(key)), label & " mismatch " & CStr(key) & ": fast=" & CStr(fast(key)) & ", full=" & CStr(complete(key))
+        Check CStr(first(key)) = CStr(complete(key)), label & " mismatch " & CStr(key) & ": first=" & CStr(first(key)) & ", full=" & CStr(complete(key))
     Next key
     mScenarioSnapshots = mScenarioSnapshots & "[" & label & "]" & vbLf & SnapshotText(complete)
 End Sub
@@ -200,48 +201,48 @@ Public Function RunRefreshPerformanceRegression() As String
     Check CStr(ws.Cells(14, COL_STATUS).Value2) = STATUS_HOLD, "manual hold status changed"
     Check ws.Cells(14, COL_REQUEST).Interior.Color = RGB(217, 210, 233), "manual hold fill changed"
     Set baseline = Snapshot(ws)
-    mStage = "unchanged fast"
-    RefreshGanttOnly False
+    mStage = "unchanged first"
+    RefreshGanttSheet False
     Set current = Snapshot(ws)
     For Each key In baseline.Keys
-        Check CStr(baseline(key)) = CStr(current(key)), "unchanged fast changed " & CStr(key)
+        Check CStr(baseline(key)) = CStr(current(key)), "unchanged first changed " & CStr(key)
     Next key
-    CompareFastAndFull ws, "unchanged"
+    CheckRepeatedRefresh ws, "unchanged"
     ws.Cells(7, COL_ACTUAL_END).Value = mMonday - 1
-    CompareFastAndFull ws, "actual date"
+    CheckRepeatedRefresh ws, "actual date"
     CheckCorner DayCell(ws, 7, mMonday - 1)
     progressBefore = CDbl(ws.Cells(5, COL_PROGRESS).Value2)
     ws.Cells(8, COL_PROGRESS).Value2 = 0.75
-    CompareFastAndFull ws, "progress"
+    CheckRepeatedRefresh ws, "progress"
     Check CDbl(ws.Cells(5, COL_PROGRESS).Value2) > progressBefore, "parent progress stale"
     ws.Cells(8, COL_REQUEST).Value2 = "Updated request caption with additional context"
     ws.Cells(8, COL_MODIFICATION).Value2 = "Updated correction notes"
-    CompareFastAndFull ws, "text"
+    CheckRepeatedRefresh ws, "text"
     Check ws.Cells(8, COL_REQUEST).Value2 = "Updated request caption with additional context", "request text changed"
     ws.Rows(6).ShowDetail = False
-    CompareFastAndFull ws, "collapsed branch"
+    CheckRepeatedRefresh ws, "collapsed branch"
     Check ws.Rows(7).Hidden And ws.Rows(8).Hidden, "collapsed descendants exposed"
     ws.Rows(6).ShowDetail = True
     ws.Cells(8, COL_LEVEL).Value2 = 2
-    CompareFastAndFull ws, "hierarchy level"
+    CheckRepeatedRefresh ws, "hierarchy level"
     Check ws.Rows(7).OutlineLevel = 3 And ws.Rows(8).OutlineLevel = 2, "promoted row outline stale"
     Check ws.Cells(8, COL_REQUEST).IndentLevel = 1, "promoted row indentation stale"
     config.Cells(HOLIDAY_DATA_START_ROW + 2, HOLIDAY_COL_DATE).Value = mMonday + 8
     config.Cells(HOLIDAY_DATA_START_ROW + 2, HOLIDAY_COL_TYPE).Value2 = HOLIDAY_TYPE_HOLIDAY
-    CompareFastAndFull ws, "holiday"
+    CheckRepeatedRefresh ws, "holiday"
     Check DayCell(ws, 9, mMonday + 8).Interior.Color = RGB(245, 245, 245), "new holiday background stale"
     ws.Outline.ShowLevels ColumnLevels:=2
     RefreshWebModeView ws
     mExpectedWebMode = False
     mExpectedModuleHidden = True
     ws.Cells(8, COL_REQUEST).Value2 = "Hidden web columns text change"
-    CompareFastAndFull ws, "stage2 hidden web columns and text"
+    CheckRepeatedRefresh ws, "stage2 hidden web columns and text"
     ws.Outline.ShowLevels ColumnLevels:=3
     RefreshWebModeView ws
     mExpectedWebMode = True
     mExpectedModuleHidden = False
-    CompareFastAndFull ws, "stage3 restored web column widths"
-    RunRefreshPerformanceRegression = "PASS: unchanged/date/progress/text/level/calendar refresh matches full calculations, fills, gradients, borders, outlines, hidden view, widths, heights, web mode and protection"
+    CheckRepeatedRefresh ws, "stage3 restored web column widths"
+    RunRefreshPerformanceRegression = "PASS: unchanged/date/progress/text/level/calendar repeated refresh preserves calculations, fills, gradients, borders, outlines, hidden view, widths, heights, web mode and protection"
     Exit Function
 Failed:
     RunRefreshPerformanceRegression = "FAIL: " & mStage & ": " & Err.Description

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-10-29 김좌현 수정 : 새로고침 단일화 및 미사용 캐시·버튼 생성·구형 PPT 진입점 제거
 ' 2026-10-29 김좌현 수정 : 비고 개체의 행 연결을 이름 범위로 보존하고 숨기기 전에 위치 정렬
 ' 2026-10-27 김좌현 수정 : 새로고침 후 등록 기준 문제 행을 완료 메시지에 안내
 ' 2026-10-23 김좌현 수정 : 간트 전용 새로고침도 이전 웹등록 헤더를 안전하게 WEB UPDATE로 갱신
@@ -13,96 +14,13 @@ Option Explicit
 ' 2026-10-20 김좌현 수정 : 미사용 항목 숨기기 매크로와 전용 버튼 생성 제거
 
 ' 2026-10-20 김좌현 수정 : 생성/새로고침을 새로고침 진입점으로 통합
-Private mTaskLayoutSignatures As Object
-Private mTaskStructureSignatures As Object
-Private mTaskVisualSignatures As Object
 
-Public Sub InvalidateGanttRenderCache(ByVal ws As Worksheet)
-    If ws Is Nothing Or mTaskVisualSignatures Is Nothing Then Exit Sub
-    If mTaskVisualSignatures.Exists(ws.CodeName) Then mTaskVisualSignatures.Remove ws.CodeName
-End Sub
-
-Private Function GanttDateHeaderMatches(ByVal ws As Worksheet, ByVal firstDate As Date, ByVal lastDate As Date) As Boolean
-    Dim startCol As Long, endCol As Long
-    startCol = ws.Range(COL_GANTT_START & "1").Column
-    endCol = startCol + CLng(lastDate - firstDate)
-    If Not IsDate(ws.Cells(GANTT_HEADER_ROW_DATE, startCol).Value) Then Exit Function
-    If Not IsDate(ws.Cells(GANTT_HEADER_ROW_DATE, endCol).Value) Then Exit Function
-    GanttDateHeaderMatches = (DateValue(ws.Cells(GANTT_HEADER_ROW_DATE, startCol).Value) = DateValue(firstDate) And _
-                              DateValue(ws.Cells(GANTT_HEADER_ROW_DATE, endCol).Value) = DateValue(lastDate))
-End Function
-
-Public Sub 칸트차트_모두새로고침()
+Public Sub 칸트차트_새로고침()
     RefreshGanttSheet
 End Sub
 
-Public Sub 칸트차트_간트새로고침()
-    RefreshGanttOnly
-End Sub
-
 Public Sub RefreshGanttSheet(Optional ByVal showCompletionMessage As Boolean = True)
-    RefreshGanttCore True, showCompletionMessage
-End Sub
-
-Public Sub RefreshGanttOnly(Optional ByVal showCompletionMessage As Boolean = True)
-    RefreshGanttCore False, showCompletionMessage
-End Sub
-
-Private Function TaskRefreshSignature(ByVal ws As Worksheet, ByVal lastRow As Long, _
-                                      ByVal structureOnly As Boolean) As String
-    Dim values As Variant, r As Long, c As Long, result As String, value As Variant
-    Dim requestOffset As Long
-    requestOffset = ws.Range(COL_REQUEST & "1").Column - ws.Range(COL_LEVEL & "1").Column + 1
-    values = ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_OWNER & lastRow).Value2
-    result = CStr(lastRow) & "|"
-    For r = 1 To UBound(values, 1)
-        For c = 1 To UBound(values, 2)
-            If c = 1 Or (Not structureOnly And _
-                (c <= 5 Or c >= requestOffset)) Then
-                value = values(r, c)
-                If IsError(value) Then
-                    result = result & "#ERR|"
-                Else
-                    result = result & Len(CStr(value)) & ":" & CStr(value) & "|"
-                End If
-            End If
-        Next c
-        If structureOnly Then result = result & IIf(HasTaskContent(ws, r + DATA_START_ROW - 1), "T", "-")
-    Next r
-    TaskRefreshSignature = result
-End Function
-
-Private Function TaskVisualSignature(ByVal ws As Worksheet, ByVal lastRow As Long, _
-                                     ByVal firstDate As Date, ByVal lastDate As Date, _
-                                     ByVal holidays As Object, ByVal workdays As Object) As String
-    Dim values As Variant, r As Long, c As Long, columnNumber As Long, result As String, value As Variant
-    Dim levelColumn As Long, minorCategoryColumn As Long, requestColumn As Long, workMinutesColumn As Long
-    levelColumn = ws.Range(COL_LEVEL & "1").Column
-    minorCategoryColumn = ws.Range(COL_MINOR_CATEGORY & "1").Column
-    requestColumn = ws.Range(COL_REQUEST & "1").Column
-    workMinutesColumn = ws.Range(COL_WORK_MINUTES & "1").Column
-    values = ws.Range(COL_LEVEL & DATA_START_ROW & ":" & COL_STATUS & lastRow).Value2
-    result = CStr(lastRow) & "|" & CLng(firstDate) & "|" & CLng(lastDate) & "|" & CLng(Date) & "|"
-    result = result & Join(holidays.Keys, ",") & "|" & Join(workdays.Keys, ",") & "|"
-    For r = 1 To UBound(values, 1)
-        For c = 1 To UBound(values, 2)
-            columnNumber = c + levelColumn - 1
-            If columnNumber <= minorCategoryColumn Or _
-               (columnNumber >= requestColumn And columnNumber <> workMinutesColumn) Then
-                value = values(r, c)
-                If IsError(value) Then
-                    result = result & "#ERR|"
-                Else
-                    result = result & Len(CStr(value)) & ":" & CStr(value) & "|"
-                End If
-            End If
-        Next c
-    Next r
-    TaskVisualSignature = result
-End Function
-
-Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showCompletionMessage As Boolean)
-    Dim ws As Worksheet, config As Worksheet
+    Dim ws As Worksheet
     Dim lastRow As Long, minDate As Date, maxDate As Date
     Dim chartStartDate As Date, chartEndDate As Date
     Dim holidayDict As Object, workdayDict As Object
@@ -112,8 +30,6 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     Dim detailScrollColumn As Long, detailScrollRow As Long
     Dim rowView As Object, originalRowView As Object
     Dim originalLastRow As Long, taskViewCaptured As Boolean
-    Dim layoutSignature As String, structureSignature As String, fitLayout As Boolean, rebuildHierarchy As Boolean
-    Dim visualSignature As String, redrawChart As Boolean
 
     previousScreenUpdating = Application.ScreenUpdating
     previousEnableEvents = Application.EnableEvents
@@ -122,27 +38,18 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     Set ws = ActiveSheet
     If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or IsWebUtilitySheet(ws) Then _
         Err.Raise vbObjectError + 2120, , "config 시트에서는 실행할 수 없습니다."
-    If includeWebSetup Then
-        EnsureTaskSheetLayout ws
-        EnsureConfigSheet
-        If HasTaskWebHeader(ws) Then RefreshWebHistoryState ws
-        ' 2026-10-27 김좌현 수정 : 새로고침이 기존 입력값을 바꾸기 전에 오류를 확인
-        If HasTaskWebHeader(ws) Then
-            typeIssues = TaskTypeIssues(ws)
-            webBasisIssues = WebTaskBasisIssues(ws)
-            structureIssue = WebTaskStructureIssue(ws)
-            If Len(typeIssues) > 0 Then validationIssues = "타입 오류:" & vbCrLf & typeIssues
-            If Len(webBasisIssues) > 0 Then validationIssues = validationIssues & vbCrLf & "등록 기준 오류:" & vbCrLf & webBasisIssues
-            If Len(structureIssue) > 0 Then validationIssues = validationIssues & vbCrLf & "웹등록 구조 오류: " & structureIssue
-            If Len(validationIssues) > 0 Then Err.Raise vbObjectError + 2121, "RefreshGanttCore", validationIssues
-        End If
-    Else
-        On Error Resume Next
-        Set config = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
-        On Error GoTo EH
-        If config Is Nothing Or Not HasTaskWebHeader(ws) Or _
-           CStr(ws.Cells(HEADER_ROW, COL_REQUEST).Value2) <> "요청 내용" Then _
-            Err.Raise vbObjectError + 2120, , "새로고침을 먼저 실행해 주세요."
+    EnsureTaskSheetLayout ws
+    EnsureConfigSheet
+    If HasTaskWebHeader(ws) Then RefreshWebHistoryState ws
+    ' 2026-10-27 김좌현 수정 : 새로고침이 기존 입력값을 바꾸기 전에 오류를 확인
+    If HasTaskWebHeader(ws) Then
+        typeIssues = TaskTypeIssues(ws)
+        webBasisIssues = WebTaskBasisIssues(ws)
+        structureIssue = WebTaskStructureIssue(ws)
+        If Len(typeIssues) > 0 Then validationIssues = "타입 오류:" & vbCrLf & typeIssues
+        If Len(webBasisIssues) > 0 Then validationIssues = validationIssues & vbCrLf & "등록 기준 오류:" & vbCrLf & webBasisIssues
+        If Len(structureIssue) > 0 Then validationIssues = validationIssues & vbCrLf & "웹등록 구조 오류: " & structureIssue
+        If Len(validationIssues) > 0 Then Err.Raise vbObjectError + 2121, "RefreshGanttSheet", validationIssues
     End If
     detailColumnHidden = CaptureTaskDetailColumnHidden(ws)
     If Not ActiveWindow Is Nothing Then
@@ -156,17 +63,11 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     Application.ScreenUpdating = False
     Application.EnableEvents = False
     UnprotectTaskSheet ws
-    If Not includeWebSetup And CStr(ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2) <> "WEB UPDATE" Then _
-        ws.Cells(HEADER_ROW, COL_WEB_ENABLED).Value2 = "WEB UPDATE"
-    ' 2026-10-22 김좌현 수정 : 삭제한 웹등록 이력의 연결과 잠금을 두 새로고침에 반영
-    If Not includeWebSetup Then RefreshWebHistoryState ws
-    If includeWebSetup Then
-        SetupDataHeaders ws
-        UpgradeGanttRefreshButtons ws
-        webBasisIssues = WebTaskBasisIssues(ws)
-        PrepareWebTaskSheet ws
-        ApplyTaskInputValidation ws
-    End If
+    SetupDataHeaders ws
+    UpgradeGanttRefreshButtons ws
+    webBasisIssues = WebTaskBasisIssues(ws)
+    PrepareWebTaskSheet ws
+    ApplyTaskInputValidation ws
     NormalizeGanttPptArtifactNames ws
     LoadHolidaySettings holidayDict, workdayDict
     lastRow = GetLastDataRow(ws)
@@ -177,36 +78,17 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     UpdateTaskNumbers ws, lastRow
 
     ' Calculate once. The old DrawTaskBars painted every cell before the final renderer replaced it.
-    ClearCalculatedArea ws, lastRow, includeWebSetup
+    ClearCalculatedArea ws, lastRow
     ApplyHierarchySummaryValues ws, lastRow, holidayDict, workdayDict
     UpdateWeeklyReportStatuses ws, lastRow
     If Not GetMinMaxDate(ws, lastRow, minDate, maxDate) Then _
         Err.Raise vbObjectError + 2120, , "시작일/종료일 데이터가 없습니다."
     chartStartDate = minDate: chartEndDate = maxDate
     TryGetDisplayDateRange chartStartDate, chartEndDate
-    If mTaskLayoutSignatures Is Nothing Then Set mTaskLayoutSignatures = CreateObject("Scripting.Dictionary")
-    If mTaskStructureSignatures Is Nothing Then Set mTaskStructureSignatures = CreateObject("Scripting.Dictionary")
-    layoutSignature = TaskRefreshSignature(ws, lastRow, False)
-    structureSignature = TaskRefreshSignature(ws, lastRow, True)
-    fitLayout = True: rebuildHierarchy = True
-    If Not includeWebSetup Then
-        If mTaskLayoutSignatures.Exists(ws.CodeName) Then _
-            fitLayout = (mTaskLayoutSignatures(ws.CodeName) <> layoutSignature)
-        If mTaskStructureSignatures.Exists(ws.CodeName) Then _
-            rebuildHierarchy = (mTaskStructureSignatures(ws.CodeName) <> structureSignature)
-    End If
-    If mTaskVisualSignatures Is Nothing Then Set mTaskVisualSignatures = CreateObject("Scripting.Dictionary")
-    visualSignature = TaskVisualSignature(ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict)
-    redrawChart = True
-    If Not includeWebSetup And mTaskVisualSignatures.Exists(ws.CodeName) Then _
-        redrawChart = (mTaskVisualSignatures(ws.CodeName) <> visualSignature)
-    If Not GanttDateHeaderMatches(ws, chartStartDate, chartEndDate) Then redrawChart = True
     ShowAllTaskRows ws, lastRow
-    If redrawChart Then
-        ClearGanttArea ws
-        DrawDateHeader ws, chartStartDate, chartEndDate, holidayDict, workdayDict
-        FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict, fitLayout, rebuildHierarchy
-    End If
+    ClearGanttArea ws
+    DrawDateHeader ws, chartStartDate, chartEndDate, holidayDict, workdayDict
+    FormatBaseArea ws, lastRow, chartStartDate, chartEndDate, holidayDict, workdayDict
     ShowAllDateColumns ws
     AlignAllGanttPptArtifactsToNoteCells ws
     RestoreTaskRowView ws, lastRow, rowView
@@ -218,22 +100,15 @@ Private Sub RefreshGanttCore(ByVal includeWebSetup As Boolean, ByVal showComplet
     End If
     ApplyCalculatedColumnsProtection ws, lastRow
     RefreshWebModeView ws, True
-    mTaskLayoutSignatures(ws.CodeName) = layoutSignature
-    mTaskStructureSignatures(ws.CodeName) = structureSignature
-    mTaskVisualSignatures(ws.CodeName) = visualSignature
     Application.EnableEvents = previousEnableEvents
     Application.ScreenUpdating = previousScreenUpdating
     If showCompletionMessage Then
-        If includeWebSetup Then
-            If Len(webBasisIssues) > 0 Then
-                MsgBox "새로고침 완료" & vbCrLf & vbCrLf & _
-                       "웹 등록 기준에 문제가 있습니다. 해당 행을 수정한 뒤 웹등록 미리보기를 실행하세요." & _
-                       vbCrLf & webBasisIssues, vbExclamation, "새로고침"
-            Else
-                MsgBox "새로고침 완료", vbInformation
-            End If
+        If Len(webBasisIssues) > 0 Then
+            MsgBox "새로고침 완료" & vbCrLf & vbCrLf & _
+                   "웹 등록 기준에 문제가 있습니다. 해당 행을 수정한 뒤 웹등록 미리보기를 실행하세요." & _
+                   vbCrLf & webBasisIssues, vbExclamation, "새로고침"
         Else
-            MsgBox "간트 새로고침 완료", vbInformation
+            MsgBox "새로고침 완료", vbInformation
         End If
     End If
     Exit Sub
@@ -263,7 +138,7 @@ EH:
     If showCompletionMessage Then
         MsgBox "오류가 발생했습니다: " & errorText, vbExclamation
     Else
-        Err.Raise vbObjectError + 2121, "RefreshGanttCore", errorText
+        Err.Raise vbObjectError + 2121, "RefreshGanttSheet", errorText
     End If
 End Sub
 
@@ -314,19 +189,6 @@ EH:
     Application.EnableEvents = True
     Application.ScreenUpdating = True
     MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
-End Sub
-
-Public Sub 칸트차트_새로고침버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttRefresh", "새로고침", "칸트차트_모두새로고침", 1
-    EnsureMainActionButtons ActiveSheet
-End Sub
-
-Public Sub 칸트차트_초기화버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttReset", "초기화", "칸트차트_초기화", 2
-End Sub
-
-Public Sub 칸트차트_개체삽입버튼_생성()
-    CreateGanttActionButton ActiveSheet, "btnGanttObjectInsert", "개체삽입", "칸트차트_개체삽입", 3
 End Sub
 
 Public Sub 칸트차트_개체삽입()
@@ -454,135 +316,6 @@ EH:
     MsgBox "PPT 편집 화면을 여는 중 오류가 발생했습니다: " & Err.Description, vbExclamation
 End Sub
 
-Public Sub 칸트차트_PPT개체열기()
-    Dim ws As Worksheet
-    Dim targetRow As Long
-    Dim callerName As String
-
-    On Error GoTo EH
-
-    Set ws = ActiveSheet
-    callerName = CStr(Application.Caller)
-
-    If ShapeExistsOnSheet(ws, callerName) Then
-        targetRow = ws.Shapes(callerName).TopLeftCell.Row
-    Else
-        targetRow = ActiveCell.Row
-    End If
-
-    칸트차트_PPT셀아이콘열기 ws, targetRow
-    Exit Sub
-
-EH:
-    MsgBox "PPT 편집 화면을 여는 중 오류가 발생했습니다: " & Err.Description, vbExclamation
-End Sub
-Private Sub CreateGanttActionButton(ByVal ws As Worksheet, _
-                                    ByVal buttonName As String, _
-                                    ByVal buttonCaption As String, _
-                                    ByVal macroName As String, _
-                                    ByVal buttonOrder As Long, _
-                                    Optional ByVal showCompletionMessage As Boolean = True)
-    Dim btn As Shape
-    Dim anchorCell As Range
-    Dim btnLeft As Double
-    Dim btnTop As Double
-    Dim btnWidth As Double
-    Dim btnHeight As Double
-    Dim btnGap As Double
-    Dim wasProtected As Boolean
-    Dim lastRow As Long
-
-    On Error GoTo EH
-
-    If ws Is Nothing Then Exit Sub
-
-    If ws.Name = CONFIG_SHEET_NAME Or ws.Name = WEEKLY_REPORT_CONFIG_SHEET_NAME Or IsWebUtilitySheet(ws) Then
-        MsgBox "config 시트에는 버튼을 생성할 수 없습니다.", vbExclamation
-        Exit Sub
-    End If
-
-    wasProtected = (ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios)
-    If wasProtected Then
-        UnprotectTaskSheet ws
-    End If
-
-    Set anchorCell = ws.Range("B2")
-
-    btnWidth = 72
-    btnHeight = 22
-    btnGap = 8
-
-    btnLeft = anchorCell.Left + ((buttonOrder - 1) * (btnWidth + btnGap))
-    btnTop = anchorCell.Top + anchorCell.Height - btnHeight
-
-    On Error Resume Next
-    ws.Shapes(buttonName).Delete
-    On Error GoTo EH
-
-    Set btn = ws.Shapes.AddShape(msoShapeRoundedRectangle, btnLeft, btnTop, btnWidth, btnHeight)
-
-    With btn
-        .Name = buttonName
-        .OnAction = macroName
-        .Placement = xlFreeFloating
-
-        .Fill.Visible = msoTrue
-        .Fill.ForeColor.RGB = RGB(212, 208, 200)
-        .Fill.Transparency = 0
-
-        .Line.Visible = msoTrue
-        .Line.ForeColor.RGB = RGB(128, 128, 128)
-        .Line.Weight = 1
-
-        .Shadow.Visible = msoFalse
-        .Adjustments.Item(1) = 0.05
-
-        With .TextFrame2
-            .VerticalAnchor = msoAnchorMiddle
-            .MarginLeft = 2
-            .MarginRight = 2
-            .MarginTop = 1
-            .MarginBottom = 1
-
-            With .TextRange
-                .Characters.Text = buttonCaption
-                .ParagraphFormat.Alignment = msoAlignCenter
-                .Font.Name = "굴림"
-                .Font.Size = 9
-                .Font.Bold = msoFalse
-                .Font.Fill.ForeColor.RGB = RGB(0, 0, 0)
-            End With
-        End With
-
-        .Glow.Radius = 0
-        .SoftEdge.Radius = 0
-        .Rotation = 0
-    End With
-
-    If wasProtected Then
-        If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
-        lastRow = GetLastDataRow(ws)
-        If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
-        ApplyCalculatedColumnsProtection ws, lastRow
-    End If
-
-    If showCompletionMessage Then
-        MsgBox "버튼 생성 완료: " & buttonCaption, vbInformation
-    End If
-    Exit Sub
-
-EH:
-    If wasProtected Then
-        On Error Resume Next
-        If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
-        lastRow = GetLastDataRow(ws)
-        If lastRow < DATA_START_ROW Then lastRow = DATA_START_ROW
-        ApplyCalculatedColumnsProtection ws, lastRow
-        On Error GoTo 0
-    End If
-    MsgBox "오류가 발생했습니다: " & Err.Description, vbExclamation
-End Sub
-
 Private Function GetGanttPptCellIconText() As String
     GetGanttPptCellIconText = ChrW(&H25A0)
 End Function
@@ -593,12 +326,6 @@ End Function
 
 Private Function GetGanttPptOleName(ByVal targetRow As Long) As String
     GetGanttPptOleName = "oleGanttPpt_" & CStr(targetRow)
-End Function
-
-Private Function ShapeExistsOnSheet(ByVal ws As Worksheet, ByVal shapeName As String) As Boolean
-    On Error Resume Next
-    ShapeExistsOnSheet = Not ws.Shapes(shapeName) Is Nothing
-    On Error GoTo 0
 End Function
 
 Private Function OLEObjectExistsOnSheet(ByVal ws As Worksheet, ByVal oleName As String) As Boolean

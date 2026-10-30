@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param([string]$WorkbookPath, [string]$SavePath)
 
+# 2026-10-29 김좌현 수정 : 폐기한 생성 화면 검사 제거 및 통합 버튼 연결·기능 보존 검증
 # 2026-10-23 김좌현 수정 : WEB UPDATE 헤더 이전 시 값·수식·개체 보존 및 중복 웹 실행 버튼 제거 검증
 # 2026-10-23 김좌현 수정 : 다른 통합문서 행 삽입 시 이름·외부참조 유입 방지 및 대상 선택목록 유지 검증
 # 2026-10-23 김좌현 수정 : 하위 작업시간 입력 즉시 상위 합계 갱신과 중복 합산·빈값·보호 상태 보존 검증
@@ -74,7 +75,7 @@ Public Function RunTaskLayoutRegression() As String
     Dim configuredStart As Variant, configuredEnd As Variant, configuredModification As Variant
     Dim reversedPeriodError As Long
     Dim buttonLeft As Double, buttonTop As Double, buttonCount As Long
-    Dim legacyButton As Shape, setupWs As Worksheet, shape As Shape
+    Dim legacyButton As Shape, shape As Shape
     Dim displayConfig As Worksheet, oldDisplaySettings As Variant
     Dim typeConfig As Worksheet, originalTypes As Variant, typeIndex As Long
     Dim hiddenBeforeRefresh() As Boolean
@@ -227,13 +228,15 @@ Public Function RunTaskLayoutRegression() As String
         If HasTaskContent(ws, r) Then Check Not ws.Rows(r).Hidden, "retired only filter hid row " & r & "; before=" & hiddenBeforeRefresh(r)
     Next r
     displayConfig.Range("J2:J5").Value2 = oldDisplaySettings
-    UpgradeTaskReportButtons ws
     ' Legacy create-only buttons migrate into the shared action row.
     UnprotectTaskSheet ws
     On Error Resume Next
     ws.Shapes("btnGanttRefresh").Delete
     On Error GoTo Failed
-    CreateVersionButton ws, "btnGanttCreate", "생성", "칸트차트_생성", 2, 72
+    Set legacyButton = ws.Shapes.AddShape(msoShapeRoundedRectangle, ws.Range("B2").Left + 80, ws.Range("B2").Top, 72, 22)
+    legacyButton.Name = "btnGanttCreate"
+    legacyButton.OnAction = "칸트차트_생성"
+    legacyButton.TextFrame2.TextRange.Text = "생성"
     buttonLeft = ws.Shapes("btnGanttCreate").Left
     buttonTop = ws.Shapes("btnGanttCreate").Top
     ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
@@ -243,7 +246,7 @@ Public Function RunTaskLayoutRegression() As String
     UpgradeGanttRefreshButtons ws
     Check ws.ProtectContents, "button migration lost protection"
     ' Excel may quantize shape coordinates by a fraction of one point after protection.
-    Check ws.Shapes("btnGanttRefresh").OnAction = "칸트차트_모두새로고침", "legacy button action"
+    Check ws.Shapes("btnGanttRefresh").OnAction = "칸트차트_새로고침", "legacy button action"
     Check ws.Shapes("btnGanttRefresh").TextFrame2.TextRange.Text = "새로고침", "refresh button caption"
     Set legacyButton = Nothing
     On Error Resume Next
@@ -259,7 +262,10 @@ Public Function RunTaskLayoutRegression() As String
     Check Right$(ws.Shapes("btnWebConfig").OnAction, Len("!OpenWebConfig")) = "!OpenWebConfig", "web config button missing"
     ' When both exist, keep the existing refresh button; also update custom actions.
     UnprotectTaskSheet ws
-    CreateVersionButton ws, "btnGanttCreate", "생성", "칸트차트_생성", 5, 72
+    Set legacyButton = ws.Shapes.AddShape(msoShapeRoundedRectangle, ws.Range("B2").Left + 320, ws.Range("B2").Top, 72, 22)
+    legacyButton.Name = "btnGanttCreate"
+    legacyButton.OnAction = "칸트차트_생성"
+    legacyButton.TextFrame2.TextRange.Text = "생성"
     Set legacyButton = ws.Shapes.AddShape(msoShapeRectangle, 1, 1, 72, 22)
     legacyButton.Name = "customLegacyRefresh"
     legacyButton.OnAction = "'old.xlsm'!modGanttMain.칸트차트_새로고침"
@@ -272,7 +278,15 @@ Public Function RunTaskLayoutRegression() As String
     Check ThisWorkbook.Saved, "repeated migration dirtied workbook"
     ' Excel may quantize shape coordinates by a fraction of one point after protection.
     Check Abs(ws.Shapes("btnGanttRefresh").Left - buttonLeft) < 0.5, "existing refresh button replaced " & ws.Shapes("btnGanttRefresh").Left & " vs " & buttonLeft
-    Check ws.Shapes("customLegacyRefresh").OnAction = "칸트차트_모두새로고침", "qualified legacy action"
+    Check ws.Shapes("customLegacyRefresh").OnAction = "칸트차트_새로고침", "qualified legacy action"
+    For Each name In Array("칸트차트_모두새로고침", "칸트차트_간트새로고침", "RefreshGanttOnly")
+        UnprotectTaskSheet ws
+        ws.Shapes("customLegacyRefresh").OnAction = "'old.xlsm'!modGanttMain." & CStr(name)
+        ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
+        UpgradeGanttRefreshButtons ws
+        Check ws.Shapes("customLegacyRefresh").OnAction = "칸트차트_새로고침", "legacy refresh alias " & CStr(name)
+        Check ws.ProtectContents, "legacy refresh alias lost protection"
+    Next name
     Set legacyButton = Nothing
     On Error Resume Next
     Set legacyButton = ws.Shapes("btnGanttCreate")
@@ -281,31 +295,14 @@ Public Function RunTaskLayoutRegression() As String
     UnprotectTaskSheet ws
     ws.Shapes("customLegacyRefresh").Delete
     ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
-    버튼_생성_선택
-    Set setupWs = ActiveSheet
-    Check setupWs.CheckBoxes.Count >= 6, "refresh button options missing"
-    Check setupWs.DropDowns.Count >= 6, "button order options missing"
-    Check setupWs.CheckBoxes("chkButtonOption2").Caption = "새로고침", "refresh option caption"
-    선택한_버튼_생성 False
-    Check ActiveSheet.Name = ws.Name, "button creation did not return to task sheet"
-    buttonCount = 0
-    For Each shape In ws.Shapes
-        If shape.Name = "btnGanttRefresh" Then buttonCount = buttonCount + 1
-    Next shape
-    Check buttonCount = 1, "refresh button duplicated"
-    Check ws.Shapes("btnGanttReset").OnAction = "칸트차트_초기화", "reset option shifted"
-    Check ws.Shapes("btnGanttObjectInsert").OnAction = "칸트차트_개체삽입", "object option shifted"
+    ' Repeated maintenance must preserve existing business buttons.
+    Check ws.Shapes("btnGanttObjectInsert").OnAction = "칸트차트_개체삽입", "object button action"
     Check ws.Shapes(COMPLETED_TASK_BUTTON_NAME).OnAction = "칸트차트_완료숨김", "completed button action"
-    Check Abs(ws.Shapes(COMPLETED_TASK_BUTTON_NAME).Width - ws.Shapes("btnGanttRefresh").Width) < 0.5, "completed button template width " & ws.Shapes(COMPLETED_TASK_BUTTON_NAME).Width & " vs " & ws.Shapes("btnGanttRefresh").Width
-    Check ws.Shapes(COMPLETED_TASK_BUTTON_NAME).TextFrame2.TextRange.Font.Size = ws.Shapes("btnGanttRefresh").TextFrame2.TextRange.Font.Size, "completed button template font"
-    Check ws.Shapes("btnPeriodTextReport").Left > ws.Shapes("btnGanttObjectInsert").Left, "button order shifted"
-    버튼_생성_선택
-    버튼_생성_취소
     Check ws.Shapes("btnPeriodTextReport").OnAction = "기간보고TXT_생성", "TXT button action"
     Check ws.Shapes("btnPeriodTextReport").TextFrame2.TextRange.Text = "TXT 출력", "TXT button caption"
     Check ws.Range("S5").Locked = False, "modification input locked"
     Check ws.ProtectContents, "task sheet protection disabled"
-    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, cross-workbook row insertion without name/link imports, receiving dropdown lists and updates, deferred hierarchical work-minute sums without double counting, zero/blank and leaf preservation, single refresh, display period preserved without only filters, legacy button migration, six button options, TXT button, protection"
+    RunTaskLayoutRegression = "PASS: data preservation, config type migration, holiday title/migration/loading, idempotent columns, period validation/persistence, input validation, cross-workbook row insertion without name/link imports, receiving dropdown lists and updates, deferred hierarchical work-minute sums without double counting, zero/blank and leaf preservation, single refresh, display period preserved without only filters, legacy button migration, existing business buttons, TXT button, protection"
     Exit Function
 Failed:
     RunTaskLayoutRegression = "FAIL: " & Err.Description

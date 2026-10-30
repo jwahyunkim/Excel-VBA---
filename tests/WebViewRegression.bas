@@ -1,5 +1,6 @@
 Attribute VB_Name = "WebViewRegression"
 Option Explicit
+' 2026-10-29 김좌현 수정 : 통합 새로고침 경로의 반복 실행·기존 결과 보존 검증
 ' 2026-10-23 김좌현 수정 : WEB UPDATE 이전·재열기 보존과 중복 웹 버튼 제거 검증
 ' 2026-10-22 김좌현 수정 : 웹 모드 표시와 웹 초기화 없는 간트 새로고침 회귀 검증
 ' 2026-10-22 김좌현 수정 : 암호로 보호된 비업무 시트의 버튼 이관 제외와 재열기 보존 검증
@@ -111,7 +112,7 @@ End Sub
 
 Public Function RunWebViewRegression() As String
     Dim ws As Worksheet, config As Worksheet, c As Long, r As Long
-    Dim scrollColumn As Long, scrollRow As Long, started As Double, fullSeconds As Double, fastSeconds As Double
+    Dim scrollColumn As Long, scrollRow As Long, started As Double, fullSeconds As Double, repeatSeconds As Double
     Dim stage As String, legacyWebButton As Shape
     On Error GoTo Failed
     Application.EnableEvents = False
@@ -169,13 +170,13 @@ Public Function RunWebViewRegression() As String
     ApplyCalculatedColumnsProtection ws, 7
     ConfigurationCalls = 0: WebSetupCalls = 0
     RenderCalls = 0
-    stage = "first fast refresh"
+    stage = "refresh after edit"
     started = Timer
-    RefreshGanttOnly False
-    fastSeconds = Timer - started
-    Check ConfigurationCalls = 0 And WebSetupCalls = 0, "fast refresh invoked configuration/web setup"
+    RefreshGanttSheet False
+    repeatSeconds = Timer - started
+    Check ConfigurationCalls > 0 And WebSetupCalls > 0, "unified refresh omitted configuration/web setup"
     Check RenderCalls > 0, "changed dates did not redraw chart"
-    stage = "verify first fast"
+    stage = "verify edited refresh"
     CheckMode ws, True
     Check ws.Columns(COL_WEB_MODULE).Hidden, "manual column hide lost"
     Check ws.Rows(7).Hidden, "manual row hide lost"
@@ -186,30 +187,30 @@ Public Function RunWebViewRegression() As String
     Check ActiveWindow.Panes(ActiveWindow.Panes.Count).ScrollRow = scrollRow, "vertical scroll lost"
     c = ws.Range(COL_GANTT_START & "1").Column + 24
     Check ws.Cells(6, c).Interior.Color = RGB(245, 245, 245), "weekend background lost"
-    stage = "repeat fast"
+    stage = "repeated refresh"
     RenderCalls = 0
-    RefreshGanttOnly False
-    Check ConfigurationCalls = 0 And WebSetupCalls = 0, "repeat fast setup invoked"
-    Check RenderCalls = 0, "unchanged fast refresh redrew chart"
-    stage = "clear chart then fast"
+    RefreshGanttSheet False
+    Check ConfigurationCalls > 0 And WebSetupCalls > 0, "repeated refresh omitted setup"
+    Check RenderCalls > 0, "unified refresh omitted chart restoration"
+    stage = "clear chart then repeat"
     UnprotectTaskSheet ws
     ClearGanttArea ws
     ApplyCalculatedColumnsProtection ws, 7
-    RefreshGanttOnly False
+    RefreshGanttSheet False
     Check RenderCalls > 0, "cleared chart was not restored"
     stage = "manual chart cell change"
     RenderCalls = 0
     Application.EnableEvents = True
     ws.Cells(6, c).Value2 = "manual chart change"
     Application.EnableEvents = False
-    RefreshGanttOnly False
+    RefreshGanttSheet False
     Check RenderCalls > 0 And Len(CStr(ws.Cells(6, c).Value2)) = 0, "manual chart edit was not restored"
     stage = "error then normal styling"
     ws.Cells(6, COL_PLAN_END).Value2 = DateSerial(2026, 10, 17)
-    RefreshGanttOnly False
+    RefreshGanttSheet False
     Check HasTaskError(ws, 6), "invalid dates were not recalculated"
     ws.Cells(6, COL_PLAN_END).Value2 = DateSerial(2026, 10, 23)
-    RefreshGanttOnly False
+    RefreshGanttSheet False
     Check Not HasTaskError(ws, 6), "corrected dates retained error"
     Check ws.Cells(6, COL_REQUEST).Interior.Color <> RGB(255, 242, 204), "corrected dates retained error styling"
     stage = "second full"
@@ -217,10 +218,10 @@ Public Function RunWebViewRegression() As String
     CheckMode ws, True
     ws.Outline.ShowLevels ColumnLevels:=2
     CheckMode ws, False
-    RefreshGanttOnly False
+    RefreshGanttSheet False
     CheckMode ws, False
-    RunWebViewRegression = "PASS: web mode, uniform buttons, fast/full separation, hierarchy dates/progress, hidden view, weekend and protection; full=" & _
-                           Format$(fullSeconds, "0.00") & "s fast=" & Format$(fastSeconds, "0.00") & "s"
+    RunWebViewRegression = "PASS: web mode, uniform buttons, single refresh path, hierarchy dates/progress, hidden view, weekend and protection; full=" & _
+                           Format$(fullSeconds, "0.00") & "s repeat=" & Format$(repeatSeconds, "0.00") & "s"
     Exit Function
 Failed:
     RunWebViewRegression = "FAIL: " & stage & " / " & RefreshPhase & ": " & Err.Description

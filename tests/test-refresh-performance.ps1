@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param([string]$WorkbookPath, [string]$BaselineRef)
 
+# 2026-10-29 김좌현 수정 : 기준본 비교 시 통합문서 이벤트도 동일 소스 버전으로 주입
 # 2026-10-22 김좌현 수정 : 격리 Excel 사본의 간트 계산/레이아웃 회귀와 선택적 Git 기준본 비교
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
@@ -60,6 +61,12 @@ function Invoke-RefreshRegression([string]$SourceRef) {
             if ($taskCode.CountOfLines -gt 0) { [void]$taskCode.DeleteLines(1, $taskCode.CountOfLines) }
             [void]$taskCode.AddFromString($taskSource)
         }
+        # Import matching events because retired callbacks must not remain in the copied workbook.
+        $taskSource = Read-TaskVba (Join-Path $taskRoot 'vba-files/Class/현재_통합_문서.cls') $SourceRef
+        $taskSource = $taskSource.Substring($taskSource.IndexOf('Option Explicit'))
+        $taskCode = $taskBook.VBProject.VBComponents.Item($taskBook.CodeName).CodeModule
+        if ($taskCode.CountOfLines -gt 0) { [void]$taskCode.DeleteLines(1, $taskCode.CountOfLines) }
+        [void]$taskCode.AddFromString($taskSource)
         $taskPhase = 'import regression harness'
         try { $taskComponent = $taskBook.VBProject.VBComponents.Item('RefreshPerformanceRegression') }
         catch { $taskComponent = $taskBook.VBProject.VBComponents.Add(1); $taskComponent.Name = 'RefreshPerformanceRegression' }
