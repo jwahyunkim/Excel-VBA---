@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-10-30 김좌현 수정 : 틀 고정 시 실제 열 숨김 상태 복원 및 날짜 열 표시 상태 보존
 ' 2026-10-23 김좌현 수정 : 열 접기 전 단계의 헤더행 고정과 숨은 열 좌표 차이로 인한 반복 틀 고정 방지
 ' 2026-10-22 김좌현 수정 : 행별 들여쓰기·굵기·배경·최소 높이를 모아 적용하고 빈 행 및 루트 경계 유지
 ' 2026-10-22 김좌현 수정 : 구조가 같은 행 그룹 재생성을 생략하고 초기화된 테두리를 렌더러에 전달
@@ -336,6 +337,7 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
     Dim viewError As Long, viewErrorText As String
     Dim selected As Object, normalized As String, selectedColumn As Variant, lastSelected As Long
     Dim freezeRows As Range, hiddenRows As Range, lastTaskRow As Long
+    Dim freezeHiddenColumns() As Boolean, freezeColumnStateCaptured As Boolean
     If ActiveWindow Is Nothing Then Exit Sub
     If Not (ActiveWorkbook Is ws.Parent) Then Exit Sub
     If Not (ActiveSheet Is ws) Then Exit Sub
@@ -413,6 +415,11 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
             Else
                 Set detailColumns = ws.Range(ws.Cells(1, 1), ws.Cells(1, lastCol)).EntireColumn
             End If
+            ReDim freezeHiddenColumns(detailColumns.Column To lastCol)
+            For c = detailColumns.Column To lastCol
+                freezeHiddenColumns(c) = ws.Columns(c).Hidden
+            Next c
+            freezeColumnStateCaptured = True
             If selected Is Nothing Then
                 For c = detailColumns.Column To lastCol
                     If ws.Columns(c).Hidden Then ws.Columns(c).Hidden = False
@@ -429,12 +436,7 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
         RestoreTaskFreezeHiddenRows hiddenRows
         If collapsed Then
             For c = detailColumns.Column To lastCol
-                If selected Is Nothing Then
-                    ws.Columns(c).Hidden = True
-                Else
-                    ws.Columns(c).Hidden = (Not selected.Exists(CStr(c)) Or _
-                        IsTaskWebDetailColumn(ws, c) Or IsTaskPrivateColumn(ws, c))
-                End If
+                ws.Columns(c).Hidden = freezeHiddenColumns(c)
             Next c
             If selected Is Nothing Then
                 nextVisibleCol = requestCol + 1
@@ -458,14 +460,9 @@ Failed:
     viewErrorText = Err.Description
     On Error Resume Next
     RestoreTaskFreezeHiddenRows hiddenRows
-    If Not detailColumns Is Nothing Then
+    If freezeColumnStateCaptured Then
         For c = detailColumns.Column To lastCol
-            If selected Is Nothing Then
-                ws.Columns(c).Hidden = True
-            Else
-                ws.Columns(c).Hidden = (Not selected.Exists(CStr(c)) Or _
-                        IsTaskWebDetailColumn(ws, c) Or IsTaskPrivateColumn(ws, c))
-            End If
+            ws.Columns(c).Hidden = freezeHiddenColumns(c)
         Next c
     End If
     Application.ScreenUpdating = wasScreenUpdating
@@ -583,7 +580,8 @@ Public Function CaptureTaskDetailColumnHidden(ByVal ws As Worksheet) As Variant
     ' 2026-10-19 김좌현 수정 : 너비 재설정으로 풀리는 선택 열 사이의 숨김 상태도 함께 보존
     If TaskViewUsesSelection() Then firstCol = 1
     firstCol = 1
-    lastCol = Application.Max(lastCol, ws.Range(COL_STATUS & "1").Column)
+    lastCol = Application.Max(lastCol, ws.Range(COL_STATUS & "1").Column, _
+                              ws.Cells(GANTT_HEADER_ROW_DATE, ws.Columns.Count).End(xlToLeft).Column)
     ReDim hidden(firstCol To lastCol)
     For c = firstCol To lastCol
         hidden(c) = ws.Columns(c).Hidden

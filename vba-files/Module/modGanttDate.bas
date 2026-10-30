@@ -1,33 +1,59 @@
 Attribute VB_Name = "modGanttDate"
 
 Option Explicit
+' 2026-10-30 김좌현 수정 : 기본 필터 중 Find가 제외하는 숨긴 업무도 마지막 데이터 행에 포함
 ' 2026-10-22 김좌현 수정 : 지연 구간에 실제 완료 여부를 포함해 진행 중/완료 표시 구분
 ' 2026-10-21 김좌현 수정 : 마감 초과 판정과 주말·공휴일을 포함한 완료 지연 일수 및 하위 지연 구간 계산
 ' 2026-10-20 김좌현 수정 : 숨긴 행도 포함해 마지막 데이터 행 탐색
 
 Public Function GetLastDataRow(ws As Worksheet) As Long
-    Dim lastRow As Long
-    Dim colAddr As Variant
-    Dim colLastRow As Long
-    Dim lastCell As Range
+    Dim lastRow As Long, colLastRow As Long, lastCell As Range
+    Dim columns As Variant, colAddr As Variant, columnNumbers() As Long
+    Dim values As Variant, firstRow As Long, endRow As Long, lastInputColumn As Long
+    Dim i As Long, r As Long, value As Variant
 
+    columns = Array(COL_LEVEL, COL_TYPE, COL_MAJOR_CATEGORY, _
+                    COL_MIDDLE_CATEGORY, COL_MINOR_CATEGORY, COL_REQUEST, _
+                    COL_MODIFICATION, COL_NOTE, COL_PLAN_START, COL_PLAN_END, _
+                    COL_ACTUAL_START, COL_ACTUAL_END, COL_MANUAL_STATUS, COL_WEEKLY_REPORT)
     lastRow = HEADER_ROW
-
-    For Each colAddr In Array(COL_LEVEL, COL_TYPE, COL_MAJOR_CATEGORY, _
-                              COL_MIDDLE_CATEGORY, COL_MINOR_CATEGORY, COL_REQUEST, _
-                              COL_MODIFICATION, _
-                              COL_NOTE, COL_PLAN_START, COL_PLAN_END, _
-                              COL_ACTUAL_START, COL_ACTUAL_END, _
-                              COL_MANUAL_STATUS, COL_WEEKLY_REPORT)
-        Set lastCell = ws.Columns(CStr(colAddr)).Find(What:="*", _
-            After:=ws.Range(CStr(colAddr) & "1"), LookIn:=xlFormulas, _
-            LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, _
-            MatchCase:=False, SearchFormat:=False)
-        colLastRow = HEADER_ROW
-        If Not lastCell Is Nothing Then colLastRow = lastCell.Row
-        If colLastRow > lastRow Then lastRow = colLastRow
-    Next colAddr
-
+    If ws.AutoFilterMode And ws.FilterMode Then
+        ' Read actual cell contents: Find/SpecialCells can depend on the filtered view.
+        ' Bound each read to 4096 rows even when formatting has extended UsedRange.
+        ReDim columnNumbers(LBound(columns) To UBound(columns))
+        For i = LBound(columns) To UBound(columns)
+            columnNumbers(i) = ws.Range(CStr(columns(i)) & "1").Column
+            lastInputColumn = Application.Max(lastInputColumn, columnNumbers(i))
+        Next i
+        endRow = ws.UsedRange.Row + ws.UsedRange.Rows.Count - 1
+        Do While endRow >= DATA_START_ROW
+            firstRow = Application.Max(DATA_START_ROW, endRow - 4095)
+            values = ws.Range(ws.Cells(firstRow, 1), ws.Cells(endRow, lastInputColumn)).Formula
+            For r = UBound(values, 1) To 1 Step -1
+                For i = LBound(columnNumbers) To UBound(columnNumbers)
+                    value = values(r, columnNumbers(i))
+                    If IsError(value) Then
+                        GetLastDataRow = firstRow + r - 1
+                        Exit Function
+                    ElseIf Len(CStr(value)) > 0 Then
+                        GetLastDataRow = firstRow + r - 1
+                        Exit Function
+                    End If
+                Next i
+            Next r
+            endRow = firstRow - 1
+        Loop
+    Else
+        For Each colAddr In columns
+            Set lastCell = ws.Columns(CStr(colAddr)).Find(What:="*", _
+                After:=ws.Range(CStr(colAddr) & "1"), LookIn:=xlFormulas, _
+                LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, _
+                MatchCase:=False, SearchFormat:=False)
+            colLastRow = HEADER_ROW
+            If Not lastCell Is Nothing Then colLastRow = lastCell.Row
+            If colLastRow > lastRow Then lastRow = colLastRow
+        Next colAddr
+    End If
     GetLastDataRow = lastRow
 End Function
 

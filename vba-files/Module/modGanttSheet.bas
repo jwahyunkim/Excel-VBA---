@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-10-30 김좌현 수정 : 새로고침 서식 적용 시 Excel 기본 자동필터 조건과 범위 유지
 ' 2026-10-29 김좌현 수정 : 폐기한 간트 전용 캐시 무효화 호출 제거
 ' 2026-10-27 김좌현 수정 : 입력 열·변경 그룹만 계층 계산하고 UI 전용 보호의 재설정 생략
 ' 2026-10-23 김좌현 수정 : WEB UPDATE 헤더로 변경하고 기존 웹등록 열의 중복 이전 방지
@@ -1077,10 +1078,7 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     endCol = startCol + CLng(chartEndDate - chartStartDate)
     filterLastRow = IIf(lastRow < HEADER_ROW + 1, HEADER_ROW + 1, lastRow)
 
-    On Error Resume Next
-    If ws.AutoFilterMode Then ws.AutoFilterMode = False
-    On Error GoTo 0
-
+    ' Keep Excel's native filter object: recreating it discards every active criterion.
     ws.Range(COL_NO & HEADER_ROW & ":" & dataLastCol & filterLastRow).Borders.LineStyle = xlNone
     ws.Range(COL_NO & HEADER_ROW & ":" & dataLastCol & filterLastRow).Interior.Pattern = xlNone
     ws.Range(ws.Cells(DATA_START_ROW, startCol), ws.Cells(filterLastRow, endCol)).Borders.LineStyle = xlNone
@@ -1097,7 +1095,19 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
         .Interior.Color = RGB(217, 217, 217)
     End With
 
-    ws.Range(COL_NO & HEADER_ROW & ":" & dataLastCol & filterLastRow).AutoFilter
+    If Not ws.AutoFilterMode Then
+        ws.Range(COL_NO & HEADER_ROW & ":" & dataLastCol & filterLastRow).AutoFilter
+    ElseIf Not ws.FilterMode Then
+        ' Extend only our default, unfiltered range; retain user-selected filter ranges.
+        With ws.AutoFilter.Range
+            If .Row = HEADER_ROW And .Column = ws.Range(COL_NO & "1").Column And _
+               .Columns.Count = ws.Range(COL_NO & "1:" & dataLastCol & "1").Columns.Count And _
+               .Rows.Count <> filterLastRow - HEADER_ROW + 1 Then
+                ws.AutoFilterMode = False
+                ws.Range(COL_NO & HEADER_ROW & ":" & dataLastCol & filterLastRow).AutoFilter
+            End If
+        End With
+    End If
 
     With ws.Range(ws.Cells(GANTT_HEADER_ROW_MONTH, startCol), ws.Cells(GANTT_HEADER_ROW_DATE, endCol))
         .Borders.LineStyle = xlContinuous
@@ -1817,8 +1827,31 @@ Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Lo
     Dim planDaysCol As Long
     Dim actualDaysCol As Long
     Dim statusCol As Long
-    Dim r As Long
+    Dim r As Long, c As Long, lastHeaderCol As Long
+    Dim hiddenColumns As Range, column As Range
+    Dim previousScreenUpdating As Boolean, errorNumber As Long, errorText As String
 
+    ' 2026-10-30 김좌현 수정 : 숨긴 날짜 열이 병합 헤더와 겹치면 Excel의 Locked 설정이 실패하므로 잠금 중에만 표시
+    previousScreenUpdating = Application.ScreenUpdating
+    On Error GoTo ProtectionFailed
+    Application.ScreenUpdating = False
+    If ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios Then ws.Unprotect
+    lastHeaderCol = ws.Cells(GANTT_HEADER_ROW_DATE, ws.Columns.Count).End(xlToLeft).Column
+    For c = ws.Range(COL_GANTT_START & "1").Column To lastHeaderCol
+        If ws.Columns(c).Hidden Then
+            Set column = ws.Columns(c)
+            If hiddenColumns Is Nothing Then
+                Set hiddenColumns = column
+            Else
+                Set hiddenColumns = Application.Union(hiddenColumns, column)
+            End If
+        End If
+    Next c
+    If Not hiddenColumns Is Nothing Then
+        For Each column In hiddenColumns.Areas
+            column.EntireColumn.Hidden = False
+        Next column
+    End If
     ws.Cells.Locked = False
 
     ws.Range(ws.Cells(DATA_START_ROW, ws.Range(COL_NO & "1").Column), ws.Cells(ws.Rows.Count, ws.Range(COL_NO & "1").Column)).Locked = True
@@ -1852,10 +1885,6 @@ Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Lo
         End If
     Next r
 
-    On Error Resume Next
-    ws.Unprotect
-    On Error GoTo 0
-
     ws.Rows("1:" & HEADER_ROW).Locked = True
     ws.Rows(DATA_START_ROW & ":" & ws.Rows.Count).Locked = False
     ' 2026-10-22 김좌현 수정 : 정렬/삽입과 함께 이동하는 웹 업무 ID를 사용자 편집에서 보호
@@ -1863,10 +1892,28 @@ Public Sub ApplyCalculatedColumnsProtection(ws As Worksheet, ByVal lastRow As Lo
     ApplyWebTaskProtection ws
     If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
 
+    If Not hiddenColumns Is Nothing Then
+        For Each column In hiddenColumns.Areas
+            column.EntireColumn.Hidden = True
+        Next column
+    End If
     ws.Protect DrawingObjects:=False, Contents:=True, Scenarios:=True, _
                UserInterfaceOnly:=True, AllowFiltering:=True, _
                AllowInsertingRows:=True, AllowDeletingRows:=True
     ws.EnableOutlining = True
+    Application.ScreenUpdating = previousScreenUpdating
+    Exit Sub
+ProtectionFailed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If Not hiddenColumns Is Nothing Then
+        For Each column In hiddenColumns.Areas
+            column.EntireColumn.Hidden = True
+        Next column
+    End If
+    Application.ScreenUpdating = previousScreenUpdating
+    On Error GoTo 0
+    Err.Raise errorNumber, "ApplyCalculatedColumnsProtection", errorText
 End Sub
 
 Public Sub UnprotectTaskSheet(ws As Worksheet)

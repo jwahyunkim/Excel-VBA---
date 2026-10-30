@@ -1,5 +1,6 @@
 Attribute VB_Name = "modCompletedTaskView"
 Option Explicit
+' 2026-10-30 김좌현 수정 : 기본 필터 제외 행을 수동 숨김·계층 접기 상태로 저장하지 않음
 ' 2026-10-20 김좌현 수정 : 시트별 완료 숨김 토글과 기존 행/계층 보기 상태 보존
 ' 2026-10-20 김좌현 수정 : 완료 숨김 전 행 상태로 수동 숨김/새 접기를 구분하고 실패 시 보기 메타데이터까지 복원
 
@@ -174,10 +175,31 @@ Private Function RowsFromMask(ByVal ws As Worksheet, ByRef mask() As Boolean, By
     Set RowsFromMask = result
 End Function
 
+Private Function NativeFilteredTaskRows(ByVal ws As Worksheet) As Range
+    If Not ws.AutoFilterMode Then Exit Function
+    If Not ws.FilterMode Then Exit Function
+    With ws.AutoFilter.Range
+        If .Rows.Count > 1 Then Set NativeFilteredTaskRows = .Offset(1).Resize(.Rows.Count - 1)
+    End With
+End Function
+
+Private Function IsNativeFilteredRow(ByVal ws As Worksheet, ByVal rowNumber As Long, ByVal filterRows As Range) As Boolean
+    Dim rowCells As Range
+    If filterRows Is Nothing Then Exit Function
+    If Not ws.Rows(rowNumber).Hidden Then Exit Function
+    Set rowCells = Application.Intersect(ws.Rows(rowNumber), filterRows)
+    If rowCells Is Nothing Then Exit Function
+    ' Excel treats every hidden row inside an active AutoFilter as filtered,
+    ' including rows hidden manually afterwards. ApplyFilter owns that range;
+    ' saving those rows as manual hiding would make exclusions stick after clearing.
+    IsNativeFilteredRow = True
+End Function
+
 Public Function CaptureTaskRowView(ByVal ws As Worksheet, ByVal lastRow As Long) As Object
     Dim view As Object, owned As Range, savedCollapsed As Range, baseline As Range
     Dim hidden() As Boolean, collapsed() As Boolean, allHidden() As Boolean
-    Dim filterOwned() As Boolean, baselineHidden() As Boolean
+    Dim filterOwned() As Boolean, baselineHidden() As Boolean, nativeHidden() As Boolean
+    Dim nativeRows As Range
     Dim r As Long, child As Long, groupEnd As Long, isExpanded As Boolean
     Dim anyOwned As Boolean, newlyHidden As Boolean, allChildrenHidden As Boolean
     Dim filterHidden As Boolean, baselineKnown As Boolean
@@ -192,6 +214,7 @@ Public Function CaptureTaskRowView(ByVal ws As Worksheet, ByVal lastRow As Long)
     Set baseline = StoredRows(ws, BASELINE_PREFIX)
     filterHidden = AreCompletedTasksHidden(ws)
     baselineKnown = HasStoredNames(ws, BASELINE_PREFIX)
+    Set nativeRows = NativeFilteredTaskRows(ws)
     view.Add "Owned", owned
     view.Add "StoredCollapsed", savedCollapsed
     view.Add "Baseline", baseline
@@ -203,10 +226,12 @@ Public Function CaptureTaskRowView(ByVal ws As Worksheet, ByVal lastRow As Long)
         ReDim allHidden(DATA_START_ROW To lastRow)
         ReDim filterOwned(DATA_START_ROW To lastRow)
         ReDim baselineHidden(DATA_START_ROW To lastRow)
+        ReDim nativeHidden(DATA_START_ROW To lastRow)
         For r = DATA_START_ROW To lastRow
             allHidden(r) = ws.Rows(r).Hidden
             filterOwned(r) = ContainsRow(owned, ws, r)
-            hidden(r) = allHidden(r) And Not filterOwned(r)
+            nativeHidden(r) = IsNativeFilteredRow(ws, r, nativeRows)
+            hidden(r) = allHidden(r) And Not filterOwned(r) And Not nativeHidden(r)
             If baselineKnown Then
                 baselineHidden(r) = ContainsRow(baseline, ws, r)
             Else
@@ -226,7 +251,7 @@ Public Function CaptureTaskRowView(ByVal ws As Worksheet, ByVal lastRow As Long)
                     anyOwned = False
                     newlyHidden = False
                     For child = r + 1 To groupEnd
-                        If Not allHidden(child) Then allChildrenHidden = False
+                        If Not allHidden(child) Or nativeHidden(child) Then allChildrenHidden = False
                         If filterOwned(child) Then anyOwned = True
                         If hidden(child) And Not baselineHidden(child) Then newlyHidden = True
                     Next child
@@ -273,6 +298,9 @@ Public Sub RestoreTaskRowView(ByVal ws As Worksheet, ByVal lastRow As Long, ByVa
     DeleteStoredNames ws, BASELINE_PREFIX
     If lastRow < DATA_START_ROW Then Exit Sub
     ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).Hidden = False
+    ' Excel can reveal even filtered rows when the entire body was excluded.
+    ' Reapply native criteria before adding back manual/outline/completed hiding.
+    If ws.AutoFilterMode And ws.FilterMode Then ws.AutoFilter.ApplyFilter
     Set rows = view("Hidden")
     SetRowsHidden rows, True
     Set rows = view("Collapsed")
@@ -285,6 +313,7 @@ Public Sub RestoreTaskRowViewSnapshot(ByVal ws As Worksheet, ByVal lastRow As Lo
     lastRow = Application.Max(lastRow, CLng(view("LastRow")))
     If lastRow >= DATA_START_ROW Then
         ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).Hidden = False
+        If ws.AutoFilterMode And ws.FilterMode Then ws.AutoFilter.ApplyFilter
         Set rows = view("AllHidden")
         SetRowsHidden rows, True
     End If
@@ -303,17 +332,18 @@ Public Sub RestoreTaskRowViewSnapshot(ByVal ws As Worksheet, ByVal lastRow As Lo
 End Sub
 
 Private Sub ApplyView(ByVal ws As Worksheet, ByVal lastRow As Long, ByVal hideCompleted As Boolean)
-    Dim view As Object, owned As Range, collapsed As Range, baseline As Range
+    Dim view As Object, owned As Range, collapsed As Range, baseline As Range, nativeRows As Range
     Dim mask() As Boolean, baselineMask() As Boolean, r As Long
     Set view = CaptureTaskRowView(ws, lastRow)
     lastRow = CLng(view("LastRow"))
     RestoreTaskRowView ws, lastRow, view
     DeleteStoredNames ws, FILTER_NAME
+    Set nativeRows = NativeFilteredTaskRows(ws)
     If hideCompleted And lastRow >= DATA_START_ROW Then
         ReDim mask(DATA_START_ROW To lastRow)
         ReDim baselineMask(DATA_START_ROW To lastRow)
         For r = DATA_START_ROW To lastRow
-            baselineMask(r) = ws.Rows(r).Hidden
+            baselineMask(r) = ws.Rows(r).Hidden And Not IsNativeFilteredRow(ws, r, nativeRows)
             If HasTaskContent(ws, r) Then
                 If CStr(ws.Cells(r, COL_STATUS).Value2) = STATUS_DONE And Not baselineMask(r) Then mask(r) = True
             End If
