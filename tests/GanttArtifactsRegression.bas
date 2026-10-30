@@ -1,3 +1,4 @@
+' 2026-10-29 김좌현 수정 : 통합 새로고침 경로의 기존 결과 보존 검증
 ' Appended to modVersionMigration only in an isolated workbook.
 ' 2026-10-29 김좌현 수정 : 첨부 개체의 행 연결·가져오기·반복 새로고침·저장 재열기 검증
 Private Sub ArtifactCheck(ByVal condition As Boolean, ByVal message As String)
@@ -114,7 +115,7 @@ Public Function RunGanttArtifactsRegression() As String
     ArtifactCheck Not ws.OLEObjects("oleGanttPpt_8") Is Nothing, "attachment 8 moved"
     stepName = "repeated hidden refresh"
     RefreshGanttSheet False
-    RefreshGanttOnly False
+    RefreshGanttSheet False
     UnprotectTaskSheet ws
     ws.Rows(6).ShowDetail = True
     RefreshGanttSheet False
@@ -126,7 +127,7 @@ Public Function RunGanttArtifactsRegression() As String
     ws.Rows(7).Insert
     ws.Cells(7, COL_LEVEL).Value2 = 3
     ws.Cells(7, COL_REQUEST).Value2 = "Inserted task"
-    RefreshGanttOnly False
+    RefreshGanttSheet False
     ArtifactCheck Not ws.OLEObjects("oleGanttPpt_8") Is Nothing, "first attachment did not follow insertion"
     ArtifactCheck Not ws.OLEObjects("oleGanttPpt_9") Is Nothing, "second attachment did not follow insertion"
     stepName = "migration of hidden attachments"
@@ -144,7 +145,7 @@ Public Function RunGanttArtifactsRegression() As String
     RefreshGanttSheet False
     ArtifactCheck Not ws.OLEObjects("oleGanttPpt_8") Is Nothing, "import attachment 8 moved"
     ArtifactCheck Not ws.OLEObjects("oleGanttPpt_9") Is Nothing, "import attachment 9 moved"
-    RunGanttArtifactsRegression = "PASS: collapsed/repeated/full/fast refresh, row insertion, hidden attachment import and source preservation"
+    RunGanttArtifactsRegression = "PASS: collapsed/repeated unified refresh, row insertion, hidden attachment import and source preservation"
     Exit Function
 Failed:
     RunGanttArtifactsRegression = "FAIL: " & stepName & ": " & Err.Description

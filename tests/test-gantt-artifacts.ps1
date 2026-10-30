@@ -1,5 +1,6 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$SourcePath, [switch]$Baseline, [switch]$ActualRefresh)
+# 2026-10-29 김좌현 수정 : 삭제한 캐시 콜백이 남지 않도록 최신 통합문서 이벤트 주입
 # 2026-10-29 김좌현 수정 : 숨긴 행의 첨부 개체와 실제 데이터 가져오기 경로 회귀 검증
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -33,6 +34,11 @@ try {
         if ($code.CountOfLines) { $code.DeleteLines(1, $code.CountOfLines) }
         $code.AddFromString($source)
     }
+    $source = Read-Vba (Join-Path $root 'vba-files/Class/현재_통합_문서.cls')
+    $source = $source.Substring($source.IndexOf('Option Explicit'))
+    $code = $book.VBProject.VBComponents.Item($book.CodeName).CodeModule
+    if ($code.CountOfLines) { $code.DeleteLines(1, $code.CountOfLines) }
+    $code.AddFromString($source)
     if ($ActualRefresh) {
         $result = [string]$excel.Run("'$($book.Name)'!RunActualRowRefreshRegression")
     } elseif ($SourcePath) {

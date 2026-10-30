@@ -8,6 +8,7 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-10-29 김좌현 수정 : 새로고침 단축키 연결 통일 및 미사용 캐시 이벤트 제거
 ' 2026-10-27 김좌현 수정 : 입력한 셀의 업무 구조 변경 여부와 타입 선택목록만 검사해 전체 재계산 축소
 ' 2026-10-26 김좌현 수정 : 타입 오류로 실행 취소한 행 변경의 웹 설정 비교 상태 복원
 ' 2026-10-22 김좌현 수정 : 간트 셀 직접 수정 시 간트 전용 새로고침 캐시 무효화
@@ -108,7 +109,6 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
         GoTo SafeExit
     End If
 
-    If Not Intersect(Target, Sh.Range(COL_GANTT_START & ":XFD")) Is Nothing Then InvalidateGanttRenderCache Sh
     Application.enableEvents = False
     HandleWebTaskChange Sh, Target
 
@@ -188,7 +188,7 @@ End Sub
 Private Sub RegisterGanttShortcuts()
     Dim workbookPrefix As String
     workbookPrefix = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!"
-    Application.OnKey "^+r", workbookPrefix & "칸트차트_모두새로고침"
+    Application.OnKey "^+r", workbookPrefix & "칸트차트_새로고침"
     Application.OnKey "^+h", workbookPrefix & "칸트차트_완료숨김"
 End Sub
 

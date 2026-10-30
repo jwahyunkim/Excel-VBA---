@@ -1,20 +1,16 @@
 Attribute VB_Name = "CompletedTaskViewRegression"
 Option Explicit
+' 2026-10-29 김좌현 수정 : 폐기한 버튼 생성 매크로 대신 테스트 개체를 직접 준비
 ' 2026-10-23 김좌현 수정 : 1·2·3단계 헤더 고정과 단계 전환 시 선택·스크롤·숨김 상태 보존 검증
 ' 2026-10-22 김좌현 수정 : 웹 열 이전 후에도 실제 업무 열로 완료 숨김 회귀 데이터 구성
 Private mPhase As String
 ' 2026-10-20 김좌현 수정 : 완료 숨김 토글/계층/새로고침/상태 복구/저장 후 유지 검증
 ' 2026-10-20 김좌현 수정 : 열 접기 순서별 틀 고정 안정성, 숨김 원인 구분 및 새로고침 중간 실패 복구 검증
 Private mFreezeResets As Long
-Private mNativeUpdates As Long
 
 ' The runner adds these callbacks only to the temporary workbook sources.
 Public Sub RecordFreezeReset()
     mFreezeResets = mFreezeResets + 1
-End Sub
-
-Public Sub RecordNativeUpdate()
-    mNativeUpdates = mNativeUpdates + 1
 End Sub
 
 Private Sub Check(ByVal condition As Boolean, ByVal message As String)
@@ -60,7 +56,9 @@ Private Sub CheckStableFold(ByVal ws As Worksheet, ByVal anchor As Long, Optiona
         Check taskWindow.FreezePanes And taskWindow.SplitRow = HEADER_ROW, "repeated monitor changed the frozen header boundary"
         Check taskWindow.Panes(1).ScrollRow = 1, "monitor scrolled the frozen headers"
         Check taskWindow.Panes(taskWindow.Panes.Count).ScrollColumn = scrollColumn, "monitor reset horizontal scrolling"
-        Check taskWindow.Panes(taskWindow.Panes.Count).ScrollRow = scrollRow, "monitor reset vertical scrolling"
+        Check taskWindow.Panes(taskWindow.Panes.Count).ScrollRow = scrollRow, _
+              "monitor reset vertical scrolling: pass=" & pass & ", expected=" & scrollRow & _
+              ", actual=" & taskWindow.Panes(taskWindow.Panes.Count).ScrollRow
         Check HiddenRowsSignature(ws, 20) = beforeRows, "monitor changed raw row visibility"
         Check TaskViewMetadataSignature(ws) = beforeMetadata, "monitor changed row-view metadata"
         Check ws.Parent.Saved, "stable monitor dirtied a saved workbook"
@@ -76,7 +74,7 @@ Public Function RunCompletedTaskViewOrderRegression() As String
     Dim cfg As Worksheet, ws As Worksheet, r As Long, selectionCase As Long, order As Long
     Dim originalStart As Variant, originalEnd As Variant, originalView As Variant
     Dim previousEvents As Boolean, previousScreenUpdating As Boolean, configCaptured As Boolean
-    Dim errorText As String, nativeUpdates As Long, cursorCase As Long, stage As Variant
+    Dim errorText As String, cursorCase As Long, stage As Variant
     Dim beforeSelection As String, beforeRows As String, beforeMetadata As String, beforeScrollRow As Long
     On Error GoTo Failed
     previousEvents = Application.EnableEvents
@@ -89,7 +87,6 @@ Public Function RunCompletedTaskViewOrderRegression() As String
     originalEnd = cfg.Range(TASK_FOLD_END_VALUE_CELL).Value2
     originalView = cfg.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2
     configCaptured = True
-    mNativeUpdates = 0
     For selectionCase = 1 To 3
         cfg.Range(TASK_FOLD_START_VALUE_CELL).Value2 = IIf(selectionCase = 3, "S", "I")
         cfg.Range(TASK_FOLD_END_VALUE_CELL).Value2 = IIf(selectionCase = 3, "AH", "W")
@@ -147,8 +144,7 @@ Public Function RunCompletedTaskViewOrderRegression() As String
             Next cursorCase
         Next order
     Next selectionCase
-    nativeUpdates = mNativeUpdates
-    RunCompletedTaskViewOrderRegression = "PASS: I:W/G, I:W/A,B,G, S:AH/G, both hide/fold orders, stages 1/2/3 both directions, header/data selections, fixed headers, stable monitor and preserved scroll/rows/metadata, native updates=" & nativeUpdates
+    RunCompletedTaskViewOrderRegression = "PASS: I:W/G, I:W/A,B,G, S:AH/G, both hide/fold orders, stages 1/2/3 both directions, header/data selections, fixed headers, stable monitor and preserved scroll/rows/metadata"
     GoTo Finished
 Failed:
     errorText = "FAIL: " & mPhase & " / " & Err.Source & " / " & Err.Description
@@ -476,7 +472,7 @@ End Sub
 Public Function RunCompletedTaskRegression() As String
     Dim ws As Worksheet, allDone As Worksheet, undated As Worksheet, cfg As Worksheet
     Dim button As Shape, reference As Shape, r As Long, trappedError As Long
-    Dim inputs As Variant, after As Variant, c As Long, originalLimit As Variant
+    Dim inputs As Variant, after As Variant, c As Long, originalLimit As Variant, buttonStyle As Variant
     On Error GoTo Failed
     Application.EnableEvents = False
     Application.ScreenUpdating = False
@@ -493,14 +489,24 @@ Public Function RunCompletedTaskRegression() As String
     RefreshGanttSheet False
     Check Not ws.Rows(6).Hidden And Not ws.Rows(9).Hidden, "initial refresh invented collapsed groups"
     UnprotectTaskSheet ws
-    CreateVersionButton ws, "btnGanttRefresh", "모두 새로고침", "칸트차트_모두새로고침", 1, 72
+    EnsureMainActionButtons ws
     With ws.Shapes("btnGanttRefresh")
         .Width = 71.25
         .Height = 23.5
         .TextFrame2.TextRange.Font.Name = "Calibri"
         .TextFrame2.TextRange.Font.Size = 11
     End With
-    CreateVersionButton ws, COMPLETED_TASK_BUTTON_NAME, CompletedTaskButtonCaption(ws), "칸트차트_완료숨김", 2, 72
+    ' Seed an existing customized button; toggling must preserve its appearance.
+    Set reference = ws.Shapes("btnGanttRefresh")
+    Set button = reference.Duplicate
+    button.Name = COMPLETED_TASK_BUTTON_NAME
+    button.OnAction = "칸트차트_완료숨김"
+    button.Placement = xlFreeFloating
+    button.Left = reference.Left + 80
+    button.Top = reference.Top
+    button.Width = reference.Width
+    button.Height = reference.Height
+    button.TextFrame2.TextRange.Text = CompletedTaskButtonCaption(ws)
     mPhase = "ws.Rows(13).Hidden = True"
     ws.Rows(13).Hidden = True
     ws.Range(COL_PLAN_END & "12").Value = DateSerial(2026, 9, 1)
@@ -508,6 +514,11 @@ Public Function RunCompletedTaskRegression() As String
     ws.Range(COL_STATUS & "10").Value2 = STATUS_DONE
     ApplyCalculatedColumnsProtection ws, 13
     inputs = ws.Range(COL_LEVEL & "5:" & COL_ACTUAL_END & "13").Value2
+    ' Capture the existing button after Excel normalizes its protected anchors.
+    Set button = ws.Shapes(COMPLETED_TASK_BUTTON_NAME)
+    buttonStyle = Array(button.Width, button.Height, button.AutoShapeType, _
+                        button.Fill.ForeColor.RGB, button.Line.ForeColor.RGB, _
+                        button.TextFrame2.TextRange.Font.Name, button.TextFrame2.TextRange.Font.Size)
     mPhase = "ToggleCompletedTaskFilter ws"
     ToggleCompletedTaskFilter ws
     Check AreCompletedTasksHidden(ws), "filter not enabled"
@@ -526,16 +537,14 @@ Public Function RunCompletedTaskRegression() As String
         Next c
     Next r
     Set button = ws.Shapes(COMPLETED_TASK_BUTTON_NAME)
-    Set reference = ws.Shapes("btnGanttRefresh")
     Check button.TextFrame2.TextRange.Text = "완료 표시", "enabled caption"
-    ' Excel rounds duplicated shape dimensions to display pixels.
-    Check Abs(button.Width - reference.Width) <= 0.75 And Abs(button.Height - reference.Height) <= 0.75, _
-          "button size differs: " & button.Width & "x" & button.Height & "/" & reference.Width & "x" & reference.Height
-    Check button.AutoShapeType = reference.AutoShapeType, "button shape differs"
-    Check button.Fill.ForeColor.RGB = reference.Fill.ForeColor.RGB, "button fill differs"
-    Check button.Line.ForeColor.RGB = reference.Line.ForeColor.RGB, "button line differs"
-    Check button.TextFrame2.TextRange.Font.Name = reference.TextFrame2.TextRange.Font.Name, "button font differs"
-    Check button.TextFrame2.TextRange.Font.Size = reference.TextFrame2.TextRange.Font.Size, "button font size differs"
+    Check Abs(button.Width - CDbl(buttonStyle(0))) < 0.1 And Abs(button.Height - CDbl(buttonStyle(1))) < 0.1, _
+          "toggle changed existing button size"
+    Check button.AutoShapeType = buttonStyle(2), "toggle changed button shape"
+    Check button.Fill.ForeColor.RGB = buttonStyle(3), "toggle changed button fill"
+    Check button.Line.ForeColor.RGB = buttonStyle(4), "toggle changed button line"
+    Check button.TextFrame2.TextRange.Font.Name = buttonStyle(5), "toggle changed button font"
+    Check button.TextFrame2.TextRange.Font.Size = buttonStyle(6), "toggle changed button font size"
     mPhase = "ToggleCompletedTaskFilter ws"
     ToggleCompletedTaskFilter ws
     Check Not ws.Rows(5).Hidden And Not ws.Rows(6).Hidden And Not ws.Rows(9).Hidden, "completed rows not restored"
@@ -608,7 +617,10 @@ Public Function RunCompletedTaskRegression() As String
     mPhase = "RefreshGanttSheet False"
     RefreshGanttSheet False
     UnprotectTaskSheet allDone
-    CreateVersionButton allDone, COMPLETED_TASK_BUTTON_NAME, "완료 숨김", "칸트차트_완료숨김", 1, 72
+    Set button = allDone.Shapes.AddShape(msoShapeRoundedRectangle, 1, 1, 72, 22)
+    button.Name = COMPLETED_TASK_BUTTON_NAME
+    button.OnAction = "칸트차트_완료숨김"
+    button.TextFrame2.TextRange.Text = "완료 숨김"
     ApplyCalculatedColumnsProtection allDone, 7
     mPhase = "ToggleCompletedTaskFilter allDone"
     ToggleCompletedTaskFilter allDone

@@ -52,15 +52,9 @@ try {
         if ($code.CountOfLines -gt 0) { $code.DeleteLines(1, $code.CountOfLines) }
         $code.AddFromString($source)
     }
-    # Import the event class as well, so tests use the current monitor implementation.
-    $source = Read-VbaSource (Join-Path $taskRoot 'vba-files/Class/CGanttOutlineView.cls')
-    $source = $source.Substring($source.IndexOf('Option Explicit'))
-    $source = $source.Replace('Private Sub mCommandBars_OnUpdate()', "Private Sub mCommandBars_OnUpdate()`r`n    CompletedTaskViewRegression.RecordNativeUpdate")
-    try { $component = $book.VBProject.VBComponents.Item('CGanttOutlineView') }
-    catch { $component = $book.VBProject.VBComponents.Add(2); $component.Name = 'CGanttOutlineView' }
-    $code = $component.CodeModule
-    if ($code.CountOfLines -gt 0) { $code.DeleteLines(1, $code.CountOfLines) }
-    $code.AddFromString($source)
+    # 2026-10-29 김좌현 수정 : 현재 선택 이벤트 기반 감시에 쓰이지 않는 구형 클래스 제거
+    try { $component = $book.VBProject.VBComponents.Item('CGanttOutlineView') } catch { $component = $null }
+    if ($component) { $book.VBProject.VBComponents.Remove($component) }
     $source = Read-VbaSource (Join-Path $taskRoot 'vba-files/Class/현재_통합_문서.cls')
     $source = $source.Substring($source.IndexOf('Option Explicit'))
     $code = $book.VBProject.VBComponents.Item([string]$book.CodeName).CodeModule

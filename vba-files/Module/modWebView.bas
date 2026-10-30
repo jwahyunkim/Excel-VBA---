@@ -1,5 +1,6 @@
 Attribute VB_Name = "modWebView"
 Option Explicit
+' 2026-10-29 김좌현 수정 : 통합 새로고침 매크로에 메인 버튼 연결
 ' 2026-10-23 김좌현 수정 : 메인 시트의 중복 웹 등록·갱신 버튼 제거와 웹 버튼 배치 정리
 ' 2026-10-22 김좌현 수정 : 모두 새로고침 버튼의 전용 매크로 연결 통일
 ' 2026-10-22 김좌현 수정 : 3단계 웹등록 모드의 버튼/헤더와 공통 작업 버튼 배치
@@ -103,7 +104,7 @@ Public Sub EnsureMainActionButtons(ByVal ws As Worksheet)
             Set ordered(count) = button
         End If
     Next name
-    ' Preserve the user-selected left-to-right order, including the new fast button.
+    ' Preserve the existing left-to-right order of active buttons.
     For i = 2 To count
         Set temp = ordered(i)
         j = i - 1
@@ -121,7 +122,7 @@ Public Sub EnsureMainActionButtons(ByVal ws As Worksheet)
         caption = button.TextFrame2.TextRange.Text
         action = vbNullString
         If button.Name = "btnGanttRefresh" Then
-            caption = "새로고침": action = "칸트차트_모두새로고침"
+            caption = "새로고침": action = "칸트차트_새로고침"
         End If
         ApplyActionStyle button, leftValue, topValue, 72, caption, action, False
         leftValue = leftValue + 80

@@ -1,3 +1,4 @@
+' 2026-10-29 김좌현 수정 : 통합 새로고침 경로의 기존 결과 보존 검증
 ' Append to modWebUpload only in a disposable workbook. No real network calls.
 ' 2026-10-22 김좌현 수정 : 등록단위 동기화·신규/갱신·서버충돌·요청번호 연결 및 미확인 복구 검증
 ' 2026-10-22 김좌현 수정 : 기존 갱신 기본값과 신규 등록 명시 선택, 연결 소실 및 모드 변조 차단 검증
@@ -1324,20 +1325,20 @@ Private Sub WebUploadRegressionHistoryRefresh(ByVal ws As Worksheet, ByVal confi
     WebUploadRegressionClearHistory log, neighborId, currentSite
     EnsureConfigSheet
     ws.Activate
-    RefreshGanttOnly False
+    RefreshGanttSheet False
     Set state = WebTaskState(neighborId)
-    WebUploadRegressionEqual CStr(state("Outcome")), "이력 삭제", "Gantt-only refresh reconciles removed task history", checked
-    WebUploadRegressionEqual CStr(state("RequestNo")), "", "Gantt-only refresh clears unsupported neighbor binding", checked
-    WebUploadRegressionAssert Not ws.Cells(8, COL_WEB_REQUESTER).Locked, "Gantt-only refresh removes requester lock", checked
-    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_ENABLED).Value2), "Y", "Gantt-only refresh preserves upload selection", checked
+    WebUploadRegressionEqual CStr(state("Outcome")), "이력 삭제", "unified refresh reconciles removed task history", checked
+    WebUploadRegressionEqual CStr(state("RequestNo")), "", "unified refresh clears unsupported neighbor binding", checked
+    WebUploadRegressionAssert Not ws.Cells(8, COL_WEB_REQUESTER).Locked, "unified refresh removes requester lock", checked
+    WebUploadRegressionEqual CStr(ws.Cells(8, COL_WEB_ENABLED).Value2), "Y", "unified refresh preserves upload selection", checked
     Set item = BuildWebItemForRow(ws, 8)
     WebUploadMockReset "success"
     AssessWebItem item, assessmentSession
     WebUploadRegressionEqual CStr(item("Operation")), "확인 필요", "deleted-history tombstone cannot be automatically registered again", checked
     WebUploadRegressionAssert Len(CStr(item("Error"))) > 0, "deleted-history selection explains required reconnection", checked
     WebUploadRegressionEqual CStr(WebUploadMockLoadCount) & CStr(WebUploadMockPostCount), "00", "deleted-history assessment never loads or posts a new form", checked
-    WebUploadRegressionAssert WebTaskHasOtherSiteConnection(selectedId), "Gantt-only refresh retains supported former-site binding", checked
-    WebUploadRegressionAssert Not Application.EnableEvents, "Gantt-only refresh restores disabled events", checked
+    WebUploadRegressionAssert WebTaskHasOtherSiteConnection(selectedId), "unified refresh retains supported former-site binding", checked
+    WebUploadRegressionAssert Not Application.EnableEvents, "unified refresh restores disabled events", checked
 
     previousAlerts = Application.DisplayAlerts
     Application.DisplayAlerts = False
@@ -1351,7 +1352,7 @@ Private Sub WebUploadRegressionHistoryRefresh(ByVal ws As Worksheet, ByVal confi
     Next r
     WebUploadRegressionAssert Not WebGroupIsLocked(ws, 5) And Not ws.Cells(5, COL_WEB_LEVEL).Locked, "all-refresh unlocks basis when every history record is removed", checked
     WebUploadRegressionAssert Not ws.Cells(6, COL_WEB_REQUESTER).Locked And Not ws.Cells(8, COL_WEB_REQUESTER).Locked, "all-refresh releases all unsupported requester locks", checked
-    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8")), selectionSnapshot, "both refresh paths preserve all web selections", checked
+    WebUploadRegressionEqual WebUploadRegressionRangeSnapshot(ws.Range(COL_WEB_ENABLED & "6:" & COL_WEB_PROGRAM_ID & "8")), selectionSnapshot, "repeated refreshes preserve all web selections", checked
 
     ws.Unprotect
     ws.Range(COL_WEB_LEVEL & "5:" & COL_WEB_LEVEL & "8").Value2 = 3
