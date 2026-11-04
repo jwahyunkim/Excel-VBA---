@@ -8,6 +8,7 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-11-04 김좌현 수정 : 닫기 취소 시 단축키 유지, 활성 통합문서만 등록하고 창/시트 전환에서 복원
 ' 2026-10-29 김좌현 수정 : 새로고침 단축키 연결 통일 및 미사용 캐시 이벤트 제거
 ' 2026-10-27 김좌현 수정 : 입력한 셀의 업무 구조 변경 여부와 타입 선택목록만 검사해 전체 재계산 축소
 ' 2026-10-26 김좌현 수정 : 타입 오류로 실행 취소한 행 변경의 웹 설정 비교 상태 복원
@@ -19,6 +20,7 @@ Private Sub Workbook_Open()
     Dim ws As Worksheet
     ' 2026-10-20 김좌현 수정 : 저장된 완료 숨김 상태에 맞춰 버튼 문구 복원
     InitializeReleaseSecurity
+    RegisterGanttShortcuts
     InitializeWebUpload
     For Each ws In ThisWorkbook.Worksheets
         UpgradeGanttRefreshButtons ws
@@ -26,7 +28,6 @@ Private Sub Workbook_Open()
     Next ws
     InitializeTaskHierarchyOutlines
     StartTaskOutlineViewMonitor
-    RegisterGanttShortcuts
 End Sub
 
 Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
@@ -135,6 +136,7 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     On Error GoTo SafeExit
 
     If Not TypeOf Sh Is Worksheet Then Exit Sub
+    RegisterGanttShortcuts
     StartTaskOutlineViewMonitor
     If Sh.Name <> WEEKLY_REPORT_CONFIG_SHEET_NAME Then Exit Sub
 
@@ -165,8 +167,16 @@ SafeExit:
 End Sub
 
 Private Sub Workbook_Activate()
-    StartTaskOutlineViewMonitor
     RegisterGanttShortcuts
+    StartTaskOutlineViewMonitor
+End Sub
+
+Private Sub Workbook_WindowActivate(ByVal Wn As Window)
+    RegisterGanttShortcuts
+End Sub
+
+Private Sub Workbook_WindowDeactivate(ByVal Wn As Window)
+    UnregisterGanttShortcuts
 End Sub
 
 Private Sub Workbook_Deactivate()
@@ -176,17 +186,19 @@ End Sub
 
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
     StopTaskOutlineViewMonitor
-    UnregisterGanttShortcuts
+    ' The save prompt may still cancel closing. Release keys on actual deactivation.
 End Sub
 
 Private Sub Workbook_AfterSave(ByVal Success As Boolean)
+    RegisterGanttShortcuts
     StartTaskOutlineViewMonitor
-    If Success Then RegisterGanttShortcuts
 End Sub
 
 ' 단축키는 Excel 전체에 적용되므로 이 통합문서가 활성화된 동안만 연결한다.
 Private Sub RegisterGanttShortcuts()
     Dim workbookPrefix As String
+    If ActiveWorkbook Is Nothing Then Exit Sub
+    If Not (ActiveWorkbook Is ThisWorkbook) Then Exit Sub
     workbookPrefix = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!"
     Application.OnKey "^+r", workbookPrefix & "칸트차트_새로고침"
     Application.OnKey "^+h", workbookPrefix & "칸트차트_완료숨김"
@@ -198,5 +210,8 @@ Private Sub UnregisterGanttShortcuts()
 End Sub
 
 Private Sub Workbook_SheetSelectionChange(ByVal Sh As Object, ByVal Target As Range)
-    If TypeOf Sh Is Worksheet Then MaintainTaskOutlineOnSelection Sh
+    If TypeOf Sh Is Worksheet Then
+        RegisterGanttShortcuts
+        MaintainTaskOutlineOnSelection Sh
+    End If
 End Sub

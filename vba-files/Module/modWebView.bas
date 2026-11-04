@@ -1,5 +1,6 @@
 Attribute VB_Name = "modWebView"
 Option Explicit
+' 2026-11-04 김좌현 수정 : CONFIG 고정 웹 열은 단계별 웹 모드 판정에서 제외
 ' 2026-10-29 김좌현 수정 : 통합 새로고침 매크로에 메인 버튼 연결
 ' 2026-10-23 김좌현 수정 : 메인 시트의 중복 웹 등록·갱신 버튼 제거와 웹 버튼 배치 정리
 ' 2026-10-22 김좌현 수정 : 모두 새로고침 버튼의 전용 매크로 연결 통일
@@ -151,11 +152,16 @@ Public Function IsWebRegistrationMode(ByVal ws As Worksheet) As Boolean
         On Error GoTo 0
     End If
     For c = ws.Range(COL_WEB_ENABLED & "1").Column To ws.Range(COL_WEB_RESULT & "1").Column
-        fieldCount = fieldCount + 1
-        If Not ws.Columns(c).Hidden Then visibleCount = visibleCount + 1
+        If ws.Columns(c).OutlineLevel > 1 Then
+            fieldCount = fieldCount + 1
+            If Not ws.Columns(c).Hidden Then visibleCount = visibleCount + 1
+        End If
     Next c
-    fieldCount = fieldCount + 1
-    If Not ws.Columns(COL_WORK_MINUTES).Hidden Then visibleCount = visibleCount + 1
+    If ws.Columns(COL_WORK_MINUTES).OutlineLevel > 1 Then
+        fieldCount = fieldCount + 1
+        If Not ws.Columns(COL_WORK_MINUTES).Hidden Then visibleCount = visibleCount + 1
+    End If
+    If fieldCount = 0 Then Exit Function
     ' A partial manual hide/unhide keeps the last explicit outline mode.
     If visibleCount = fieldCount Then
         IsWebRegistrationMode = True
