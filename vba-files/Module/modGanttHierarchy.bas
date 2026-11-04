@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-11-04 김좌현 수정 : 내용 줄바꿈 시 열 너비 유지 및 최종 글꼴·들여쓰기 이후 행 맞춤
 ' 2026-11-04 김좌현 수정 : CONFIG에서 선택한 고정 열을 웹 설정/작업시간 접기 규칙보다 우선 표시
 ' 2026-10-30 김좌현 수정 : 틀 고정 시 실제 열 숨김 상태 복원 및 날짜 열 표시 상태 보존
 ' 2026-10-23 김좌현 수정 : 열 접기 전 단계의 헤더행 고정과 숨은 열 좌표 차이로 인한 반복 틀 고정 방지
@@ -285,7 +286,10 @@ Public Sub InitializeTaskHierarchyOutlines()
     On Error Resume Next
     Set configWs = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
     On Error GoTo 0
-    If Not configWs Is Nothing Then EnsureTaskDetailFoldConfig configWs
+    If Not configWs Is Nothing Then
+        EnsureTaskDetailFoldConfig configWs
+        EnsureTaskTextDisplayConfig configWs
+    End If
     For Each ws In ThisWorkbook.Worksheets
         If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) = "No." And _
            CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) = "Level" Then
@@ -294,6 +298,7 @@ Public Sub InitializeTaskHierarchyOutlines()
             UnprotectTaskSheet ws
             EnsureTaskDetailColumnOutline ws
             EnsureTaskRequestFreeze ws
+            ApplyTaskTextDisplay ws, Application.Max(DATA_START_ROW, GetLastDataRow(ws))
             ApplyCalculatedColumnsProtection ws, GetLastDataRow(ws)
         End If
     Next ws
@@ -929,7 +934,9 @@ NextTask:
     If Not heightRanges(3) Is Nothing Then heightRanges(3).RowHeight = 23
 
     ' Fit the final bold text and native indentation, not the old text prefixes.
-    If fitLayout Then ws.Range(COL_REQUEST & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
+    If fitLayout And Not TaskTextWrapEnabled() Then _
+        ws.Range(COL_REQUEST & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
+    ApplyTaskTextDisplay ws, lastRow, DATA_START_ROW, fitLayout
     If rebuildHierarchy Then RebuildTaskHierarchyOutline ws, lastRow
     RenderHierarchyTaskBars ws, lastRow, startCol, endCol, Nothing, Nothing, bordersAlreadyReset
 End Sub

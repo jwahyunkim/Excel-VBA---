@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-11-04 김좌현 수정 : CONFIG 내용 표시 방식 적용 및 열 너비·숨김 행 보존
 ' 2026-10-30 김좌현 수정 : 새로고침 서식 적용 시 Excel 기본 자동필터 조건과 범위 유지
 ' 2026-10-29 김좌현 수정 : 폐기한 간트 전용 캐시 무효화 호출 제거
 ' 2026-10-27 김좌현 수정 : 입력 열·변경 그룹만 계층 계산하고 UI 전용 보호의 재설정 생략
@@ -1056,6 +1057,86 @@ Private Function HasHoldIncludedStatusText(ByVal statusText As String) As Boolea
     HasHoldIncludedStatusText = (InStr(1, statusText, STATUS_DONE_WITH_HOLD_SUFFIX, vbTextCompare) > 0)
 End Function
 
+Public Sub ApplyTaskTextDisplay(ByVal ws As Worksheet, ByVal lastRow As Long, _
+                                Optional ByVal firstRow As Long = DATA_START_ROW, _
+                                Optional ByVal fitRows As Boolean = True)
+    Dim textRange As Range, hiddenRows As Range, area As Range
+    Dim r As Long, minHeight As Double, taskLevel As Long, lastTaskRow As Long
+    Dim errorNumber As Long, errorText As String
+    firstRow = Application.Max(firstRow, DATA_START_ROW)
+    If lastRow < firstRow Then Exit Sub
+    Set textRange = ws.Range(COL_REQUEST & firstRow & ":" & COL_MODIFICATION & lastRow)
+    For r = firstRow To lastRow
+        If ws.Rows(r).Hidden Then
+            If hiddenRows Is Nothing Then
+                Set hiddenRows = ws.Rows(r)
+            Else
+                Set hiddenRows = Application.Union(hiddenRows, ws.Rows(r))
+            End If
+        End If
+    Next r
+    On Error GoTo Failed
+    textRange.WrapText = TaskTextWrapEnabled()
+    textRange.ShrinkToFit = False
+    If Not fitRows Then GoTo Finished
+    lastTaskRow = Application.Max(lastRow, GetLastDataRow(ws))
+    textRange.EntireRow.AutoFit
+    For r = firstRow To lastRow
+        If HasTaskContent(ws, r) Then
+            taskLevel = GetTaskLevel(ws, r)
+            minHeight = 23
+            If taskLevel = 2 Then minHeight = 26
+            If taskLevel = 1 And HasChildTask(ws, r, lastTaskRow) Then minHeight = 30
+            If ws.Rows(r).RowHeight < minHeight Then ws.Rows(r).RowHeight = minHeight
+        End If
+    Next r
+Finished:
+    If Not hiddenRows Is Nothing Then
+        For Each area In hiddenRows.Areas
+            area.EntireRow.Hidden = True
+        Next area
+    End If
+    If errorNumber <> 0 Then Err.Raise errorNumber, "ApplyTaskTextDisplay", errorText
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    Resume Finished
+End Sub
+
+Public Sub ApplyTaskTextDisplaySettings()
+    Dim ws As Worksheet, lastRow As Long, wrapEnabled As Boolean, wasProtected As Boolean
+    Dim previousEvents As Boolean, previousScreenUpdating As Boolean
+    Dim errorNumber As Long, errorText As String
+    wrapEnabled = TaskTextWrapEnabled()
+    previousEvents = Application.EnableEvents
+    previousScreenUpdating = Application.ScreenUpdating
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    For Each ws In ThisWorkbook.Worksheets
+        If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) = "No." And _
+           CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) = "Level" Then
+            wasProtected = ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios
+            UnprotectTaskSheet ws
+            lastRow = Application.Max(DATA_START_ROW, GetLastDataRow(ws))
+            ApplyTaskTextDisplay ws, lastRow
+            AlignAllGanttPptArtifactsToNoteCells ws
+            If wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+        End If
+    Next ws
+Finished:
+    Application.EnableEvents = previousEvents
+    Application.ScreenUpdating = previousScreenUpdating
+    If errorNumber <> 0 Then Err.Raise errorNumber, "ApplyTaskTextDisplaySettings", errorText
+    Exit Sub
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    On Error Resume Next
+    If Not ws Is Nothing And wasProtected Then ApplyCalculatedColumnsProtection ws, lastRow
+    On Error GoTo 0
+    GoTo Finished
+End Sub
+
 Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartStartDate As Date, ByVal chartEndDate As Date, ByVal holidayDict As Object, ByVal workdayDict As Object, _
                           Optional ByVal fitLayout As Boolean = True, Optional ByVal rebuildHierarchy As Boolean = True)
     Dim startCol As Long
@@ -1186,7 +1267,6 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
     Next c
 
     If fitLayout Then
-    ws.Range(COL_REQUEST & ":" & COL_MODIFICATION).WrapText = False
     ws.Columns(COL_WORK_MINUTES).ColumnWidth = 13
     If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
     ws.Columns(COL_NOTE).ColumnWidth = 4.5
@@ -1202,15 +1282,17 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
 
     ' 새로고침 후 화면의 문자열이 열 너비 때문에 잘리지 않도록
     ' 분류, 업무명, 담당자 및 상태 열을 실제 내용에 맞춘다.
-    ws.Range(COL_NO & HEADER_ROW & ":" & _
-             COL_MODIFICATION & lastRow).Columns.AutoFit
+    If TaskTextWrapEnabled() Then
+        ws.Range(COL_NO & HEADER_ROW & ":" & COL_WEB_TASK_ID & lastRow).Columns.AutoFit
+    Else
+        ws.Range(COL_NO & HEADER_ROW & ":" & COL_MODIFICATION & lastRow).Columns.AutoFit
+    End If
     ws.Range(COL_OWNER & HEADER_ROW & ":" & _
              COL_OWNER & lastRow).Columns.AutoFit
     ws.Range(COL_MANUAL_STATUS & HEADER_ROW & ":" & _
              COL_WEEKLY_REPORT & lastRow).Columns.AutoFit
     ws.Range(COL_STATUS & HEADER_ROW & ":" & _
              COL_STATUS & lastRow).Columns.AutoFit
-    ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).AutoFit
     End If
 
     ws.Rows(GANTT_HEADER_ROW_MONTH).RowHeight = 20

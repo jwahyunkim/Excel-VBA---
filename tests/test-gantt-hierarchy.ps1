@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
-param([string]$WorkbookPath, [string]$SavePath, [switch]$ViewOnly, [switch]$SelectedColumnsOnly)
+param([string]$WorkbookPath, [string]$SavePath, [switch]$ViewOnly, [switch]$SelectedColumnsOnly, [string]$PreviewPath)
 
+# 2026-11-04 김좌현 수정 : CONFIG 줄바꿈 선택·즉시 반영·행 숨김·열 너비·새로고침·재열기 검증
 # 2026-10-23 김좌현 수정 : 모든 열 접기 단계의 헤더 고정과 펼친 단계의 가로 고정 해제 검증
 # 2026-10-22 김좌현 수정 : 웹 설정/작업시간 이전의 값·수식·개체와 반복 실행 보존 검증
 # 2026-10-20 김좌현 수정 : 새로고침 통합과 기존 버튼 전환 회귀 검증
@@ -279,6 +280,91 @@ Failed:
     VerifyScheduledOutlineSelection = "FAIL: " & Err.Source & " / " & Err.Description
     Application.EnableEvents = False
 End Function
+Public Function RunTaskTextDisplayRegression() As String
+    Dim ws As Worksheet, cfg As Worksheet, r As Long, height As Double
+    Dim requestText As String, modificationText As String, headerWrap As Variant
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    StopTaskOutlineViewMonitor
+    EnsureConfigSheet
+    Set cfg = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    cfg.Range(TASK_TEXT_DISPLAY_VALUE_CELL).ClearContents
+    EnsureTaskTextDisplayConfig cfg
+    Check CStr(cfg.Range(TASK_TEXT_DISPLAY_VALUE_CELL).Value2) = TASK_TEXT_DISPLAY_SINGLE, "missing text setting defaults to single line"
+    Check cfg.Range(TASK_TEXT_DISPLAY_VALUE_CELL).Validation.Type = xlValidateList, "text setting dropdown missing"
+    cfg.Range(TASK_MAX_LENGTH_VALUE_RANGE).Value2 = 1000
+    Set ws = ThisWorkbook.Worksheets.Add
+    ws.Name = "TextDisplayRegression"
+    SetupDataHeaders ws
+    For r = 5 To 7
+        ws.Cells(r, COL_LEVEL).Value2 = r - 4
+        ws.Cells(r, COL_REQUEST).Value2 = "Task " & r
+        ws.Cells(r, COL_PLAN_START).Value = DateSerial(2026, 11, 2)
+        ws.Cells(r, COL_PLAN_END).Value = DateSerial(2026, 11, 6)
+    Next r
+    requestText = String$(120, "W")
+    modificationText = "first line" & vbLf & "second line"
+    ws.Cells(6, COL_REQUEST).Value2 = requestText
+    ws.Cells(7, COL_MODIFICATION).Value2 = modificationText
+    ws.Columns(COL_REQUEST & ":" & COL_MODIFICATION).ColumnWidth = 24
+    headerWrap = ws.Cells(HEADER_ROW, COL_REQUEST).WrapText
+    ws.Rows(7).Hidden = True
+    ApplyCalculatedColumnsProtection ws, 7
+    ws.Activate
+    Application.EnableEvents = True
+    cfg.Range(TASK_TEXT_DISPLAY_VALUE_CELL).Value2 = TASK_TEXT_DISPLAY_WRAP
+    Check ws.Range("R6:S7").WrapText, "config change did not enable both text columns"
+    Check ws.Rows(6).RowHeight > 26, "wrapped long text has no fitted row height"
+    Check ws.Rows(7).Hidden, "config change exposed hidden row"
+    Check ws.Cells(HEADER_ROW, COL_REQUEST).WrapText = headerWrap, "config change modified header wrapping"
+    Check ws.ProtectContents, "config change removed task protection"
+    Check Abs(ws.Columns(COL_REQUEST).ColumnWidth - 24) < 0.1, "config change widened wrapped text column"
+    ws.Cells(6, COL_REQUEST).Value2 = requestText & requestText
+    Check ws.Cells(6, COL_REQUEST).WrapText, "editing text lost wrap setting"
+    Check ws.Rows(6).RowHeight > 26, "editing text did not fit row"
+    ws.Cells(5, COL_REQUEST).Value2 = "Root edit"
+    Check ws.Rows(5).RowHeight >= 30, "editing only a root row lost its hierarchy minimum height"
+    RefreshGanttSheet False
+    Check ws.Cells(6, COL_REQUEST).WrapText, "refresh disabled wrapping"
+    Check Abs(ws.Columns(COL_REQUEST).ColumnWidth - 24) < 0.1, "refresh expanded wrapped column"
+    Check ws.Rows(7).Hidden, "refresh exposed hidden row"
+    Check CStr(ws.Cells(6, COL_REQUEST).Value2) = requestText & requestText, "wrapping changed request data"
+    Check CStr(ws.Cells(7, COL_MODIFICATION).Value2) = modificationText, "wrapping changed manual line breaks"
+    height = ws.Rows(6).RowHeight
+    cfg.Range(TASK_TEXT_DISPLAY_VALUE_CELL).Value2 = TASK_TEXT_DISPLAY_SINGLE
+    Check Not ws.Cells(6, COL_REQUEST).WrapText, "single-line setting left wrapping enabled"
+    Check ws.Rows(6).RowHeight < height, "single-line setting left multi-line row height"
+    Check ws.Rows(7).Hidden, "single-line setting exposed hidden row"
+    RefreshGanttSheet False
+    Check Not ws.Cells(6, COL_REQUEST).WrapText, "single-line refresh enabled wrapping"
+    Check ws.Columns(COL_REQUEST).ColumnWidth > 24, "single-line refresh lost existing automatic column fit"
+    UnprotectTaskSheet ws
+    ws.Columns(COL_REQUEST & ":" & COL_MODIFICATION).ColumnWidth = 24
+    ApplyCalculatedColumnsProtection ws, 7
+    cfg.Range(TASK_TEXT_DISPLAY_VALUE_CELL).Value2 = TASK_TEXT_DISPLAY_WRAP
+    EnsureConfigSheet
+    Check TaskTextWrapEnabled(), "config initialization reset selected text mode"
+    Application.EnableEvents = False
+    RunTaskTextDisplayRegression = "PASS: CONFIG text display, live edits, hidden rows, protected refresh and original text preservation"
+    Exit Function
+Failed:
+    Application.EnableEvents = False
+    RunTaskTextDisplayRegression = "FAIL: " & Err.Source & " / " & Err.Description
+End Function
+Public Function ReopenTaskTextDisplayRegression() As String
+    Dim ws As Worksheet
+    On Error GoTo Failed
+    Set ws = ThisWorkbook.Worksheets("TextDisplayRegression")
+    Check TaskTextWrapEnabled(), "reopen lost config text display selection"
+    Check ws.Cells(6, COL_REQUEST).WrapText, "reopen lost text wrapping"
+    Check ws.Rows(6).RowHeight > 26, "reopen lost fitted row height"
+    Check ws.Rows(7).Hidden, "reopen exposed hidden task row"
+    Check Abs(ws.Columns(COL_REQUEST).ColumnWidth - 24) < 0.1, "reopen changed text width"
+    ReopenTaskTextDisplayRegression = "PASS: saved text display mode, row heights, hidden state and widths survive reopen"
+    Exit Function
+Failed:
+    ReopenTaskTextDisplayRegression = "FAIL: " & Err.Source & " / " & Err.Description
+End Function
 '@)
     $taskPhase = 'save and reload imported VBA'
     $taskBook.Save()
@@ -310,6 +396,27 @@ End Function
     $result = [string]$taskExcel.Run("'$($taskBook.Name)'!VerifyScheduledOutlineSelection")
     if (-not $result.StartsWith('PASS:')) { throw $result }
     Write-Output $result
+    $taskPhase = 'CONFIG text display regression'
+    $result = [string]$taskExcel.Run("'$($taskBook.Name)'!RunTaskTextDisplayRegression")
+    if (-not $result.StartsWith('PASS:')) { throw $result }
+    Write-Output $result
+    $taskBook.Save()
+    $taskBook.Close($false)
+    [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskBook)
+    $taskBook = $taskExcel.Workbooks.Open($taskTemp, 0, $false)
+    $result = [string]$taskExcel.Run("'$($taskBook.Name)'!ReopenTaskTextDisplayRegression")
+    if (-not $result.StartsWith('PASS:')) { throw $result }
+    Write-Output $result
+    $taskComponents = $taskBook.VBProject.VBComponents
+    $harness = $taskComponents.Item('GanttHierarchyRegression')
+    if ($PreviewPath) {
+        $previewSheet = $taskBook.Worksheets.Item('TextDisplayRegression')
+        $previewSheet.PageSetup.PrintArea = '$R$4:$S$7'
+        $previewSheet.PageSetup.Zoom = $false
+        $previewSheet.PageSetup.FitToPagesWide = 1
+        $previewSheet.PageSetup.FitToPagesTall = 1
+        $previewSheet.ExportAsFixedFormat(0, [IO.Path]::GetFullPath($PreviewPath))
+    }
     $taskComponents.Remove($harness)
     if ($SavePath) {
         $taskPhase = 'save updated copy'

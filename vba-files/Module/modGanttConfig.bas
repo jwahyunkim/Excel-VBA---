@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttConfig"
 Option Explicit
+' 2026-11-04 김좌현 수정 : 요청·수정 내용의 줄바꿈/한줄보기 CONFIG 설정 정의
 ' 2026-10-22 김좌현 수정 : 웹 등록 설정·영구 업무 ID·작업시간 삽입에 맞춰 업무 열 좌표 변경
 ' 2026-10-20 김좌현 수정 : 휴일 표 제목 공간 확보에 따른 헤더/입력 시작 행 변경
 ' 2026-10-20 김좌현 수정 : 미사용 간트 only/보고 only 필터 설정 상수 제거
@@ -112,6 +113,11 @@ Public Const DISPLAY_SETTING_START_LABEL_CELL As String = "I2"
 Public Const DISPLAY_SETTING_START_VALUE_CELL As String = "J2"
 Public Const DISPLAY_SETTING_END_LABEL_CELL As String = "I3"
 Public Const DISPLAY_SETTING_END_VALUE_CELL As String = "J3"
+Public Const TASK_TEXT_DISPLAY_TITLE_CELL As String = "I19"
+Public Const TASK_TEXT_DISPLAY_LABEL_CELL As String = "I20"
+Public Const TASK_TEXT_DISPLAY_VALUE_CELL As String = "J20"
+Public Const TASK_TEXT_DISPLAY_SINGLE As String = "한줄보기"
+Public Const TASK_TEXT_DISPLAY_WRAP As String = "줄바꿈 허용"
 Public Const INPUT_SETTING_TITLE_CELL As String = "I7"
 Public Const TASK_FOLD_TITLE_CELL As String = "I12"
 Public Const TASK_FOLD_START_VALUE_CELL As String = "J13"

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-11-04 김좌현 수정 : 날짜 없는 가져오기 데이터에도 CONFIG 내용 표시 방식 적용
 ' 2026-11-04 김좌현 수정 : 가져오기 전 대상 데이터·계산·간트·행 보기 초기화 및 종료 시 단축키 복원
 ' 2026-10-29 김좌현 수정 : 수동 버튼 생성 화면·폐기 보고서 정비 제거 및 새로고침 연결 단일화
 ' 2026-10-29 김좌현 수정 : 비고 개체의 실제 행 연결을 보존하고 셀을 지정해 OLE 붙여넣기
@@ -381,6 +382,7 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
 
     ApplyTaskInputValidation targetSheet
     UpdateTaskNumbers targetSheet, sourceLastRow
+    ApplyTaskTextDisplay targetSheet, Application.Max(DATA_START_ROW, sourceLastRow)
     ApplyCalculatedColumnsProtection targetSheet, Application.Max(DATA_START_ROW, sourceLastRow)
 End Sub
 

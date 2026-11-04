@@ -1,4 +1,5 @@
 ' Append to modVersionMigration in a disposable workbook. The file picker and confirmation UI are bypassed.
+' 2026-11-04 김좌현 수정 : 일반·날짜 없는 데이터 가져오기 후 줄바꿈 설정 유지 검증
 ' 2026-11-04 김좌현 수정 : 가져오기 전 잔여 번호·계산·간트·숨김·메모 초기화와 빈 원본 검증
 ' 2026-10-23 김좌현 수정 : 데이터 가져오기의 현행·구형 열 매핑, 웹 이력·연결 이관 및 충돌 사전 차단 검증
 Private Const MIG_MATCH As String = "MigrationMatch"
@@ -26,6 +27,8 @@ Public Function RunVersionMigrationRegression() As String
     Application.EnableEvents = False
     stage = "initialize disposable target workbook"
     InitializeWebUpload
+    EnsureConfigSheet
+    ThisWorkbook.Worksheets(CONFIG_SHEET_NAME).Range(TASK_TEXT_DISPLAY_VALUE_CELL).Value2 = TASK_TEXT_DISPLAY_WRAP
     EnsureWebHistorySheets
     Set config = ThisWorkbook.Worksheets(WEB_CONFIG_SHEET_NAME)
     config.Range("B2").Value2 = MIG_SITE
@@ -115,6 +118,7 @@ Public Function RunVersionMigrationRegression() As String
     Set plan = BuildWebMigrationPlan(source, ThisWorkbook)
     ImportOutputReportConfig source, ThisWorkbook
     ImportTaskSheet sourceWs, target, copied, failed
+    MigrationAssert target.Range("R5:S9").WrapText, "import applies target CONFIG wrapping before date rendering", checked
     MigrationEqual MigrationCells(target.Range("C5:AA9")), MigrationCells(sourceWs.Range("C5:AA9")), "current task fields, web inputs, identities and minutes copied by real columns", checked
     MigrationEqual MigrationCells(target.Range("AC5:AE9")), MigrationCells(sourceWs.Range("AC5:AE9")), "manual fields copied separately from calculated AB", checked
     MigrationEqual CStr(target.Range("AB6").Formula), "", "old calculated formula removed before rebuilding", checked
@@ -308,6 +312,7 @@ Private Sub MigrationCheckEmptyReset(ByRef checked As Long)
     MigrationEqual CStr(target.Range("B5").Value2), "1", "undated imported task receives a fresh number", checked
     MigrationEqual CStr(Application.CountA(target.Range("B6:ZZ45"))), "0", "undated import leaves no old trailing results", checked
     MigrationAssert target.ProtectContents, "undated import retains task protection", checked
+    MigrationAssert target.Range("R5:S5").WrapText, "undated import applies target CONFIG wrapping", checked
     source.Close SaveChanges:=False
     Exit Sub
 Failed:
