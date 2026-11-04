@@ -1,5 +1,6 @@
 Attribute VB_Name = "modCompletedTaskView"
 Option Explicit
+' 2026-11-04 김좌현 수정 : 데이터 교체 시 완료 숨김·수동 숨김 기준 메타데이터 전체 초기화
 ' 2026-10-30 김좌현 수정 : 기본 필터 제외 행을 수동 숨김·계층 접기 상태로 저장하지 않음
 ' 2026-10-20 김좌현 수정 : 시트별 완료 숨김 토글과 기존 행/계층 보기 상태 보존
 ' 2026-10-20 김좌현 수정 : 완료 숨김 전 행 상태로 수동 숨김/새 접기를 구분하고 실패 시 보기 메타데이터까지 복원
@@ -369,6 +370,14 @@ End Sub
 
 Public Sub ClearCompletedTaskFilter(ByVal ws As Worksheet, ByVal lastRow As Long)
     ApplyView ws, lastRow, False
+End Sub
+
+Public Sub ResetCompletedTaskView(ByVal ws As Worksheet)
+    DeleteStoredNames ws, FILTER_NAME
+    DeleteStoredNames ws, OWNED_PREFIX
+    DeleteStoredNames ws, COLLAPSED_PREFIX
+    DeleteStoredNames ws, BASELINE_PREFIX
+    UpdateCompletedTaskButton ws
 End Sub
 
 Public Sub ToggleCompletedTaskFilter(ByVal ws As Worksheet)

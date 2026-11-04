@@ -1,5 +1,7 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-11-04 김좌현 수정 : 날짜 없는 가져오기 데이터에도 CONFIG 내용 표시 방식 적용
+' 2026-11-04 김좌현 수정 : 가져오기 전 대상 데이터·계산·간트·행 보기 초기화 및 종료 시 단축키 복원
 ' 2026-10-29 김좌현 수정 : 수동 버튼 생성 화면·폐기 보고서 정비 제거 및 새로고침 연결 단일화
 ' 2026-10-29 김좌현 수정 : 비고 개체의 실제 행 연결을 보존하고 셀을 지정해 OLE 붙여넣기
 ' 2026-10-23 김좌현 수정 : 현재 웹 업무 열 배치와 업무 ID·등록 이력·요청번호 연결을 함께 이관
@@ -49,6 +51,7 @@ Public Sub 데이터_가져오기()
         MsgBox "신버전 파일을 활성화한 뒤 다시 실행하세요.", vbExclamation
         Exit Sub
     End If
+    Set originalSheet = ActiveSheet
 
     sourcePath = PickLegacyWorkbookPath()
     If Len(sourcePath) = 0 Then Exit Sub
@@ -80,15 +83,14 @@ Public Sub 데이터_가져오기()
 
     answer = MsgBox( _
         "같은 이름의 업무 시트 " & matchingSheetCount & "개를 가져옵니다." & vbCrLf & vbCrLf & _
-        "신버전 시트의 기존 입력 내용과 PPT 개체는 구버전 내용으로 교체됩니다." & vbCrLf & _
+        "대상 업무 시트의 기존 데이터·계산 결과·간트·숨김 상태·PPT 개체를 초기화한 뒤 가져옵니다." & vbCrLf & _
         "가져오는 업무의 웹 등록 이력과 요청번호 연결도 함께 교체됩니다." & vbCrLf & _
-        "신버전의 계산식, VBA 및 기본 서식은 유지됩니다." & vbCrLf & vbCrLf & _
+        "신버전의 VBA·설정·헤더·버튼은 유지하고 계산 결과와 데이터 서식은 다시 생성합니다." & vbCrLf & vbCrLf & _
         "계속하시겠습니까?", _
         vbQuestion Or vbYesNo Or vbDefaultButton2, _
         "구버전 데이터 가져오기")
     If answer <> vbYes Then GoTo SafeExit
 
-    Set originalSheet = ActiveSheet
     previousScreenUpdating = Application.ScreenUpdating
     previousEnableEvents = Application.EnableEvents
     previousCalculation = Application.Calculation
@@ -146,6 +148,7 @@ SafeExit:
     If openedByMigration And Not sourceBook Is Nothing Then
         sourceBook.Close SaveChanges:=False
     End If
+    RestoreMigrationShortcuts
     On Error GoTo 0
     Exit Sub
 
@@ -161,6 +164,7 @@ EH:
     If openedByMigration And Not sourceBook Is Nothing Then
         sourceBook.Close SaveChanges:=False
     End If
+    RestoreMigrationShortcuts
     On Error GoTo 0
 
     MsgBox "구버전 데이터를 가져오는 중 오류가 발생했습니다." & vbCrLf & _
@@ -277,8 +281,7 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
 
     UnprotectTaskSheet targetSheet
     SetupDataHeaders targetSheet
-    DeleteTargetPptObjects targetSheet
-    ClearTargetPptIcons targetSheet, clearLastRow
+    ResetMigrationTaskSheet targetSheet, clearLastRow
     sourceHasFourLevelClassification = _
         (Trim$(CStr(sourceSheet.Range("D" & HEADER_ROW).Value2)) = "타입" And _
          Trim$(CStr(sourceSheet.Range("E" & HEADER_ROW).Value2)) = "대분류" And _
@@ -291,11 +294,6 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
          Trim$(CStr(sourceSheet.Range("I" & HEADER_ROW).Value2)) = "수정 내용")
     sourceHasWebLayout = HasMigrationWebLayout(sourceSheet)
     sourceHasWorkMinutes = (Trim$(CStr(sourceSheet.Range(COL_WORK_MINUTES & HEADER_ROW).Value2)) = "작업시간(분)")
-
-    targetSheet.Range(COL_LEVEL & DATA_START_ROW & ":" & _
-                      COL_PROGRESS & clearLastRow).ClearContents
-    targetSheet.Range(COL_MANUAL_PROGRESS & DATA_START_ROW & ":" & _
-                      COL_WEEKLY_REPORT & clearLastRow).ClearContents
 
     If sourceLastRow >= DATA_START_ROW Then
         If sourceHasWebLayout Then
@@ -383,6 +381,48 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
     Next sourceOle
 
     ApplyTaskInputValidation targetSheet
+    UpdateTaskNumbers targetSheet, sourceLastRow
+    ApplyTaskTextDisplay targetSheet, Application.Max(DATA_START_ROW, sourceLastRow)
+    ApplyCalculatedColumnsProtection targetSheet, Application.Max(DATA_START_ROW, sourceLastRow)
+End Sub
+
+Private Sub ResetMigrationTaskSheet(ByVal ws As Worksheet, ByVal lastRow As Long)
+    Dim lastCol As Long, pass As Long, groupError As Long, groupErrorText As String
+    Dim dataArea As Range, i As Long, key As String
+    lastRow = Application.Max(lastRow, ws.UsedRange.Row + ws.UsedRange.Rows.Count - 1, DATA_START_ROW)
+    lastCol = Application.Max(ws.Range(COL_STATUS & "1").Column, _
+                              ws.UsedRange.Column + ws.UsedRange.Columns.Count - 1)
+    DeleteTargetPptObjects ws
+    If ws.FilterMode Then ws.ShowAllData
+    ResetCompletedTaskView ws
+    ' Ungroup only full rows; ClearOutline would also remove CONFIG column groups.
+    For pass = 1 To 7
+        On Error Resume Next
+        ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).Ungroup
+        groupError = Err.Number: groupErrorText = Err.Description
+        Err.Clear
+        On Error GoTo 0
+        If groupError <> 0 Then
+            If groupError <> 1004 Then Err.Raise groupError, "ResetMigrationTaskSheet", groupErrorText
+            Exit For
+        End If
+    Next pass
+    ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).Hidden = False
+    ws.Rows(CStr(DATA_START_ROW) & ":" & CStr(lastRow)).RowHeight = ws.StandardHeight
+    ClearGanttArea ws
+    Set dataArea = ws.Range(ws.Cells(DATA_START_ROW, ws.Range(COL_NO & "1").Column), ws.Cells(lastRow, lastCol))
+    dataArea.UnMerge
+    dataArea.Clear
+    If lastCol >= ws.Range(COL_GANTT_START & "1").Column Then
+        With ws.Range(ws.Cells(1, ws.Range(COL_GANTT_START & "1").Column), ws.Cells(HEADER_ROW, lastCol))
+            .UnMerge
+            .Clear
+        End With
+    End If
+    For i = ws.Names.Count To 1 Step -1
+        key = Mid$(ws.Names(i).Name, InStrRev(ws.Names(i).Name, "!") + 1)
+        If Left$(key, Len("_GanttPptRow_")) = "_GanttPptRow_" Then ws.Names(i).Delete
+    Next i
 End Sub
 
 Private Sub CopyMigrationColumnBlock(ByVal sourceSheet As Worksheet, _
@@ -766,6 +806,14 @@ Private Sub RestoreApplicationState(ByVal screenUpdating As Boolean, _
     Application.Calculation = calculation
     Application.EnableEvents = enableEvents
     Application.ScreenUpdating = screenUpdating
+    RestoreMigrationShortcuts
+End Sub
+
+Private Sub RestoreMigrationShortcuts()
+    If ActiveWorkbook Is Nothing Then Exit Sub
+    If Not (ActiveWorkbook Is ThisWorkbook) Then Exit Sub
+    Application.Run "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!" & _
+                    ThisWorkbook.CodeName & ".RestoreGanttShortcutBindings"
 End Sub
 
 ' 2026-10-23 김좌현 수정 : 업무 ID와 이관 시트의 웹 이력·연결을 사전 검증 후 값으로 함께 이전

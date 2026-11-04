@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$WorkbookPath, [switch]$Baseline)
+param([string]$WorkbookPath, [switch]$Baseline, [switch]$KeyboardProbe, [switch]$AfterMigration, [string]$KeySpec = '^+r', [string]$ImportSourcePath, [switch]$NativeBindings, [string]$ProbeName = 'Shortcut-A.xlsm')
 
 # 2026-11-04 김좌현 수정 : 실제 Excel 이벤트로 닫기 취소·비활성 저장·창 전환·다른 이름 저장 단축키 회귀 검증
 $ErrorActionPreference = 'Stop'
@@ -36,6 +36,7 @@ function Get-Binding([int]$row = 1) {
 function Get-ExpectedBinding($book, [string]$macro = '칸트차트_새로고침') {
     return "'" + $book.Name.Replace("'", "''") + "'!" + $macro
 }
+function Get-BindingOwner { return [string]$observer.Worksheets.Item(1).Cells.Item(1, 2).Value2 }
 function Clear-TestBinding {
     $excel.OnKey('^+r')
     $observer.Worksheets.Item(1).Cells.Item(1, 1).Value2 = ''
@@ -49,8 +50,9 @@ function Prepare-TestBook([string]$path) {
         $classSource = Read-TaskVba (Join-Path $taskRoot 'vba-files/Class/현재_통합_문서.cls')
     }
     $classSource = $classSource.Substring($classSource.IndexOf('Option Explicit'))
+    $classSource = $classSource.Replace('Application.OnKey "^+r"', ('Application.OnKey "' + $KeySpec + '"'))
     # Record assignments while forwarding them to the real Application.OnKey API.
-    $classSource = $classSource.Replace('Application.OnKey ', 'RecordTestShortcut ')
+    if (-not $NativeBindings) { $classSource = $classSource.Replace('Application.OnKey ', 'RecordTestShortcut ') }
     $cancelBody = @'
     If ShortcutRegression.CancelNextClose Then
         Cancel = True
@@ -71,9 +73,11 @@ Private Sub RecordTestShortcut(ByVal key As String, Optional ByVal procedure As 
     row = IIf(key = "^+r", 1, 2)
     If IsMissing(procedure) Then
         Application.Workbooks("$observerName").Worksheets(1).Cells(row, 1).Value2 = ""
+        Application.Workbooks("$observerName").Worksheets(1).Cells(row, 2).Value2 = ""
         Application.OnKey key
     Else
         Application.Workbooks("$observerName").Worksheets(1).Cells(row, 1).Value2 = "binding:" & CStr(procedure)
+        Application.Workbooks("$observerName").Worksheets(1).Cells(row, 2).Value2 = ThisWorkbook.Name
         Application.OnKey key, CStr(procedure)
     End If
 End Sub
@@ -89,10 +93,25 @@ End Sub
     $main = $main -replace '(?m)^Attribute VB_Name = .*\r?\n', ''
     $entryPattern = '(?s)(Public Sub 칸트차트_새로고침\(\)\s*)RefreshGanttSheet(\s*End Sub)'
     if (-not [regex]::IsMatch($main, $entryPattern)) { throw 'Cannot instrument refresh entry point.' }
-    $main = [regex]::Replace($main, $entryPattern, '${1}ShortcutRegression.RefreshCalls = ShortcutRegression.RefreshCalls + 1' + "`r`n    RefreshGanttSheet False" + '${2}')
+    $refreshCall = if ($ImportSourcePath) { 'RefreshGanttSheet' } else { 'RefreshGanttSheet False' }
+    $main = [regex]::Replace($main, $entryPattern, '${1}' + $refreshCall + "`r`n    ShortcutRegression.RefreshCalls = ShortcutRegression.RefreshCalls + 1" + '${2}')
     $code = $book.VBProject.VBComponents.Item('modGanttMain').CodeModule
     $code.DeleteLines(1, $code.CountOfLines)
     $code.AddFromString($main)
+    foreach ($moduleName in @('modVersionMigration', 'modCompletedTaskView', 'modGanttHierarchy')) {
+        $moduleSource = Read-TaskVba (Join-Path $taskRoot ('vba-files/Module/' + $moduleName + '.bas'))
+        $moduleSource = $moduleSource -replace '(?m)^Attribute VB_Name = .*\r?\n', ''
+        if ($moduleName -eq 'modVersionMigration') {
+            if ($ImportSourcePath) {
+                $pickerCode = "Private Function PickLegacyWorkbookPath() As String`r`n    PickLegacyWorkbookPath = `"" + $ImportSourcePath.Replace('"','""') + "`"`r`nEnd Function"
+                $moduleSource = [regex]::Replace($moduleSource, '(?s)Private Function PickLegacyWorkbookPath\(\) As String.*?End Function', [Text.RegularExpressions.MatchEvaluator]{ param($match) $pickerCode })
+            }
+            $moduleSource += "`r`nPublic Sub RegressionRestoreMigrationState()`r`n    RestoreApplicationState True, True, xlCalculationAutomatic`r`nEnd Sub`r`n"
+        }
+        $code = $book.VBProject.VBComponents.Item($moduleName).CodeModule
+        $code.DeleteLines(1, $code.CountOfLines)
+        $code.AddFromString($moduleSource)
+    }
     $harness = $book.VBProject.VBComponents.Add(1)
     $harness.Name = 'ShortcutRegression'
     $harness.CodeModule.AddFromString(@'
@@ -104,6 +123,9 @@ Public Sub ArmCloseCancellation()
 End Sub
 Public Function RefreshCount() As Long
     RefreshCount = RefreshCalls
+End Function
+Public Function ShortcutOwner() As String
+    ShortcutOwner = ThisWorkbook.Name
 End Function
 Public Sub CreateFixture()
     Dim ws As Worksheet, events As Boolean
@@ -135,7 +157,7 @@ End Sub
 }
 
 try {
-    $pathA = Join-Path $taskTemp 'Shortcut-A.xlsm'
+    $pathA = Join-Path $taskTemp $ProbeName
     $pathB = Join-Path $taskTemp 'Shortcut-B.xlsm'
     Copy-Item -LiteralPath $WorkbookPath -Destination $pathA
     Copy-Item -LiteralPath $WorkbookPath -Destination $pathB
@@ -147,10 +169,39 @@ try {
     $excel.AutomationSecurity = 1
     $observer = $excel.Workbooks.Add()
     Prepare-TestBook $pathA
-    Prepare-TestBook $pathB
+    If (-not $KeyboardProbe) { Prepare-TestBook $pathB }
     $excel.EnableEvents = $true
     $bookA = $excel.Workbooks.Open($pathA, 0, $false)
     Write-Verbose ('Initial binding=' + (Get-Binding) + '; expected=' + (Get-ExpectedBinding $bookA) + '; events=' + $excel.EnableEvents + '; active=' + $excel.ActiveWorkbook.Name)
+    if ($KeyboardProbe) {
+        if ($ImportSourcePath) {
+            $bookA.Worksheets.Item('Sheet1').Activate()
+            Write-Output 'IMPORT READY: production import with original confirmation/completion dialogs'
+            $importMacro = if ($NativeBindings) { '데이터_가져오기' } else { "'$($bookA.Name)'!데이터_가져오기" }
+            $null = $excel.Run($importMacro)
+        } else {
+            $fixtureMacro = if ($NativeBindings) { 'CreateFixture' } else { "'$($bookA.Name)'!CreateFixture" }
+            $null = $excel.Run($fixtureMacro)
+            $bookA.Worksheets.Item('ShortcutTask').Activate()
+            [void]$bookA.Worksheets.Item('ShortcutTask').Range('R5').Select()
+        }
+        if ($AfterMigration -and -not $ImportSourcePath) {
+            $observer.Activate()
+            $excel.EnableEvents = $false
+            $bookA.Activate()
+            $null = $excel.Run("'$($bookA.Name)'!RegressionRestoreMigrationState")
+        }
+        Write-Output ('KEYBOARD READY: ' + $bookA.Name + ' / key=' + $KeySpec + ' / press Ctrl+Shift+R in the test window')
+        $deadline = [DateTime]::UtcNow.AddSeconds(300)
+        $calls = 0
+        while ($calls -eq 0 -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $counterMacro = if ($NativeBindings) { 'RefreshCount' } else { "'$($bookA.Name)'!RefreshCount" }
+            $calls = [int]$excel.Run($counterMacro)
+        }
+        Check ($calls -gt 0) ('real keyboard invokes refresh with OnKey ' + $KeySpec)
+        return
+    }
     Check ((Get-Binding) -eq (Get-ExpectedBinding $bookA)) 'opening workbook registers Ctrl+Shift+R'
     Check ((Get-Binding 2) -eq (Get-ExpectedBinding $bookA '칸트차트_완료숨김')) 'Ctrl+Shift+H registration preserved'
 
@@ -165,7 +216,12 @@ try {
     Check ((Get-Binding) -eq (Get-ExpectedBinding $bookA)) 'switching back restores active workbook shortcut'
     $bookB.Save()
     Check ($excel.ActiveWorkbook.Name -eq $bookA.Name) 'saving inactive workbook keeps active workbook'
-    Check ((Get-Binding) -eq (Get-ExpectedBinding $bookA)) 'inactive workbook save cannot overwrite active shortcut'
+    Check ((Get-Binding) -eq (Get-ExpectedBinding $bookA)) ('inactive workbook save cannot overwrite active shortcut; actual=' + (Get-Binding))
+    Check ((Get-BindingOwner) -eq [string]$bookA.Name) 'active workbook remains the shortcut owner after inactive save'
+    Check ([string]$excel.Run('ShortcutOwner') -eq [string]$bookA.Name) 'unqualified macro resolves to active workbook A'
+    $bookB.Activate()
+    Check ([string]$excel.Run('ShortcutOwner') -eq [string]$bookB.Name) 'unqualified macro resolves to active workbook B'
+    $bookA.Activate()
     if ($Baseline) {
         if ($failures.Count -lt 2) { throw 'Expected baseline failures were not reproduced.' }
         Write-Output ('BASELINE REPRODUCED: ' + $failures.Count + ' shortcut lifecycle failures')
@@ -177,6 +233,13 @@ try {
     Check ((Get-Binding) -eq (Get-ExpectedBinding $bookA)) 'closing inactive workbook preserves active shortcut'
     $null = $excel.Run("'$($bookA.Name)'!CreateFixture")
     $bookA.Worksheets.Item('ShortcutTask').Activate()
+    $observer.Activate()
+    Check ((Get-Binding) -eq '') 'opening import source releases target shortcuts'
+    $excel.EnableEvents = $false
+    $bookA.Activate()
+    Check ((Get-Binding) -eq '') 'return with events disabled does not register shortcuts automatically'
+    $null = $excel.Run("'$($bookA.Name)'!RegressionRestoreMigrationState")
+    Check ((Get-Binding) -eq (Get-ExpectedBinding $bookA)) 'import completion restores shortcut without another cell selection'
     Clear-TestBinding
     [void]$bookA.Worksheets.Item('ShortcutTask').Range('R6').Select()
     Check ((Get-Binding) -eq (Get-ExpectedBinding $bookA)) 'cell selection restores an overwritten shortcut'
@@ -218,7 +281,7 @@ try {
     foreach ($book in @($bookB, $bookA, $observer)) { if ($book) { try { $book.Close($false) } catch {} } }
     if ($excel) { try { $excel.Quit() } catch {}; [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel) }
     # Only this run's explicitly named temporary workbook files are removed.
-    foreach ($name in @('Shortcut-A.xlsm', 'Shortcut-B.xlsm', "업무 'Shortcut Renamed.xlsm")) {
+    foreach ($name in @($ProbeName, 'Shortcut-B.xlsm', "업무 'Shortcut Renamed.xlsm")) {
         $path = Join-Path $taskTemp $name
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     }

@@ -1,5 +1,6 @@
 Attribute VB_Name = "modHoliday"
 Option Explicit
+' 2026-11-04 김좌현 수정 : 내용 표시 방식 선택 목록과 기존값 보존 초기화 추가
 ' 2026-10-22 김좌현 수정 : 웹 유틸리티 시트의 업무 목록/입력 검증 제외
 ' 2026-10-20 김좌현 수정 : 휴일·근무일 표 제목 추가 및 기존 날짜 입력 보존 이전
 ' 2026-10-20 김좌현 수정 : config 영역 정렬 및 입력/안내 서식 통일
@@ -138,7 +139,61 @@ Public Sub EnsureConfigSheet()
     EnsureTaskTypeConfig
     FormatConfigSheet ws
     EnsureTaskDetailFoldConfig ws
+    EnsureTaskTextDisplayConfig ws
 End Sub
+
+Public Sub EnsureTaskTextDisplayConfig(ByVal ws As Worksheet)
+    ws.Range(TASK_TEXT_DISPLAY_TITLE_CELL).Value2 = "내용 표시 설정"
+    With ws.Range("I19:J19")
+        .Interior.Color = RGB(37, 55, 75)
+        .Font.Color = RGB(255, 255, 255)
+        .Font.Bold = True
+        .RowHeight = 28
+    End With
+    ws.Range(TASK_TEXT_DISPLAY_LABEL_CELL).Value2 = "내용 표시 방식"
+    With ws.Range(TASK_TEXT_DISPLAY_VALUE_CELL)
+        If Len(Trim$(CStr(.Value2))) = 0 Then .Value2 = TASK_TEXT_DISPLAY_SINGLE
+        .Validation.Delete
+        .Validation.Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+                        Formula1:=TASK_TEXT_DISPLAY_WRAP & "," & TASK_TEXT_DISPLAY_SINGLE
+        .Validation.IgnoreBlank = False
+        .Validation.InCellDropdown = True
+        .Validation.ShowError = True
+        .Validation.ErrorTitle = "설정값 오류"
+        .Validation.ErrorMessage = "줄바꿈 허용 또는 한줄보기를 선택하세요."
+        .Interior.Color = RGB(255, 249, 228)
+        .Font.Color = RGB(36, 72, 111)
+        .HorizontalAlignment = xlCenter
+        .Borders(xlEdgeBottom).LineStyle = xlContinuous
+        .Borders(xlEdgeBottom).Color = RGB(216, 222, 229)
+    End With
+    With ws.Range("I21:J22")
+        .Merge
+        .Value2 = "요청·수정 내용에 적용합니다." & vbLf & "줄바꿈 시 행 높이 자동 조절"
+        .WrapText = True
+        .Font.Size = 9
+        .Font.Color = RGB(95, 105, 117)
+        .VerticalAlignment = xlCenter
+    End With
+End Sub
+
+Public Function TaskTextWrapEnabled() As Boolean
+    Dim ws As Worksheet, value As String
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+    value = Trim$(CStr(ws.Range(TASK_TEXT_DISPLAY_VALUE_CELL).Value2))
+    Select Case value
+        Case TASK_TEXT_DISPLAY_WRAP
+            TaskTextWrapEnabled = True
+        Case "", TASK_TEXT_DISPLAY_SINGLE
+            TaskTextWrapEnabled = False
+        Case Else
+            Err.Raise vbObjectError + 2122, "TaskTextWrapEnabled", _
+                      "config의 내용 표시 방식은 줄바꿈 허용 또는 한줄보기여야 합니다."
+    End Select
+End Function
 
 Private Sub MigrateHolidayTable(ByVal ws As Worksheet)
     Dim lastRow As Long

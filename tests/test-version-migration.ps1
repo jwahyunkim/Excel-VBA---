@@ -40,6 +40,13 @@ try {
         $migrationPhase = 'import ' + $migrationFile.BaseName
         $migrationSource = Read-MigrationSource $migrationFile.FullName
         if ($migrationFile.BaseName -eq 'modVersionMigration') {
+            # Exercise the production import entry point without file-picker or message-box UI.
+            $migrationSource = [regex]::Replace($migrationSource, '(?s)Private Function PickLegacyWorkbookPath\(\) As String.*?End Function', @'
+Private Function PickLegacyWorkbookPath() As String
+    PickLegacyWorkbookPath = ThisWorkbook.Path & "\migration-source.xlsx"
+End Function
+'@)
+            $migrationSource = $migrationSource -replace '\bMsgBox\b', 'MigrationTestMessageBox'
             $migrationHarness = Read-MigrationSource (Join-Path $PSScriptRoot 'VersionMigrationRegression.bas')
             $migrationDeclarations = [regex]::Matches($migrationHarness, '(?m)^Private Const MIG_.*\r?$')
             $migrationDeclarationText = ($migrationDeclarations | ForEach-Object { $_.Value.TrimEnd("`r") }) -join "`r`n"
