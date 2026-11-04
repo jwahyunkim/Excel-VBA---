@@ -87,10 +87,10 @@ Public Function RunCompletedTaskViewOrderRegression() As String
     originalEnd = cfg.Range(TASK_FOLD_END_VALUE_CELL).Value2
     originalView = cfg.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2
     configCaptured = True
-    For selectionCase = 1 To 3
-        cfg.Range(TASK_FOLD_START_VALUE_CELL).Value2 = IIf(selectionCase = 3, "S", "I")
-        cfg.Range(TASK_FOLD_END_VALUE_CELL).Value2 = IIf(selectionCase = 3, "AH", "W")
-        cfg.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = IIf(selectionCase = 2, "A,B,G", "G")
+    For selectionCase = 1 To 4
+        cfg.Range(TASK_FOLD_START_VALUE_CELL).Value2 = IIf(selectionCase >= 3, "S", "I")
+        cfg.Range(TASK_FOLD_END_VALUE_CELL).Value2 = IIf(selectionCase >= 3, "AH", "W")
+        cfg.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = IIf(selectionCase = 4, "R,Z", IIf(selectionCase = 2, "A,B,G", "G"))
         For order = 1 To 2
             mPhase = "fold order variant " & selectionCase & ", order " & order
             Set ws = NewTaskSheet("CompletedFold" & selectionCase & "Order" & order)
@@ -99,6 +99,8 @@ Public Function RunCompletedTaskViewOrderRegression() As String
             Next r
             ws.Activate
             RefreshGanttSheet False
+            If selectionCase = 4 Then _
+                Check Not ws.Columns("R").Hidden And Not ws.Columns("Z").Hidden, "refresh hid CONFIG R,Z fixed columns"
             ws.Outline.ShowLevels ColumnLevels:=2
             EnsureTaskRequestFreeze ws
             If order = 1 Then
@@ -112,7 +114,7 @@ Public Function RunCompletedTaskViewOrderRegression() As String
             Application.EnableEvents = True
             Application.ScreenUpdating = True
             StartTaskOutlineViewMonitor
-            CheckStableFold ws, IIf(selectionCase = 2, 1, 7)
+            CheckStableFold ws, IIf(selectionCase = 4, 18, IIf(selectionCase = 2, 1, 7))
             StopTaskOutlineViewMonitor
             Application.EnableEvents = False
             Application.ScreenUpdating = False
@@ -135,7 +137,9 @@ Public Function RunCompletedTaskViewOrderRegression() As String
                     Application.EnableEvents = True
                     Application.ScreenUpdating = True
                     StartTaskOutlineViewMonitor
-                    CheckStableFold ws, IIf(selectionCase = 2, 1, 7), (CLng(stage) = 1)
+                    CheckStableFold ws, IIf(selectionCase = 4, 18, IIf(selectionCase = 2, 1, 7)), (CLng(stage) = 1)
+                    If selectionCase = 4 Then _
+                        Check Not ws.Columns("R").Hidden And Not ws.Columns("Z").Hidden, "CONFIG R,Z fixed columns hidden"
                     Check Selection.Address = beforeSelection, "stable monitor moved the selected cell"
                     StopTaskOutlineViewMonitor
                     Application.EnableEvents = False
@@ -144,7 +148,7 @@ Public Function RunCompletedTaskViewOrderRegression() As String
             Next cursorCase
         Next order
     Next selectionCase
-    RunCompletedTaskViewOrderRegression = "PASS: I:W/G, I:W/A,B,G, S:AH/G, both hide/fold orders, stages 1/2/3 both directions, header/data selections, fixed headers, stable monitor and preserved scroll/rows/metadata"
+    RunCompletedTaskViewOrderRegression = "PASS: I:W/G, I:W/A,B,G, S:AH/G, S:AH/R,Z, both hide/fold orders, stages 1/2/3 both directions, header/data selections, fixed headers, stable monitor and preserved scroll/rows/metadata"
     GoTo Finished
 Failed:
     errorText = "FAIL: " & mPhase & " / " & Err.Source & " / " & Err.Description

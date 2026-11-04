@@ -60,6 +60,10 @@ Private Sub Check(ByVal ok As Boolean, ByVal label As String)
 End Sub
 Private Sub CheckStage(ByVal ws As Worksheet, ByVal stage As Long)
     Dim c As Long, header As Long
+    Dim fixedColumns As String, config As Worksheet, isFixed As Boolean
+    Set config = ThisWorkbook.Worksheets(CONFIG_SHEET_NAME)
+    If InStr(CStr(config.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2), ",") > 0 Then _
+        fixedColumns = "," & CStr(config.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2) & ","
     ws.Outline.ShowLevels ColumnLevels:=stage
     EnsureTaskRequestFreeze ws
     Check ActiveWindow.FreezePanes And ActiveWindow.SplitRow = HEADER_ROW, "fixed header missing at stage " & stage
@@ -69,12 +73,16 @@ Private Sub CheckStage(ByVal ws As Worksheet, ByVal stage As Long)
         Check Not ws.Rows(header).Hidden, "hidden header at stage " & stage
     Next header
     For c = ws.Range(COL_WEB_ENABLED & "1").Column To ws.Range(COL_WEB_RESULT & "1").Column
-        Check ws.Columns(c).OutlineLevel = 3, "web column depth " & c
-        Check CBool(ws.Columns(c).Hidden) = (stage < 3), "web visibility " & stage & "/" & c
+        isFixed = InStr(fixedColumns, "," & Replace(ws.Cells(1, c).Address(False, False), "1", "") & ",") > 0
+        Check ws.Columns(c).OutlineLevel = IIf(isFixed, 1, 3), "web column depth " & c
+        Check CBool(ws.Columns(c).Hidden) = (stage < 3 And Not isFixed), "web visibility " & stage & "/" & c
     Next c
-    Check ws.Columns(COL_WORK_MINUTES).OutlineLevel = 3, "minutes depth"
-    Check CBool(ws.Columns(COL_WORK_MINUTES).Hidden) = (stage < 3), "minutes visibility " & stage
-    Check Not ws.Columns(COL_REQUEST).Hidden, "request hidden at stage " & stage
+    isFixed = InStr(fixedColumns, "," & COL_WORK_MINUTES & ",") > 0
+    Check ws.Columns(COL_WORK_MINUTES).OutlineLevel = IIf(isFixed, 1, 3), "minutes depth"
+    Check CBool(ws.Columns(COL_WORK_MINUTES).Hidden) = (stage < 3 And Not isFixed), "minutes visibility " & stage
+    If Len(fixedColumns) = 0 Or InStr(fixedColumns, "," & COL_REQUEST & ",") > 0 Or stage > 1 Then _
+        Check Not ws.Columns(COL_REQUEST).Hidden, "request hidden at stage " & stage
+    Check IsWebRegistrationMode(ws) = (stage = 3), "pinned web field changed mode at stage " & stage
     Check ws.Columns(COL_WEB_TASK_ID).Hidden And ws.Columns(COL_WEB_TASK_ID).OutlineLevel = 1, "private ID exposed/grouped"
     Check ws.Rows(6).OutlineLevel = 2 And ws.Rows(7).OutlineLevel = 3, "column stage changed row groups"
 End Sub
@@ -154,7 +162,8 @@ Public Function RunGanttHierarchyRegression() As String
     ApplyCalculatedColumnsProtection ws, 12
     CheckStage ws, 1
     Check ws.Columns("G").OutlineLevel = 1 And ws.Columns("R").OutlineLevel = 1, "selected columns grouped"
-    Check ws.Columns("Z").OutlineLevel = 3 And ws.Columns("Z").Hidden, "selected minutes bypassed stage 3"
+    Check ws.Columns("H").OutlineLevel = 1 And Not ws.Columns("H").Hidden, "selected web field hidden"
+    Check ws.Columns("Z").OutlineLevel = 1 And Not ws.Columns("Z").Hidden, "selected minutes hidden"
     CheckStage ws, 2
     Check Not ws.Columns("T").Hidden, "custom stage 2 did not expand ordinary columns"
     CheckStage ws, 3
@@ -163,7 +172,30 @@ Public Function RunGanttHierarchyRegression() As String
     EnsureTaskDetailColumnOutline ws
     ApplyCalculatedColumnsProtection ws, 12
     CheckStage ws, 1
+    Check ws.Columns("R").Hidden, "web-only selection inserted an unrequested ordinary column"
+    Check ActiveWindow.Panes(1).ScrollColumn = 8, "selected web field not used as freeze start"
     CheckStage ws, 3
+    config.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = "R,Z"
+    ApplyTaskDetailColumnSettings
+    For stage = 1 To 3
+        CheckStage ws, stage
+        Check Not ws.Columns("R").Hidden And Not ws.Columns("Z").Hidden, "R,Z selection was hidden"
+    Next stage
+    CheckStage ws, 1
+    Check ActiveWindow.Panes(1).ScrollColumn = 18 And ActiveWindow.SplitColumn > 0, "R,Z freeze missing"
+    hidden = CaptureTaskDetailColumnHidden(ws)
+    UnprotectTaskSheet ws
+    ws.Columns("Z").Hidden = True
+    RestoreTaskDetailColumnHidden ws, hidden
+    Check Not ws.Columns("Z").Hidden And ws.Columns("S").Hidden, "R,Z refresh visibility lost"
+    ApplyCalculatedColumnsProtection ws, 12
+    config.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = "G,R"
+    ApplyTaskDetailColumnSettings
+    Check ws.Columns("Z").Hidden And ws.Columns("Z").OutlineLevel = 3, "unselected minutes did not return to compact visibility"
+    config.Range(TASK_FOLD_VIEW_START_VALUE_CELL).Value2 = "Q,R,Z"
+    ApplyTaskDetailColumnSettings
+    CheckStage ws, 1
+    Check ws.Columns("Q").Hidden And Not ws.Columns("Z").Hidden, "fixed selection exposed private ID or hid minutes"
     selectedColumns = ""
     For c = 1 To ws.Range(COL_STATUS & "1").Column
         If Not IsTaskWebDetailColumn(ws, c) And c <> ws.Range(COL_WEB_TASK_ID & "1").Column Then

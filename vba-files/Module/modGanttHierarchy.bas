@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttHierarchy"
 Option Explicit
+' 2026-11-04 김좌현 수정 : CONFIG에서 선택한 고정 열을 웹 설정/작업시간 접기 규칙보다 우선 표시
 ' 2026-10-30 김좌현 수정 : 틀 고정 시 실제 열 숨김 상태 복원 및 날짜 열 표시 상태 보존
 ' 2026-10-23 김좌현 수정 : 열 접기 전 단계의 헤더행 고정과 숨은 열 좌표 차이로 인한 반복 틀 고정 방지
 ' 2026-10-22 김좌현 수정 : 행별 들여쓰기·굵기·배경·최소 높이를 모아 적용하고 빈 행 및 루트 경계 유지
@@ -38,8 +39,7 @@ Private Function TaskViewColumnSelection(ByVal ws As Worksheet, ByVal lastCol As
     Next part
     If selected.Count < 2 Or selected.Count >= lastCol Then Exit Function
     For c = 1 To lastCol
-        If selected.Exists(CStr(c)) And Not IsTaskWebDetailColumn(ws, c) And _
-           Not IsTaskPrivateColumn(ws, c) Then hasVisibleSelection = True
+        If selected.Exists(CStr(c)) And Not IsTaskPrivateColumn(ws, c) Then hasVisibleSelection = True
     Next c
     If Not hasVisibleSelection Then
         number = ws.Range(COL_REQUEST & "1").Column
@@ -125,8 +125,8 @@ Private Function GetTaskViewStartColumn(ByVal ws As Worksheet, ByVal firstCol As
             Set selected = TaskViewColumnSelection(ws, lastCol, normalized)
             If Not selected Is Nothing Then
                 For c = 1 To lastCol
-                    If selected.Exists(CStr(c)) And Not IsTaskWebDetailColumn(ws, c) And _
-                        Not IsTaskPrivateColumn(ws, c) Then GetTaskViewStartColumn = c: Exit For
+                    If selected.Exists(CStr(c)) And Not IsTaskPrivateColumn(ws, c) Then _
+                        GetTaskViewStartColumn = c: Exit For
                 Next c
             End If
             Exit Function
@@ -142,7 +142,7 @@ End Function
 Private Sub UpdateTaskFoldHint(ByVal configWs As Worksheet, ByVal valid As Boolean)
     With configWs.Range(TASK_FOLD_HINT_CELL)
         If valid Then
-            .Value2 = "고정 열: H 또는 A,B,G (접기 끝 열 이내)" & vbLf & "펼치면 원래 화면으로 복원"
+            .Value2 = "고정 열: G 또는 R,Z (여러 열 지정 시 우선 표시)" & vbLf & "펼치면 원래 화면으로 복원"
             .Font.Color = RGB(95, 105, 117)
         Else
             .Value2 = "접기 시작 ≤ 끝 · 열 문자를 확인하세요." & vbLf & "고정 열: F 또는 A,B,G (접기 끝 열 이내)"
@@ -202,7 +202,7 @@ Public Sub EnsureTaskDetailFoldConfig(ByVal ws As Worksheet)
             ' Lists are validated by ApplyTaskDetailColumnSettings before any outline changes.
             cell.Validation.Add Type:=xlValidateInputOnly
             cell.Validation.InputTitle = "접힌 화면 고정 열"
-            cell.Validation.InputMessage = "한 열: H / 여러 열: A,B,G,K (접기 끝 열 이내, 시트 순서)"
+            cell.Validation.InputMessage = "한 열: G / 여러 열: R,Z (접기 끝 열 이내, 웹/작업시간도 우선 표시)"
             cell.Validation.ShowInput = True
             GoTo NextSettingCell
         End If
@@ -374,8 +374,7 @@ Public Sub EnsureTaskRequestFreeze(ByVal ws As Worksheet)
         If Not hasFoldColumn Then collapsed = False
     Else
         For Each selectedColumn In selected.Keys
-            If Not IsTaskWebDetailColumn(ws, CLng(selectedColumn)) And _
-               Not IsTaskPrivateColumn(ws, CLng(selectedColumn)) Then _
+            If Not IsTaskPrivateColumn(ws, CLng(selectedColumn)) Then _
                 lastSelected = Application.Max(lastSelected, CLng(selectedColumn))
         Next selectedColumn
         freezeColumns = lastSelected - requestCol + 1
@@ -590,11 +589,20 @@ Public Function CaptureTaskDetailColumnHidden(ByVal ws As Worksheet) As Variant
 End Function
 
 Public Sub RestoreTaskDetailColumnHidden(ByVal ws As Worksheet, ByVal hidden As Variant)
-    Dim c As Long
+    Dim c As Long, selected As Object, normalized As String, firstCol As Long, lastCol As Long
+    Dim targetHidden As Boolean
     If Not IsArray(hidden) Then Exit Sub
+    If TaskViewUsesSelection() Then
+        If GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then _
+            Set selected = TaskViewColumnSelection(ws, lastCol, normalized)
+    End If
     For c = LBound(hidden) To UBound(hidden)
-        If ws.Columns(c).Hidden <> CBool(hidden(c)) Then
-            ws.Columns(c).Hidden = CBool(hidden(c))
+        targetHidden = CBool(hidden(c))
+        If Not selected Is Nothing Then
+            If selected.Exists(CStr(c)) And Not IsTaskPrivateColumn(ws, c) Then targetHidden = False
+        End If
+        If ws.Columns(c).Hidden <> targetHidden Then
+            ws.Columns(c).Hidden = targetHidden
         End If
     Next c
     If Not ws.Columns(COL_WEB_TASK_ID).Hidden Then ws.Columns(COL_WEB_TASK_ID).Hidden = True
@@ -633,10 +641,10 @@ End Function
 
 Public Sub EnsureTaskDetailColumnOutline(ByVal ws As Worksheet)
     Dim firstCol As Long, lastCol As Long, c As Long, limit As Long, pass As Long, runStart As Long
-    Dim needsGroup As Boolean, wasCollapsed As Boolean, settingsChanged As Boolean
+    Dim needsGroup As Boolean, wasCollapsed As Boolean, settingsChanged As Boolean, wasWebExpanded As Boolean
     Dim selected As Object, normalized As String, signature As String, previousSignature As String
     Dim rangeName As Name, oldColumns As Range, detailColumns As Range
-    Dim expected() As Long, hidden() As Boolean, oldFirst As Long, oldLast As Long
+    Dim expected() As Long, hidden() As Boolean, wasPinnedWeb() As Boolean, oldFirst As Long, oldLast As Long
     If IsWebUtilitySheet(ws) Then Exit Sub
     If Not GetTaskDetailColumnBounds(ws, firstCol, lastCol) Then Exit Sub
     If GetTaskViewStartColumn(ws, firstCol, lastCol) = 0 Then Exit Sub
@@ -667,7 +675,10 @@ Public Sub EnsureTaskDetailColumnOutline(ByVal ws As Worksheet)
     End If
     ReDim expected(1 To limit)
     ReDim hidden(1 To limit)
+    ReDim wasPinnedWeb(1 To limit)
+    wasWebExpanded = IsWebRegistrationMode(ws)
     For c = 1 To limit
+        wasPinnedWeb(c) = (IsTaskWebDetailColumn(ws, c) And ws.Columns(c).OutlineLevel = 1)
         expected(c) = 1
         If selected Is Nothing Then
             If c >= firstCol And c <= lastCol Then expected(c) = 2
@@ -675,6 +686,10 @@ Public Sub EnsureTaskDetailColumnOutline(ByVal ws As Worksheet)
             If Not selected.Exists(CStr(c)) Then expected(c) = 2
         End If
         If IsTaskWebDetailColumn(ws, c) Then expected(c) = 3
+        ' Explicit CONFIG selections stay visible in every outline stage.
+        If Not selected Is Nothing Then
+            If selected.Exists(CStr(c)) Then expected(c) = 1
+        End If
         If IsTaskPrivateColumn(ws, c) Then expected(c) = 1
         hidden(c) = ws.Columns(c).Hidden
         If ws.Columns(c).OutlineLevel <> expected(c) Then needsGroup = True
@@ -703,6 +718,15 @@ Public Sub EnsureTaskDetailColumnOutline(ByVal ws As Worksheet)
                 ws.Columns(c).Hidden = (expected(c) = 2 And wasCollapsed)
             Else
                 ws.Columns(c).Hidden = hidden(c)
+            End If
+            If settingsChanged And wasPinnedWeb(c) And expected(c) = 3 Then _
+                ws.Columns(c).Hidden = Not wasWebExpanded
+        Next c
+    End If
+    If Not selected Is Nothing Then
+        For c = 1 To lastCol
+            If selected.Exists(CStr(c)) And Not IsTaskPrivateColumn(ws, c) Then
+                If ws.Columns(c).Hidden Then ws.Columns(c).Hidden = False
             End If
         Next c
     End If
