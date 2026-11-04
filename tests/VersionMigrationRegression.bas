@@ -1,4 +1,5 @@
 ' Append to modVersionMigration in a disposable workbook. The file picker and confirmation UI are bypassed.
+' 2026-11-04 김좌현 수정 : 가져오기 전 잔여 번호·계산·간트·숨김·메모 초기화와 빈 원본 검증
 ' 2026-10-23 김좌현 수정 : 데이터 가져오기의 현행·구형 열 매핑, 웹 이력·연결 이관 및 충돌 사전 차단 검증
 Private Const MIG_MATCH As String = "MigrationMatch"
 Private Const MIG_KEEP As String = "MigrationKeep"
@@ -43,6 +44,19 @@ Public Function RunVersionMigrationRegression() As String
     target.Cells(10, COL_WEB_TASK_ID).Value2 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     target.Range("AB6").Formula = "=AA6"
     target.Range("R6").Interior.Color = RGB(210, 225, 240)
+    target.Range("B35").Value2 = 999
+    target.Range("AB35").Formula = "=1"
+    target.Range("AF35:AH35").Value2 = "old calculated tail"
+    target.Range("ZZ40").Value2 = "old chart-only tail"
+    target.Range("AI40:AJ40").Merge
+    target.Range("R35").AddComment "old note"
+    target.Hyperlinks.Add Anchor:=target.Range("U35"), Address:="https://obsolete.invalid/", TextToDisplay:="old link"
+    target.Range("B35:AH35").FormatConditions.Add Type:=xlExpression, Formula1:="=TRUE"
+    target.Rows("34:35").Group
+    target.Rows(35).Hidden = True
+    target.Names.Add Name:="'" & target.Name & "'!_GanttHideCompleted", RefersTo:="=1", Visible:=False
+    target.Names.Add Name:="'" & target.Name & "'!_GanttPptRow_12345", RefersTo:="='" & target.Name & "'!$U$35", Visible:=False
+    target.Range("B4:AH40").AutoFilter Field:=1, Criteria1:="999"
     Set keep = ThisWorkbook.Worksheets.Add
     keep.Name = MIG_KEEP
     SetupDataHeaders keep
@@ -103,9 +117,17 @@ Public Function RunVersionMigrationRegression() As String
     ImportTaskSheet sourceWs, target, copied, failed
     MigrationEqual MigrationCells(target.Range("C5:AA9")), MigrationCells(sourceWs.Range("C5:AA9")), "current task fields, web inputs, identities and minutes copied by real columns", checked
     MigrationEqual MigrationCells(target.Range("AC5:AE9")), MigrationCells(sourceWs.Range("AC5:AE9")), "manual fields copied separately from calculated AB", checked
-    MigrationEqual CStr(target.Range("AB6").Formula), "=AA6", "target calculated formula preserved before refresh", checked
-    MigrationEqual CStr(target.Range("R6").Interior.Color), CStr(RGB(210, 225, 240)), "target input formatting preserved during value import", checked
+    MigrationEqual CStr(target.Range("AB6").Formula), "", "old calculated formula removed before rebuilding", checked
+    MigrationEqual CStr(target.Range("R6").Interior.Pattern), CStr(xlNone), "old input formatting reset before rendering", checked
     MigrationEqual CStr(Application.CountA(target.Range("H10:AE10"))), "0", "old trailing target input and task identity cleared", checked
+    MigrationEqual CStr(Application.CountA(target.Range("B10:ZZ40"))), "0", "numbers calculated-only and chart-only trailing cells all cleared", checked
+    MigrationAssert Not target.Rows(35).Hidden And target.Rows(35).OutlineLevel = 1, "old hidden rows and groups reset", checked
+    MigrationAssert Not target.FilterMode And Not AreCompletedTasksHidden(target), "native filter and completed-hide state reset", checked
+    MigrationAssert target.Range("R35").Comment Is Nothing, "old comments cleared", checked
+    MigrationEqual CStr(target.Range("U35").Hyperlinks.Count), "0", "old hyperlinks cleared", checked
+    MigrationEqual CStr(target.Range("B35:AH35").FormatConditions.Count), "0", "old conditional formatting cleared", checked
+    MigrationAssert Not target.Range("AI40").MergeCells, "old chart merges cleared", checked
+    MigrationEqual CStr(target.Range("B4").Value2), "No.", "task headers retained", checked
     EnsureWebHistorySheets
     ApplyWebMigrationPlan plan, ThisWorkbook, logs, states
     ResetWebPreviewAfterMigration
@@ -219,9 +241,24 @@ Public Function RunVersionMigrationRegression() As String
     MigrationEqual MigrationCells(old.Range("B4:T5")), snapshot, "legacy source remains unchanged", checked
     MigrationEqual MigrationCells(keep.Range("B4:AE5")) & MigrationIdHistory(MIG_KEEP_ID), keepBefore, "legacy import still preserves unmatched target sheet and history", checked
     MigrationEqual CStr(WebUploadMockPostCount) & CStr(WebUploadMockUpdateCount), "00", "migration regression performs no web writes", checked
+    stage = "empty and undated sources reset all previous output"
+    MigrationCheckEmptyReset checked
     source.Close SaveChanges:=False
     legacy.Close SaveChanges:=False
     ThisWorkbook.Worksheets(MIG_MATCH).Activate
+    stage = "public import resets target and returns to the original target sheet"
+    Set target = ThisWorkbook.Worksheets(MIG_MATCH)
+    UnprotectTaskSheet target
+    target.Range("B55").Value2 = 999
+    target.Range("AH55").Value2 = "old status before real import"
+    target.Range("ZZ55").Value2 = "old chart before real import"
+    Application.EnableEvents = True
+    Call 데이터_가져오기
+    Application.EnableEvents = False
+    MigrationEqual ThisWorkbook.Names("_MigrationTestLastMessage").RefersTo, "=""done""", "public import entry completes successfully", checked
+    MigrationAssert ActiveWorkbook Is ThisWorkbook, "public import returns to the target workbook", checked
+    MigrationEqual ActiveSheet.Name, MIG_MATCH, "public import restores the original target sheet", checked
+    MigrationEqual CStr(Application.CountA(target.Range("B55:ZZ55"))), "0", "public import removes calculated-only and chart-only trailing data", checked
     RunVersionMigrationRegression = "PASS: " & CStr(checked) & " version migration assertions"
     Exit Function
 Failed:
@@ -230,6 +267,55 @@ Failed:
     If Not source Is Nothing Then source.Close SaveChanges:=False
     If Not legacy Is Nothing Then legacy.Close SaveChanges:=False
 End Function
+
+Private Function MigrationTestMessageBox(ByVal prompt As String, Optional ByVal buttons As VbMsgBoxStyle = vbOKOnly, _
+                                         Optional ByVal title As String = "") As VbMsgBoxResult
+    Dim status As String
+    status = "confirmation"
+    If InStr(prompt, "완료되었습니다") > 0 Then status = "done"
+    If InStr(title, "오류") > 0 Then status = "error"
+    ThisWorkbook.Names.Add Name:="_MigrationTestLastMessage", RefersTo:="=""" & status & """", Visible:=False
+    MigrationTestMessageBox = vbYes
+End Function
+
+Private Sub MigrationCheckEmptyReset(ByRef checked As Long)
+    Dim source As Workbook, old As Worksheet, target As Worksheet, copied As Long, failed As Long
+    On Error GoTo Failed
+    Set target = ThisWorkbook.Worksheets.Add
+    target.Name = "MigrationEmptyReset"
+    SetupDataHeaders target
+    UnprotectTaskSheet target
+    target.Range("B45").Value2 = 123
+    target.Range("AH45").Value2 = "obsolete status"
+    target.Range("ZZ45").Value2 = "obsolete gantt"
+    target.Range("AI4").Value = DateSerial(2025, 1, 1)
+    Set source = Application.Workbooks.Add(xlWBATWorksheet)
+    Set old = source.Worksheets(1)
+    old.Name = target.Name
+    old.Range("B4:AH4").Value2 = target.Range("B4:AH4").Value2
+    ThisWorkbook.Activate
+    ImportTaskSheet old, target, copied, failed
+    MigrationEqual CStr(Application.CountA(target.Range("B5:ZZ45"))), "0", "empty source leaves no old input or calculated values", checked
+    MigrationEqual CStr(Application.CountA(target.Range("AI1:ZZ4"))), "0", "empty source leaves no old date headers", checked
+    MigrationAssert target.ProtectContents, "empty import retains task protection", checked
+    old.Range("C5").Value2 = 1
+    old.Range("R5").Value2 = "undated imported task"
+    UnprotectTaskSheet target
+    target.Range("AF30:AH30").Value2 = "obsolete formula result"
+    ImportTaskSheet old, target, copied, failed
+    MigrationAssert Not RefreshMigratedSheet(target), "undated source skips date rendering", checked
+    MigrationEqual CStr(target.Range("R5").Value2), "undated imported task", "undated new task imported", checked
+    MigrationEqual CStr(target.Range("B5").Value2), "1", "undated imported task receives a fresh number", checked
+    MigrationEqual CStr(Application.CountA(target.Range("B6:ZZ45"))), "0", "undated import leaves no old trailing results", checked
+    MigrationAssert target.ProtectContents, "undated import retains task protection", checked
+    source.Close SaveChanges:=False
+    Exit Sub
+Failed:
+    On Error Resume Next
+    If Not source Is Nothing Then source.Close SaveChanges:=False
+    On Error GoTo 0
+    Err.Raise vbObjectError + 2660, "MigrationCheckEmptyReset", "empty/undated reset failed"
+End Sub
 
 Public Function RunSavedVersionMigrationRegression() As String
     Dim checked As Long, state As Object, ws As Worksheet

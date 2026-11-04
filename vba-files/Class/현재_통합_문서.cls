@@ -8,12 +8,15 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-11-04 김좌현 수정 : 이벤트를 끈 가져오기·보안 저장 이후 새로고침 단축키 명시적 복원
 ' 2026-11-04 김좌현 수정 : 닫기 취소 시 단축키 유지, 활성 통합문서만 등록하고 창/시트 전환에서 복원
 ' 2026-10-29 김좌현 수정 : 새로고침 단축키 연결 통일 및 미사용 캐시 이벤트 제거
 ' 2026-10-27 김좌현 수정 : 입력한 셀의 업무 구조 변경 여부와 타입 선택목록만 검사해 전체 재계산 축소
 ' 2026-10-26 김좌현 수정 : 타입 오류로 실행 취소한 행 변경의 웹 설정 비교 상태 복원
 ' 2026-10-22 김좌현 수정 : 간트 셀 직접 수정 시 간트 전용 새로고침 캐시 무효화
 ' 2026-10-22 김좌현 수정 : 웹등록 초기화, 보호 비밀번호와 그룹별 등록 기준 이벤트 연결
+
+Private mGanttShortcutsRegistered As Boolean
 
 Private Sub Workbook_Open()
     ' 2026-10-20 김좌현 수정 : 기존 생성 버튼을 새로고침으로 전환
@@ -43,6 +46,7 @@ Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
     End If
     StopTaskOutlineViewMonitor
     PrepareReleaseForSave SaveAsUI, Cancel
+    If Cancel And mGanttShortcutsRegistered Then RegisterGanttShortcuts
     If Cancel Then StartTaskOutlineViewMonitor
     Exit Sub
 WebPasswordError:
@@ -195,6 +199,10 @@ Private Sub Workbook_AfterSave(ByVal Success As Boolean)
 End Sub
 
 ' 단축키는 Excel 전체에 적용되므로 이 통합문서가 활성화된 동안만 연결한다.
+Public Sub RestoreGanttShortcutBindings()
+    RegisterGanttShortcuts
+End Sub
+
 Private Sub RegisterGanttShortcuts()
     Dim workbookPrefix As String
     If ActiveWorkbook Is Nothing Then Exit Sub
@@ -202,11 +210,18 @@ Private Sub RegisterGanttShortcuts()
     workbookPrefix = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!"
     Application.OnKey "^+r", workbookPrefix & "칸트차트_새로고침"
     Application.OnKey "^+h", workbookPrefix & "칸트차트_완료숨김"
+    mGanttShortcutsRegistered = True
 End Sub
 
 Private Sub UnregisterGanttShortcuts()
+    ' A late deactivate event from an inactive copy must not clear the current owner's keys.
+    If Not mGanttShortcutsRegistered Then
+        If ActiveWorkbook Is Nothing Then Exit Sub
+        If Not (ActiveWorkbook Is ThisWorkbook) Then Exit Sub
+    End If
     Application.OnKey "^+r"
     Application.OnKey "^+h"
+    mGanttShortcutsRegistered = False
 End Sub
 
 Private Sub Workbook_SheetSelectionChange(ByVal Sh As Object, ByVal Target As Range)
