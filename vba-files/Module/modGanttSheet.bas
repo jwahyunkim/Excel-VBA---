@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttSheet"
 Option Explicit
+' 2026-11-09 김좌현 수정 : 당일 업무 행과 상태 셀의 민트색을 계층별 농도로 구분
 ' 2026-11-04 김좌현 수정 : CONFIG 내용 표시 방식 적용 및 열 너비·숨김 행 보존
 ' 2026-10-30 김좌현 수정 : 새로고침 서식 적용 시 Excel 기본 자동필터 조건과 범위 유지
 ' 2026-10-29 김좌현 수정 : 폐기한 간트 전용 캐시 무효화 호출 제거
@@ -1229,8 +1230,17 @@ Public Sub FormatBaseArea(ws As Worksheet, ByVal lastRow As Long, ByVal chartSta
                     Case STATUS_CAUTION
                         ws.Cells(r, COL_STATUS).Interior.Color = RGB(255, 235, 156)
                     Case STATUS_TODAY
-                        ws.Range(COL_NO & r & ":" & dataLastCol & r).Interior.Color = RGB(229, 247, 245)
-                        ws.Cells(r, COL_STATUS).Interior.Color = RGB(158, 225, 219)
+                        Select Case levelValue
+                            Case 1
+                                ws.Range(COL_NO & r & ":" & dataLastCol & r).Interior.Color = RGB(168, 221, 212)
+                                ws.Cells(r, COL_STATUS).Interior.Color = RGB(99, 190, 177)
+                            Case 2
+                                ws.Range(COL_NO & r & ":" & dataLastCol & r).Interior.Color = RGB(198, 235, 229)
+                                ws.Cells(r, COL_STATUS).Interior.Color = RGB(128, 208, 198)
+                            Case Else
+                                ws.Range(COL_NO & r & ":" & dataLastCol & r).Interior.Color = RGB(229, 247, 245)
+                                ws.Cells(r, COL_STATUS).Interior.Color = RGB(158, 225, 219)
+                        End Select
                     Case STATUS_HOLD
                         ws.Range(COL_NO & r & ":" & dataLastCol & r).Interior.Color = RGB(217, 210, 233)
                         ws.Cells(r, COL_STATUS).Interior.Color = RGB(180, 167, 214)
