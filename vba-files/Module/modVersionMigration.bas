@@ -1,5 +1,6 @@
 Attribute VB_Name = "modVersionMigration"
 Option Explicit
+' 2026-11-11 김좌현 수정 : 가져오기 시 삭제 행 첨부 제외 및 PPT 개체·연결 이름 동시 정리
 ' 2026-11-04 김좌현 수정 : 날짜 없는 가져오기 데이터에도 CONFIG 내용 표시 방식 적용
 ' 2026-11-04 김좌현 수정 : 가져오기 전 대상 데이터·계산·간트·행 보기 초기화 및 종료 시 단축키 복원
 ' 2026-10-29 김좌현 수정 : 수동 버튼 생성 화면·폐기 보고서 정비 제거 및 새로고침 연결 단일화
@@ -369,7 +370,7 @@ Private Sub ImportTaskSheet(ByVal sourceSheet As Worksheet, _
 
     For Each sourceOle In sourceSheet.OLEObjects
         If IsMigratablePptObject(sourceOle) Then
-            rowNum = GetGanttPptObjectRow(sourceSheet, sourceOle)
+            rowNum = GetGanttPptObjectRow(sourceSheet, sourceOle, True)
             If rowNum >= DATA_START_ROW Then
                 If CopyPptObject(sourceOle, targetSheet, rowNum) Then
                     copiedObjectCount = copiedObjectCount + 1
@@ -393,6 +394,7 @@ Private Sub ResetMigrationTaskSheet(ByVal ws As Worksheet, ByVal lastRow As Long
     lastCol = Application.Max(ws.Range(COL_STATUS & "1").Column, _
                               ws.UsedRange.Column + ws.UsedRange.Columns.Count - 1)
     DeleteTargetPptObjects ws
+    DeleteLegacyGanttPptShapes ws
     If ws.FilterMode Then ws.ShowAllData
     ResetCompletedTaskView ws
     ' Ungroup only full rows; ClearOutline would also remove CONFIG column groups.
@@ -467,7 +469,13 @@ Private Function CopyPptObject(ByVal sourceOle As OLEObject, _
 CopyFailed:
     ' Remove a partial paste so a retry cannot leave an unbound or duplicate object.
     On Error Resume Next
-    If Not pastedOle Is Nothing Then pastedOle.Delete
+    If Not pastedOle Is Nothing Then
+        If IsMigratablePptObject(pastedOle) Then
+            DeleteManagedGanttPptObject targetSheet, pastedOle
+        Else
+            pastedOle.Delete
+        End If
+    End If
     Application.CutCopyMode = False
     CopyPptObject = False
 End Function
@@ -593,7 +601,7 @@ Private Sub DeleteTargetPptObjects(ByVal targetSheet As Worksheet)
         objectName = targetSheet.OLEObjects(objectIndex).Name
         If Left$(objectName, Len(PPT_OLE_PREFIX)) = PPT_OLE_PREFIX Or _
            Left$(objectName, Len(TEMP_PPT_OLE_PREFIX)) = TEMP_PPT_OLE_PREFIX Then
-            targetSheet.OLEObjects(objectIndex).Delete
+            DeleteManagedGanttPptObject targetSheet, targetSheet.OLEObjects(objectIndex)
         End If
     Next objectIndex
 End Sub
@@ -651,7 +659,7 @@ Private Function GetMigrationLastRow(ByVal ws As Worksheet) As Long
 
     For Each oleItem In ws.OLEObjects
         If IsMigratablePptObject(oleItem) Then
-            lastRow = Application.Max(lastRow, GetGanttPptObjectRow(ws, oleItem))
+            lastRow = Application.Max(lastRow, GetGanttPptObjectRow(ws, oleItem, True))
         End If
     Next oleItem
 

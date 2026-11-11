@@ -8,6 +8,7 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = True
 Option Explicit
+' 2026-11-11 김좌현 수정 : 비고 PPT 셀 우클릭 시 첨부 삭제 메뉴 연결
 ' 2026-11-04 김좌현 수정 : CONFIG 내용 표시 변경 즉시 반영 및 입력한 내용 행의 줄바꿈 유지
 ' 2026-11-04 김좌현 수정 : 이벤트를 끈 가져오기·보안 저장 이후 새로고침 단축키 명시적 복원
 ' 2026-11-04 김좌현 수정 : 닫기 취소 시 단축키 유지, 활성 통합문서만 등록하고 창/시트 전환에서 복원
@@ -162,6 +163,13 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
 
 SafeExit:
     Application.enableEvents = True
+End Sub
+
+Private Sub Workbook_SheetBeforeRightClick(ByVal Sh As Object, ByVal Target As Range, Cancel As Boolean)
+    If Not TypeOf Sh Is Worksheet Then Exit Sub
+    If Not IsGanttPptDeleteCell(Sh, Target) Then Exit Sub
+    Cancel = True
+    ShowGanttPptDeleteMenu Sh, Target
 End Sub
 
 Private Sub Workbook_SheetFollowHyperlink(ByVal Sh As Object, ByVal Target As Hyperlink)
