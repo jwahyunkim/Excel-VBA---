@@ -1,5 +1,6 @@
 Attribute VB_Name = "modGanttMain"
 Option Explicit
+' 2026-11-11 김좌현 수정 : 첨부 PPT 우클릭 삭제, 연결 행 기준 탐색 및 삭제 행 잔존 개체 정리
 ' 2026-10-29 김좌현 수정 : 새로고침 단일화 및 미사용 캐시·버튼 생성·구형 PPT 진입점 제거
 ' 2026-10-29 김좌현 수정 : 비고 개체의 행 연결을 이름 범위로 보존하고 숨기기 전에 위치 정렬
 ' 2026-10-27 김좌현 수정 : 새로고침 후 등록 기준 문제 행을 완료 메시지에 안내
@@ -14,6 +15,8 @@ Option Explicit
 ' 2026-10-20 김좌현 수정 : 미사용 항목 숨기기 매크로와 전용 버튼 생성 제거
 
 ' 2026-10-20 김좌현 수정 : 생성/새로고침을 새로고침 진입점으로 통합
+
+Private mPptDeleteTarget As Range
 
 Public Sub 칸트차트_새로고침()
     RefreshGanttSheet
@@ -235,8 +238,6 @@ Public Sub 칸트차트_개체삽입()
         UnprotectTaskSheet ws
     End If
 
-    RemoveEmbeddedPptArtifacts ws, targetRow
-
     Set oleObj = ws.OLEObjects.Add( _
         ClassType:="PowerPoint.Show.12", _
         Link:=False, _
@@ -248,7 +249,7 @@ Public Sub 칸트차트_개체삽입()
         Height:=1)
 
     With oleObj
-        .Name = oleName
+        .Name = "tmpGanttPptOle_" & CStr(.ShapeRange.Item(1).ID)
         .Placement = xlMoveAndSize
         .PrintObject = False
         .Width = 1
@@ -257,6 +258,7 @@ Public Sub 칸트차트_개체삽입()
     End With
 
     PositionHiddenGanttPptOle ws, oleObj, targetRow
+    If Not OLEObjectExistsOnSheet(ws, oleName) Then oleObj.Name = oleName
     SetGanttPptCellIcon ws, targetRow
 
     If wasProtected Then
@@ -274,8 +276,13 @@ Public Sub 칸트차트_개체삽입()
 
 EH:
     On Error Resume Next
-    If Not ws Is Nothing And targetRow >= DATA_START_ROW Then
-        RemoveEmbeddedPptArtifacts ws, targetRow
+    If Not oleObj Is Nothing Then
+        If IsGanttPptOleObject(oleObj) Then
+            DeleteManagedGanttPptObject ws, oleObj
+        Else
+            oleObj.Delete
+        End If
+        ClearGanttPptCellIcon ws, targetRow
     End If
     If wasProtected Then
         If CStr(ws.Range(COL_MODIFICATION & HEADER_ROW).Value2) <> "수정 내용" Then EnsureTaskSheetLayout ws
@@ -299,15 +306,13 @@ Public Sub 칸트차트_PPT셀아이콘열기(ByVal ws As Worksheet, ByVal targetRow As Lo
     If ws Is Nothing Then Exit Sub
     If targetRow < DATA_START_ROW Then Exit Sub
 
-    oleName = GetGanttPptOleName(targetRow)
-
-    If Not OLEObjectExistsOnSheet(ws, oleName) Then
+    Set oleObj = FindGanttPptObjectForRow(ws, targetRow)
+    If oleObj Is Nothing Then
         ClearGanttPptCellIcon ws, targetRow
         MsgBox "Excel에 포함된 PPT 개체를 찾을 수 없습니다.", vbExclamation
         Exit Sub
     End If
 
-    Set oleObj = ws.OLEObjects(oleName)
     oleObj.Visible = False
     oleObj.Verb Verb:=xlOpen
     Exit Sub
@@ -410,7 +415,8 @@ Private Function GanttPptRowAnchorName(ByVal ws As Worksheet, ByVal oleObj As OL
     GanttPptRowAnchorName = "'" & Replace(ws.Name, "'", "''") & "'!_GanttPptRow_" & CStr(oleObj.ShapeRange.Item(1).ID)
 End Function
 
-Public Function GetGanttPptObjectRow(ByVal ws As Worksheet, ByVal oleObj As OLEObject) As Long
+Public Function GetGanttPptObjectRow(ByVal ws As Worksheet, ByVal oleObj As OLEObject, _
+                                     Optional ByVal allowDeletedRow As Boolean = False) As Long
     Dim anchor As Name, cell As Range, namedRow As Long, suffix As String
     On Error Resume Next
     Set anchor = ws.Names(GanttPptRowAnchorName(ws, oleObj))
@@ -423,6 +429,7 @@ Public Function GetGanttPptObjectRow(ByVal ws As Worksheet, ByVal oleObj As OLEO
         End If
     End If
     If Not anchor Is Nothing Then
+        If allowDeletedRow And InStr(1, anchor.RefersTo, "#REF!", vbTextCompare) > 0 Then Exit Function
         Err.Raise vbObjectError + 2130, "GetGanttPptObjectRow", "첨부 개체의 연결 행이 삭제되었습니다: " & oleObj.Name
     End If
     ' Upgrade legacy attachments by their managed row name, including already displaced objects.
@@ -476,10 +483,9 @@ Private Sub PositionHiddenGanttPptOle(ByVal ws As Worksheet, ByVal oleObj As OLE
 End Sub
 
 Private Function HasEmbeddedPptObject(ByVal ws As Worksheet, ByVal targetRow As Long) As Boolean
-    Dim oleName As String
-
-    oleName = GetGanttPptOleName(targetRow)
-    HasEmbeddedPptObject = OLEObjectExistsOnSheet(ws, oleName)
+    Dim oleObj As OLEObject
+    Set oleObj = FindGanttPptObjectForRow(ws, targetRow)
+    HasEmbeddedPptObject = Not oleObj Is Nothing
 
     If HasEmbeddedPptObject Then
         SetGanttPptCellIcon ws, targetRow
@@ -488,22 +494,145 @@ Private Function HasEmbeddedPptObject(ByVal ws As Worksheet, ByVal targetRow As 
     End If
 End Function
 
-Private Sub RemoveEmbeddedPptArtifacts(ByVal ws As Worksheet, ByVal targetRow As Long)
-    Dim shapeName As String
-    Dim oleName As String
-
-    shapeName = GetGanttPptShapeName(targetRow)
-    oleName = GetGanttPptOleName(targetRow)
-
+Private Function FindGanttPptObjectForRow(ByVal ws As Worksheet, ByVal targetRow As Long) As OLEObject
+    Dim oleObj As OLEObject
     On Error Resume Next
-    ws.Shapes(shapeName).Delete
-    ws.OLEObjects(oleName).Delete
+    Set oleObj = ws.OLEObjects(GetGanttPptOleName(targetRow))
     On Error GoTo 0
+    If Not oleObj Is Nothing Then
+        If GetGanttPptObjectRow(ws, oleObj, True) = targetRow Then
+            Set FindGanttPptObjectForRow = oleObj
+            Exit Function
+        End If
+    End If
+    For Each oleObj In ws.OLEObjects
+        If IsGanttPptOleObject(oleObj) Then
+            If GetGanttPptObjectRow(ws, oleObj, True) = targetRow Then
+                Set FindGanttPptObjectForRow = oleObj
+                Exit Function
+            End If
+        End If
+    Next oleObj
+End Function
 
-    ClearGanttPptCellIcon ws, targetRow
+Public Function IsGanttPptDeleteCell(ByVal ws As Worksheet, ByVal target As Range) As Boolean
+    If Not target.Parent Is ws Then Exit Function
+    If target.CountLarge <> 1 Then Exit Function
+    If target.Row < DATA_START_ROW Then Exit Function
+    If target.Column <> ws.Range(COL_NOTE & "1").Column Then Exit Function
+    If CStr(ws.Cells(HEADER_ROW, COL_NO).Value2) <> "No." Or _
+       CStr(ws.Cells(HEADER_ROW, COL_LEVEL).Value2) <> "Level" Then Exit Function
+    If IsError(target.Value2) Then Exit Function
+    IsGanttPptDeleteCell = (CStr(target.Value2) = GetGanttPptCellIconText())
+End Function
+
+Public Sub ShowGanttPptDeleteMenu(ByVal ws As Worksheet, ByVal target As Range)
+    Dim menu As Object, action As Object, errorText As String
+    On Error GoTo Failed
+    Set mPptDeleteTarget = target
+    Set menu = Application.CommandBars.Add(Position:=msoBarPopup, Temporary:=True)
+    Set action = menu.Controls.Add(Type:=msoControlButton, Temporary:=True)
+    action.Caption = "첨부 PPT 삭제"
+    action.OnAction = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!칸트차트_PPT삭제"
+    menu.ShowPopup
+CleanUp:
+    On Error Resume Next
+    If Not menu Is Nothing Then menu.Delete
+    Set mPptDeleteTarget = Nothing
+    On Error GoTo 0
+    If Len(errorText) > 0 Then MsgBox "첨부 메뉴를 표시하지 못했습니다: " & errorText, vbExclamation
+    Exit Sub
+Failed:
+    errorText = Err.Description
+    Resume CleanUp
 End Sub
 
-Private Sub DeleteLegacyGanttPptShapes(ByVal ws As Worksheet)
+Public Sub 칸트차트_PPT삭제()
+    Dim target As Range, ws As Worksheet
+    On Error GoTo Failed
+    If Not mPptDeleteTarget Is Nothing Then
+        Set target = mPptDeleteTarget
+    Else
+        If Not TypeOf ActiveSheet Is Worksheet Then Exit Sub
+        If Not ActiveWorkbook Is ThisWorkbook Then Exit Sub
+        If TypeName(Selection) <> "Range" Then Exit Sub
+        Set target = Selection
+    End If
+    Set ws = target.Parent
+    If Not ws.Parent Is ThisWorkbook Then Exit Sub
+    If Not IsGanttPptDeleteCell(ws, target) Then Exit Sub
+    If MsgBox(CStr(target.Row) & "행의 첨부 PPT를 삭제할까요?" & vbCrLf & _
+              "업무 내용과 행은 유지됩니다.", vbQuestion Or vbYesNo Or vbDefaultButton2, _
+              "첨부 PPT 삭제") <> vbYes Then Exit Sub
+    If Not DeleteGanttPptForRow(ws, target.Row) Then _
+        MsgBox "연결된 PPT가 없어 남은 표시만 정리했습니다.", vbInformation
+    Exit Sub
+Failed:
+    MsgBox "첨부 PPT를 삭제하지 못했습니다: " & Err.Description, vbExclamation
+End Sub
+
+Public Function DeleteGanttPptForRow(ByVal ws As Worksheet, ByVal targetRow As Long) As Boolean
+    Dim i As Long, oleObj As OLEObject, wasProtected As Boolean
+    Dim previousEvents As Boolean, previousScreen As Boolean, errorNumber As Long, errorText As String
+    If targetRow < DATA_START_ROW Or targetRow > ws.Rows.Count Then _
+        Err.Raise vbObjectError + 2132, "DeleteGanttPptForRow", "업무 행을 선택하세요."
+    previousEvents = Application.EnableEvents
+    previousScreen = Application.ScreenUpdating
+    wasProtected = ws.ProtectContents Or ws.ProtectDrawingObjects Or ws.ProtectScenarios
+    On Error GoTo Failed
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    If wasProtected Then UnprotectTaskSheet ws
+    For i = ws.OLEObjects.Count To 1 Step -1
+        Set oleObj = ws.OLEObjects(i)
+        If IsGanttPptOleObject(oleObj) Then
+            If GetGanttPptObjectRow(ws, oleObj, True) = targetRow Then
+                DeleteManagedGanttPptObject ws, oleObj
+                DeleteGanttPptForRow = True
+            End If
+        End If
+    Next i
+    ClearGanttPptCellIcon ws, targetRow
+RestoreState:
+    On Error GoTo RestoreFailed
+    If wasProtected Then
+        ws.Protect DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+                   UserInterfaceOnly:=True, AllowFiltering:=True, _
+                   AllowInsertingRows:=True, AllowDeletingRows:=True
+    End If
+Finish:
+    On Error GoTo 0
+    Application.EnableEvents = previousEvents
+    Application.ScreenUpdating = previousScreen
+    If errorNumber <> 0 Then Err.Raise errorNumber, "DeleteGanttPptForRow", errorText
+    Exit Function
+Failed:
+    errorNumber = Err.Number: errorText = Err.Description
+    Resume RestoreState
+RestoreFailed:
+    If errorNumber = 0 Then
+        errorNumber = Err.Number: errorText = Err.Description
+    End If
+    Resume Finish
+End Function
+
+Public Sub DeleteManagedGanttPptObject(ByVal ws As Worksheet, ByVal oleObj As OLEObject)
+    Dim anchorName As String, anchor As Name, legacyShape As Shape, shapeName As String
+    If Not oleObj.Parent Is ws Then Err.Raise vbObjectError + 2133, , "첨부 시트가 일치하지 않습니다."
+    If Not IsGanttPptOleObject(oleObj) Then Err.Raise vbObjectError + 2133, , "관리 대상 PPT가 아닙니다."
+    anchorName = GanttPptRowAnchorName(ws, oleObj)
+    If Left$(oleObj.Name, Len("oleGanttPpt_")) = "oleGanttPpt_" Then _
+        shapeName = "shpGanttPpt_" & Mid$(oleObj.Name, Len("oleGanttPpt_") + 1)
+    On Error Resume Next
+    Set anchor = ws.Names(anchorName)
+    If Len(shapeName) > 0 Then Set legacyShape = ws.Shapes(shapeName)
+    On Error GoTo 0
+    oleObj.Delete
+    If Not anchor Is Nothing Then anchor.Delete
+    If Not legacyShape Is Nothing Then legacyShape.Delete
+End Sub
+
+Public Sub DeleteLegacyGanttPptShapes(ByVal ws As Worksheet)
     Dim i As Long
 
     For i = ws.Shapes.Count To 1 Step -1
@@ -555,17 +684,23 @@ Private Sub NormalizeGanttPptArtifactNames(ByVal ws As Worksheet)
     Dim oleObj As OLEObject
     Dim targetRow As Long
     Dim finalName As String
-    Dim tempIndex As Long
+    Dim tempIndex As Long, objectIndex As Long
 
     tempIndex = 1
 
-    For Each oleObj In ws.OLEObjects
+    For objectIndex = ws.OLEObjects.Count To 1 Step -1
+        Set oleObj = ws.OLEObjects(objectIndex)
         If IsGanttPptOleObject(oleObj) Then
-            BindGanttPptObjectRow ws, oleObj, GetGanttPptObjectRow(ws, oleObj)
-            oleObj.Name = "tmpGanttPptOle_" & Format$(Now, "hhnnss") & "_" & CStr(tempIndex)
-            tempIndex = tempIndex + 1
+            targetRow = GetGanttPptObjectRow(ws, oleObj, True)
+            If targetRow = 0 Then
+                DeleteManagedGanttPptObject ws, oleObj
+            Else
+                BindGanttPptObjectRow ws, oleObj, targetRow
+                oleObj.Name = "tmpGanttPptOle_" & Format$(Now, "hhnnss") & "_" & CStr(tempIndex)
+                tempIndex = tempIndex + 1
+            End If
         End If
-    Next oleObj
+    Next objectIndex
 
     For Each oleObj In ws.OLEObjects
         If IsGanttPptOleObject(oleObj) Then
